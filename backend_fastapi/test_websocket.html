@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste WebSocket</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        #messages {
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            margin: 20px 0;
+        }
+        .message {
+            padding: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #007bff;
+            background-color: white;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Teste WebSocket - Sistema WhatsApp</h1>
+
+    <div>
+        <label for="token">Token JWT:</label><br>
+        <input type="text" id="token" style="width: 100%; padding: 5px;" placeholder="Cole o token aqui">
+        <br><br>
+        <button onclick="connect()">Conectar</button>
+        <button onclick="disconnect()">Desconectar</button>
+        <button onclick="sendPing()">Enviar Ping</button>
+    </div>
+
+    <div id="status" class="status disconnected">
+        🔴 Desconectado
+    </div>
+
+    <h3>Mensagens Recebidas:</h3>
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+
+        function addMessage(message, type = 'info') {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> - ${message}`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.innerHTML = '🟢 Conectado';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.innerHTML = '🔴 Desconectado';
+            }
+        }
+
+        function connect() {
+            const token = document.getElementById('token').value;
+            if (!token) {
+                alert('Por favor, insira um token JWT');
+                return;
+            }
+
+            if (ws) {
+                addMessage('Fechando conexão anterior...', 'warning');
+                ws.close();
+            }
+
+            const wsUrl = `ws://localhost:8001/api/v1/ws?token=${token}`;
+            addMessage(`Conectando em: ${wsUrl}`, 'info');
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                addMessage('✅ WebSocket conectado com sucesso!', 'success');
+                updateStatus(true);
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                addMessage(`📨 Evento recebido: <strong>${message.event}</strong><br>Dados: ${JSON.stringify(message.data, null, 2)}`, 'info');
+            };
+
+            ws.onerror = (error) => {
+                addMessage(`❌ Erro WebSocket: ${error}`, 'error');
+            };
+
+            ws.onclose = (event) => {
+                addMessage(`🔌 WebSocket desconectado (código: ${event.code})`, 'warning');
+                updateStatus(false);
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close(1000);
+                addMessage('Desconectando...', 'info');
+            } else {
+                addMessage('Nenhuma conexão ativa', 'warning');
+            }
+        }
+
+        function sendPing() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ event: 'ping' }));
+                addMessage('📤 Ping enviado', 'info');
+            } else {
+                addMessage('⚠️ Não conectado. Conecte primeiro!', 'warning');
+            }
+        }
+
+        // Auto-preencher token do localStorage se disponível
+        window.onload = () => {
+            const storedToken = localStorage.getItem('@WhatsApp:token');
+            if (storedToken) {
+                document.getElementById('token').value = storedToken;
+                addMessage('Token carregado do localStorage', 'info');
+            } else {
+                addMessage('Nenhum token encontrado. Faça login no painel primeiro e copie o token.', 'warning');
+            }
+        };
+    </script>
+</body>
+</html>
