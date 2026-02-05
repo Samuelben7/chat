@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Query, Depends, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 from datetime import datetime
@@ -53,7 +54,7 @@ async def verify_webhook(
 
         if empresa:
             print(f"✅ Webhook verificado para empresa: {empresa.nome}")
-            return hub_challenge
+            return PlainTextResponse(content=hub_challenge)
 
     print("❌ Token de verificação inválido!")
     raise HTTPException(status_code=403, detail="Verification token mismatch")

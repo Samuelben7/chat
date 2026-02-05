@@ -65,6 +65,7 @@ services:
       # WhatsApp API
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
+      VERIFY_TOKEN: ${VERIFY_TOKEN}
 
       # App
       DEBUG: ${DEBUG:-False}
@@ -107,6 +108,7 @@ services:
       # WhatsApp API
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
+      VERIFY_TOKEN: ${VERIFY_TOKEN}
 
       # App
       DEBUG: ${DEBUG:-False}
