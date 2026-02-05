@@ -65,6 +65,7 @@ async def websocket_endpoint(
 
                 # Notificar OUTROS usuários da empresa (exceto ele mesmo)
                 await manager.broadcast_to_empresa(
+                    empresa_id,
                     {
                         "event": "atendente_online",
                         "data": {
@@ -73,7 +74,6 @@ async def websocket_endpoint(
                             "timestamp": datetime.now().isoformat()
                         }
                     },
-                    empresa_id,
                     exclude_user=user_id  # Não enviar para ele mesmo!
                 )
 

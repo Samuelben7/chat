@@ -122,16 +122,16 @@ class ConnectionManager:
 
     async def broadcast_to_empresa(
         self,
-        message: dict,
         empresa_id: int,
+        message: dict,
         exclude_user: str = None
     ):
         """
         Envia mensagem para todos os usuários de uma empresa
 
         Args:
-            message: Mensagem a ser enviada (dict)
             empresa_id: ID da empresa
+            message: Mensagem a ser enviada (dict)
             exclude_user: ID do usuário a ser excluído (opcional)
         """
         if empresa_id not in self.connections_by_empresa:
