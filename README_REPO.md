@@ -24,7 +24,7 @@ Sistema completo de atendimento WhatsApp com bot builder, multi-empresa e painel
 - Docker + Docker Compose
 - Nginx (reverse proxy)
 - SSL (Let's Encrypt)
-token: IitlWBgPYq2WCiCPou9ggVZGU9jSnQuuk1CvaVX7yM8
+
 ## ⚡ Performance
 
 Sistema otimizado com:
