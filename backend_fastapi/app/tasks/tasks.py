@@ -441,3 +441,55 @@ def notificar_atendente(atendente_id: int, mensagem: str):
             "success": False,
             "error": str(e)
         }
+
+
+# ========== TASK: ENVIAR EMAIL DE CONFIRMAÇÃO ==========
+
+@celery_app.task(name="app.tasks.tasks.enviar_email_confirmacao_task")
+def enviar_email_confirmacao_task(destinatario: str, nome_empresa: str, token: str):
+    """
+    Task assíncrona para enviar email de confirmação de cadastro.
+
+    Args:
+        destinatario: Email da empresa
+        nome_empresa: Nome da empresa
+        token: Token de confirmação
+
+    Returns:
+        dict: Resultado do envio
+    """
+    try:
+        from app.services.email_service import enviar_email_confirmacao
+        import asyncio
+
+        # Executa função async de forma síncrona no worker do Celery
+        loop = asyncio.get_event_loop()
+        sucesso = loop.run_until_complete(
+            enviar_email_confirmacao(
+                destinatario=destinatario,
+                nome_empresa=nome_empresa,
+                token=token
+            )
+        )
+
+        if sucesso:
+            print(f"✅ Email de confirmação enviado para {destinatario}")
+            return {
+                "success": True,
+                "email": destinatario
+            }
+        else:
+            print(f"⚠️  Falha ao enviar email para {destinatario}")
+            return {
+                "success": False,
+                "email": destinatario,
+                "error": "Falha no envio"
+            }
+
+    except Exception as e:
+        print(f"❌ Erro enviando email de confirmação: {e}")
+        return {
+            "success": False,
+            "email": destinatario,
+            "error": str(e)
+        }

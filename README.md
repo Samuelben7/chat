@@ -47,12 +47,16 @@ Sistema otimizado com:
 - [x] Sistema multi-empresa isolado
 - [x] Autenticação JWT por role (empresa/atendente)
 - [x] Dados isolados por empresa_id
+- [x] Cadastro de empresas com verificação de email em 2 etapas
+- [x] Emails transacionais com design profissional
 
 ### Bot Builder
 - [x] Editor visual de fluxos
 - [x] Tipos: text, button, list, interactive
-- [x] Validações de campos
+- [x] Validações de campos (CPF, CEP, data, etc)
 - [x] Templates salvos
+- [x] Bot de limpeza/engenharia pré-configurado
+- [x] Script de criação automática de bots
 
 ### Atendimento
 - [x] Painel de atendentes em tempo real
@@ -66,20 +70,75 @@ Sistema otimizado com:
 ### Integrações
 - [x] WhatsApp Business API (Meta)
 - [x] Webhook multi-tenant
-- [x] Processamento assíncrono
+- [x] Processamento assíncrono (Celery + Redis)
 - [x] Retry automático
+- [x] Email SMTP (Gmail)
+
+## 🤖 Bot de Limpeza/Engenharia
+
+Sistema inclui bot pré-configurado com fluxo completo:
+
+1. **Menu Inicial** - Boas-vindas com opções
+2. **Verificação Cliente** - Busca por CPF ou novo cadastro
+3. **Tipo de Serviço** - Casas/Apartamentos/Empresas
+4. **Quantidade Quartos** - 2-4, 3-4, 4+ quartos
+5. **Agendamento** - Data do serviço
+6. **Cadastro Completo** - Nome, CPF, endereço, CEP, complemento, cidade
+7. **Pagamento** - Crédito/PIX/Débito
+8. **Finalização** - Confirmação
+
+**Criar novo bot:**
+```bash
+cd backend_fastapi
+python criar_bot_limpeza.py <empresa_id>
+```
+
+**Ver estrutura do bot:**
+```bash
+python -c "
+from app.database.database import SessionLocal
+from app.models.models import BotFluxoNo
+
+db = SessionLocal()
+nos = db.query(BotFluxoNo).filter_by(empresa_id=1).order_by(BotFluxoNo.ordem).all()
+for no in nos:
+    print(f'{no.ordem}. {no.titulo} ({no.tipo})')
+"
+```
+
+## 📧 Sistema de Email
+
+Confirmação de cadastro em 2 etapas com emails profissionais:
+
+- Design moderno com gradientes
+- Logo da empresa
+- Responsivo (mobile-friendly)
+- Links seguros com token de 32 caracteres
+- Expiração em 24 horas
+- Processamento assíncrono via Celery (não trava a API)
+
+**Configuração:**
+```bash
+# .env
+EMAIL_HOST_PASSWORD=sua_senha_de_app_do_gmail
+```
+
+**Gerar senha de app Gmail:**
+https://myaccount.google.com/apppasswords
 
 ## 📚 Documentação
 
+- **[LOCAL_SETUP.md](LOCAL_SETUP.md)** - Guia completo de setup local (NOVO!)
 - **[DEPLOY_DOCKER.md](DEPLOY_DOCKER.md)** - Guia completo de deploy com Docker
 - **[OTIMIZACOES.md](OTIMIZACOES.md)** - Detalhes das otimizações implementadas
 - **[.env.example](.env.example)** - Variáveis de ambiente necessárias
 
-## 🚀 Quick Start (Desenvolvimento)
+## 🚀 Quick Start (Desenvolvimento Local)
 
-### Backend
+### Setup Automático
 
 ```bash
+# 1. Backend
 cd backend_fastapi
 
 # Criar ambiente virtual
@@ -91,42 +150,58 @@ pip install -r requirements.txt
 
 # Configurar .env
 cp .env.example .env
-# Edite .env com suas credenciais
+nano .env  # Configure EMAIL_HOST_PASSWORD e outras variáveis
 
-# Rodar com Docker (Postgres + Redis)
-cd ..
-docker compose up -d postgres redis
+# Criar banco PostgreSQL
+sudo -u postgres createdb whatsapp_sistema
 
-# Criar tabelas
-cd backend_fastapi
-python3 -c "from app.database.database import engine, Base; from app.models import models; Base.metadata.create_all(bind=engine)"
+# Setup completo (cria tabelas, empresa e bot)
+python setup_local.py
 
-# Rodar API
-uvicorn app.main:app --reload --port 8000
+# 2. Frontend
+cd ../frontend_react
+npm install
+cp .env.example .env
 
-# Em outro terminal, rodar Celery Worker
-celery -A app.tasks.celery_app worker -l info
+# 3. Iniciar serviços (4 terminais)
+./start_local.sh  # Ver instruções
 ```
 
-### Frontend
+### Iniciar Serviços Manualmente
 
+**Terminal 1 - Redis:**
+```bash
+redis-server
+```
+
+**Terminal 2 - Celery Worker:**
+```bash
+cd backend_fastapi
+source venv/bin/activate
+celery -A app.tasks.celery_app worker --loglevel=info
+```
+
+**Terminal 3 - Backend:**
+```bash
+cd backend_fastapi
+source venv/bin/activate
+uvicorn main:app --reload --port 8000
+```
+
+**Terminal 4 - Frontend:**
 ```bash
 cd frontend_react
-
-# Instalar dependências
-npm install
-
-# Configurar .env
-cp .env.example .env.local
-# Edite com URL da API
-
-# Rodar dev server
-npm run dev
+npm start
 ```
 
 Acesse:
+- **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8000/docs
-- **Frontend:** http://localhost:5173
+- **Redoc:** http://localhost:8000/redoc
+
+**Credenciais de teste:**
+- Email: tami.hta1208@gmail.com
+- Senha: 123456
 
 ## 🐳 Deploy Produção (Docker)
 

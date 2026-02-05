@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.database.database import get_db
-from app.models.models import Empresa, Atendente, EmpresaAuth, AtendenteAuth
+from app.models.models import Empresa, Atendente, EmpresaAuth, AtendenteAuth, TokenConfirmacaoEmail
 from app.schemas.auth import (
     LoginEmpresaRequest,
     LoginAtendenteRequest,
@@ -17,6 +17,9 @@ from app.schemas.auth import (
     UsuarioAtual,
     CriarAtendenteRequest,
     AtendenteResponse,
+    RegistroEmpresaRequest,
+    RegistroEmpresaResponse,
+    ConfirmarEmailRequest,
 )
 from app.core.auth import (
     verificar_senha,
@@ -340,3 +343,166 @@ async def criar_atendente(
         pode_atender=novo_atendente.pode_atender,
         criado_em=novo_atendente.ultima_atividade
     )
+
+
+# ========== REGISTRO DE EMPRESA (2 ETAPAS) ==========
+
+@router.post("/empresa/register", response_model=RegistroEmpresaResponse)
+async def registrar_empresa(
+    dados: RegistroEmpresaRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    ETAPA 1: Registra uma nova empresa e envia email de confirmação
+
+    Processo:
+    1. Valida se email/CNPJ já existe
+    2. Cria empresa (inativa)
+    3. Cria auth com senha hasheada
+    4. Gera token de confirmação
+    5. Envia email via Celery (não bloqueia API) ✨
+    """
+    # Verificar se email já existe
+    email_existe = db.query(EmpresaAuth).filter(
+        EmpresaAuth.email == dados.email
+    ).first()
+
+    if email_existe:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email já cadastrado"
+        )
+
+    # Verificar CNPJ (se fornecido)
+    if dados.cnpj:
+        cnpj_existe = db.query(Empresa).filter(
+            Empresa.cnpj == dados.cnpj
+        ).first()
+
+        if cnpj_existe:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="CNPJ já cadastrado"
+            )
+
+    # Criar empresa (INATIVA até confirmar email)
+    nova_empresa = Empresa(
+        nome=dados.nome,
+        cnpj=dados.cnpj,
+        email=dados.email,
+        telefone=dados.telefone,
+        whatsapp_token=dados.whatsapp_token or "TOKEN_PENDENTE",
+        phone_number_id=dados.phone_number_id or "PHONE_ID_PENDENTE",
+        verify_token=f"verify_{hash_senha(dados.email)[:32]}",
+        ativa=False  # ❗ Inativa até confirmar email
+    )
+
+    db.add(nova_empresa)
+    db.flush()
+
+    # Criar autenticação
+    nova_auth = EmpresaAuth(
+        empresa_id=nova_empresa.id,
+        email=dados.email,
+        senha_hash=hash_senha(dados.senha)
+    )
+
+    db.add(nova_auth)
+
+    # Gerar token de confirmação
+    from app.services.email_service import gerar_token_confirmacao
+    from datetime import timedelta
+
+    token = gerar_token_confirmacao()
+    expira_em = datetime.utcnow() + timedelta(hours=24)
+
+    token_confirmacao = TokenConfirmacaoEmail(
+        email=dados.email,
+        token=token,
+        empresa_id=nova_empresa.id,
+        usado=False,
+        expira_em=expira_em
+    )
+
+    db.add(token_confirmacao)
+    db.commit()
+
+    # Enviar email via Celery (ASSÍNCRONO - NÃO BLOQUEIA) 🚀
+    try:
+        from app.tasks.tasks import enviar_email_confirmacao_task
+        enviar_email_confirmacao_task.delay(
+            destinatario=dados.email,
+            nome_empresa=dados.nome,
+            token=token
+        )
+        print(f"✅ Task de email enviada para Celery - Email: {dados.email}")
+    except Exception as e:
+        print(f"⚠️  Celery não disponível, enviando sync: {e}")
+        # Fallback: envia síncrono se Celery não estiver disponível
+        from app.services.email_service import enviar_email_confirmacao
+        await enviar_email_confirmacao(dados.email, dados.nome, token)
+
+    return RegistroEmpresaResponse(
+        mensagem="Cadastro realizado! Verifique seu email para ativar a conta.",
+        email=dados.email,
+        empresa_id=nova_empresa.id
+    )
+
+
+@router.post("/empresa/confirm-email")
+async def confirmar_email(
+    dados: ConfirmarEmailRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    ETAPA 2: Confirma o email da empresa via token
+
+    Processo:
+    1. Valida token (existe, não usado, não expirado)
+    2. Ativa a empresa
+    3. Marca token como usado
+    """
+    # Buscar token
+    token_obj = db.query(TokenConfirmacaoEmail).filter(
+        TokenConfirmacaoEmail.token == dados.token,
+        TokenConfirmacaoEmail.usado == False
+    ).first()
+
+    if not token_obj:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido ou já utilizado"
+        )
+
+    # Verificar expiração
+    if datetime.utcnow() > token_obj.expira_em:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token expirado. Solicite um novo cadastro."
+        )
+
+    # Ativar empresa
+    empresa = db.query(Empresa).filter(
+        Empresa.id == token_obj.empresa_id
+    ).first()
+
+    if not empresa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Empresa não encontrada"
+        )
+
+    empresa.ativa = True
+
+    # Marcar token como usado
+    token_obj.usado = True
+
+    db.commit()
+
+    print(f"✅ Email confirmado - Empresa: {empresa.nome} (ID: {empresa.id})")
+
+    return {
+        "mensagem": "Email confirmado com sucesso! Agora você pode fazer login.",
+        "empresa_id": empresa.id,
+        "empresa_nome": empresa.nome
+    }

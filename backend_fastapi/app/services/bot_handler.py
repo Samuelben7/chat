@@ -151,7 +151,11 @@ class BotMessageHandler:
         """Atualiza estado da sessão."""
         self.session.estado_atual = new_state
         if dados_temp is not None:
-            self.session.dados_temporarios.update(dados_temp)
+            # SQLAlchemy não detecta mudanças em JSON com .update()
+            # Precisamos reatribuir o dict inteiro
+            temp_data = self.session.dados_temporarios.copy()
+            temp_data.update(dados_temp)
+            self.session.dados_temporarios = temp_data
         self.db.commit()
 
     async def process_message(self):

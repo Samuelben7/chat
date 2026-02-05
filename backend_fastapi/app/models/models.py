@@ -364,3 +364,18 @@ class BotFluxoOpcao(Base):
     # Relationships
     no = relationship("BotFluxoNo", back_populates="opcoes", foreign_keys=[no_id])
     proximo_no = relationship("BotFluxoNo", foreign_keys=[proximo_no_id])
+
+
+class TokenConfirmacaoEmail(Base):
+    """
+    Tokens para confirmação de email de novas empresas
+    """
+    __tablename__ = "token_confirmacao_email"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False)
+    usado = Column(Boolean, default=False)
+    expira_em = Column(DateTime(timezone=True), nullable=False)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())

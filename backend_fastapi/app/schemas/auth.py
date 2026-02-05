@@ -65,3 +65,28 @@ class AtendenteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RegistroEmpresaRequest(BaseModel):
+    """Request para cadastro de nova empresa"""
+    nome: str
+    cnpj: Optional[str] = None
+    email: EmailStr
+    telefone: Optional[str] = None
+    senha: str
+
+    # Credenciais WhatsApp (opcionais no cadastro inicial)
+    whatsapp_token: Optional[str] = None
+    phone_number_id: Optional[str] = None
+
+
+class RegistroEmpresaResponse(BaseModel):
+    """Response após cadastro de empresa"""
+    mensagem: str
+    email: str
+    empresa_id: int
+
+
+class ConfirmarEmailRequest(BaseModel):
+    """Request para confirmar email com token"""
+    token: str
