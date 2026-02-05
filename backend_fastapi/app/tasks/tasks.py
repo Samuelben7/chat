@@ -233,9 +233,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             except Exception as e:
                 print(f"❌ Erro no bot: {e}")
 
-        # WebSocket broadcast
+        # WebSocket broadcast via Redis Pub/Sub
         try:
-            from app.core.websocket_manager import manager as ws_manager
+            import redis
+            import json
 
             mensagem_log = db.query(MensagemLog).filter(
                 MensagemLog.empresa_id == empresa.id,
@@ -243,10 +244,12 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             ).order_by(MensagemLog.timestamp.desc()).first()
 
             if mensagem_log:
-                # Rodar broadcast em thread
-                import asyncio
-                asyncio.run(ws_manager.broadcast_to_empresa(empresa.id, {
+                # Publicar no Redis para a API repassar aos WebSockets
+                redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
+
+                message_data = {
                     "event": "nova_mensagem",
+                    "empresa_id": empresa.id,
                     "data": {
                         "mensagem": {
                             "id": mensagem_log.id,
@@ -261,8 +264,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             "status": atendimento.status if atendimento else "bot"
                         }
                     }
-                }))
-                print(f"🔔 Broadcast enviado")
+                }
+
+                redis_client.publish('websocket_broadcast', json.dumps(message_data))
+                print(f"🔔 Broadcast publicado no Redis para empresa {empresa.id}")
 
         except Exception as e:
             print(f"⚠️  Erro no broadcast: {e}")
