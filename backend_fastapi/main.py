@@ -74,9 +74,13 @@ async def startup_event():
     print(f"🔴 Redis: {settings.REDIS_URL}")
     print(f"🔌 WebSocket: ws://localhost:8000{settings.API_V1_STR}/ws/{{atendente_id}}")
 
-    # Iniciar listener Redis para broadcasts WebSocket
+    # Iniciar listener Redis apenas no worker principal (evita múltiplos listeners)
+    import os
     import asyncio
-    asyncio.create_task(redis_websocket_bridge())
+    # Uvicorn workers: apenas o processo com WORKER_ID não definido inicia o bridge
+    if not os.getenv('UVICORN_WORKER_ID') or os.getenv('UVICORN_WORKER_ID') == '0':
+        asyncio.create_task(redis_websocket_bridge())
+        print("🎯 Redis WebSocket bridge inicializado neste worker")
 
 
 @app.on_event("shutdown")
