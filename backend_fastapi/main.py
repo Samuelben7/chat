@@ -6,9 +6,18 @@ from app.core.config import settings
 from app.database.database import engine, Base
 import os
 from pathlib import Path
+import asyncio
 
 # Import routers
 from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder
+
+# Import Redis Pub/Sub e WebSocket Manager
+from app.core.redis_pubsub import pubsub_manager
+from app.core.websocket_manager import manager as ws_manager
+
+# Import Metrics
+from app.core.metrics import get_metrics
+from fastapi import Response
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -40,13 +49,39 @@ async def startup_event():
     print(f"📊 Database: {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'configured'}")
     print(f"🔴 Redis: {settings.REDIS_URL}")
     print(f"🔌 WebSocket: ws://localhost:8000{settings.API_V1_STR}/ws/{{atendente_id}}")
-    print(f"📡 WebSocket via HTTP interno (sem Redis Pub/Sub)")
+
+    # Conectar Redis Pub/Sub
+    await pubsub_manager.connect()
+
+    # Criar handler de broadcasts
+    async def handle_broadcast(message: dict):
+        """Handler que recebe mensagens do Redis Pub/Sub e envia via WebSocket"""
+        try:
+            empresa_id = message.pop("empresa_id", None)
+            if not empresa_id:
+                print("⚠️ Mensagem Pub/Sub sem empresa_id")
+                return
+
+            await ws_manager.broadcast_to_empresa(empresa_id, message)
+            print(f"✅ Broadcast via Pub/Sub para empresa {empresa_id}")
+
+        except Exception as e:
+            print(f"❌ Erro no handler de broadcast: {e}")
+
+    # Iniciar listener em background
+    asyncio.create_task(pubsub_manager.listen(handle_broadcast))
+    print("📡 Redis Pub/Sub listener ativo - canal: ws:broadcast:emp:*")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Evento de encerramento da aplicação."""
-    print("👋 Aplicação encerrada")
+    print("👋 Encerrando aplicação...")
+
+    # Desconectar Redis Pub/Sub
+    await pubsub_manager.disconnect()
+
+    print("✅ Aplicação encerrada")
 
 
 @app.get("/")
@@ -64,6 +99,22 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Endpoint Prometheus metrics
+
+    Expõe métricas em formato Prometheus para scraping.
+    Métricas incluem:
+    - Conexões WebSocket ativas
+    - Latências (Pub/Sub, broadcasts, WhatsApp API)
+    - Taxa de sucesso de envios
+    - Cache hit rate
+    - Estado do circuit breaker
+    """
+    return Response(content=get_metrics(), media_type="text/plain")
 
 
 @app.get("/test-websocket")

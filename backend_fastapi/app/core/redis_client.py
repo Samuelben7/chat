@@ -133,6 +133,64 @@ class RedisClient:
             logger.error(f"Erro ao invalidar pattern {pattern}: {e}")
             return 0
 
+    def track_key_with_tag(self, key: str, tag: str, ttl: int = 300):
+        """
+        Adiciona chave a tag set para invalidação rápida
+
+        Args:
+            key: Chave do cache
+            tag: Tag para agrupar chaves relacionadas
+            ttl: TTL da chave (tag expira após as chaves)
+        """
+        if not self.is_available:
+            return False
+
+        try:
+            tag_key = f"tag:{tag}"
+            # Adicionar chave ao set da tag
+            self.client.sadd(tag_key, key)
+            # Tag expira 60s depois das chaves (cleanup automático)
+            self.client.expire(tag_key, ttl + 60)
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao rastrear chave {key} com tag {tag}: {e}")
+            return False
+
+    def invalidate_by_tag(self, tag: str):
+        """
+        Invalida todas chaves de um tag usando UNLINK (non-blocking)
+
+        UNLINK é O(N) mas non-blocking, não trava event loop
+
+        Args:
+            tag: Tag das chaves a invalidar
+
+        Returns:
+            int: Quantidade de chaves invalidadas
+        """
+        if not self.is_available:
+            return 0
+
+        try:
+            tag_key = f"tag:{tag}"
+            # Pegar todas chaves do tag
+            keys = self.client.smembers(tag_key)
+
+            if keys:
+                # UNLINK é non-blocking (não trava event loop)
+                # Converte bytes para strings se necessário
+                keys_list = [k.decode() if isinstance(k, bytes) else k for k in keys]
+                self.client.unlink(*keys_list)
+                # Deletar o próprio tag
+                self.client.delete(tag_key)
+                logger.info(f"🗑️ Invalidadas {len(keys_list)} chaves do tag '{tag}'")
+                return len(keys_list)
+
+            return 0
+        except Exception as e:
+            logger.error(f"Erro ao invalidar tag {tag}: {e}")
+            return 0
+
     # ========== CACHE DE LISTAS ==========
 
     def get_list(self, key: str) -> Optional[List]:
@@ -247,9 +305,18 @@ class RedisClient:
         self.invalidate_pattern(f"empresa:phone:*")  # Também por phone_id
 
     def cache_conversas(self, empresa_id: int, status: str, data: List[dict], ttl: int = 30):
-        """Cache de lista de conversas (30 segundos)"""
+        """Cache de lista de conversas (30 segundos) com tag tracking"""
         key = f"conversas:emp:{empresa_id}:status:{status}"
-        return self.set_json(key, data, ttl)
+        tag = f"conversas:emp:{empresa_id}"
+
+        # Salvar no cache
+        result = self.set_json(key, data, ttl)
+
+        # Rastrear com tag para invalidação rápida
+        if result:
+            self.track_key_with_tag(key, tag, ttl)
+
+        return result
 
     def get_conversas(self, empresa_id: int, status: str) -> Optional[List[dict]]:
         """Pega conversas do cache"""
@@ -257,9 +324,14 @@ class RedisClient:
         return self.get_json(key)
 
     def invalidate_conversas(self, empresa_id: int):
-        """Invalida cache de conversas ao receber nova mensagem"""
-        pattern = f"conversas:emp:{empresa_id}:*"
-        return self.invalidate_pattern(pattern)
+        """
+        Invalida cache de conversas ao receber nova mensagem
+
+        Usa invalidate_by_tag (UNLINK non-blocking) em vez de
+        invalidate_pattern (SCAN + DEL blocking)
+        """
+        tag = f"conversas:emp:{empresa_id}"
+        return self.invalidate_by_tag(tag)
 
     def cache_atendentes(self, empresa_id: int, data: List[dict], ttl: int = 300):
         """Cache de lista de atendentes (5 minutos)"""

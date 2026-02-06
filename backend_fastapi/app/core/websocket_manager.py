@@ -9,6 +9,20 @@ import json
 import asyncio
 from datetime import datetime
 
+# Import métricas
+try:
+    from app.core.metrics import (
+        ws_connections_total,
+        ws_disconnections_total,
+        websocket_active_connections,
+        websocket_total_active,
+        ws_broadcasts_total,
+        broadcast_latency
+    )
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
+
 
 class ConnectionManager:
     """
@@ -65,6 +79,12 @@ class ConnectionManager:
             "connected_at": datetime.now().isoformat()
         }
 
+        # Métricas
+        if METRICS_ENABLED:
+            ws_connections_total.labels(empresa_id=str(empresa_id)).inc()
+            websocket_active_connections.labels(empresa_id=str(empresa_id)).inc()
+            websocket_total_active.inc()
+
         print(f"✅ WebSocket conectado: empresa={empresa_id}, user={user_id}, role={role}")
 
     def disconnect(self, empresa_id: int, user_id: str):
@@ -93,6 +113,12 @@ class ConnectionManager:
         # Remover metadados
         if connection_key in self.connection_metadata:
             del self.connection_metadata[connection_key]
+
+        # Métricas
+        if METRICS_ENABLED:
+            ws_disconnections_total.labels(empresa_id=str(empresa_id), reason="normal").inc()
+            websocket_active_connections.labels(empresa_id=str(empresa_id)).dec()
+            websocket_total_active.dec()
 
         print(f"❌ WebSocket desconectado: empresa={empresa_id}, user={user_id}")
 
@@ -134,10 +160,14 @@ class ConnectionManager:
             message: Mensagem a ser enviada (dict)
             exclude_user: ID do usuário a ser excluído (opcional)
         """
+        import time
+        start_time = time.time()
+
         if empresa_id not in self.connections_by_empresa:
             return
 
         disconnected_users = []
+        event_type = message.get("event", "unknown")
 
         for user_id, websocket in self.connections_by_empresa[empresa_id].items():
             if exclude_user and user_id == exclude_user:
@@ -152,6 +182,13 @@ class ConnectionManager:
         # Limpar conexões mortas
         for user_id in disconnected_users:
             self.disconnect(empresa_id, user_id)
+
+        # Métricas
+        if METRICS_ENABLED:
+            latency = time.time() - start_time
+            broadcast_latency.observe(latency)
+            status = "success" if not disconnected_users else "partial"
+            ws_broadcasts_total.labels(event=event_type, status=status).inc()
 
     async def broadcast_to_role(
         self,

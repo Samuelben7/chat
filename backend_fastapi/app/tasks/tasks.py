@@ -3,18 +3,48 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import httpx
 from typing import Dict, Any
+import json
 
 from app.tasks.celery_app import celery_app
 from app.database.database import SessionLocal
 from app.models.models import MensagemLog, Atendimento, Atendente, Empresa
 from app.core.config import settings
 from app.core.redis_client import redis_cache
+from app.core.circuit_breaker import whatsapp_circuit_breaker
+import time
+
+# Import métricas
+try:
+    from app.core.metrics import (
+        whatsapp_sent_total,
+        whatsapp_received_total,
+        whatsapp_api_latency,
+        webhook_processing_latency,
+        task_processing_latency,
+        update_circuit_breaker_metrics
+    )
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
 
 
-@celery_app.task(name="app.tasks.tasks.enviar_mensagem_whatsapp")
-def enviar_mensagem_whatsapp(to: str, message: str, message_type: str = "text"):
+@celery_app.task(
+    name="app.tasks.tasks.enviar_mensagem_whatsapp",
+    bind=True,  # Necessário para self.retry()
+    autoretry_for=(httpx.HTTPError, httpx.TimeoutException),
+    retry_kwargs={'max_retries': 3, 'countdown': 5},
+    retry_backoff=True,        # Exponential backoff: 5s → 10s → 20s
+    retry_backoff_max=60,      # Máximo 60s de espera
+    retry_jitter=True          # Evita thundering herd
+)
+def enviar_mensagem_whatsapp(self, to: str, message: str, message_type: str = "text"):
     """
     Task assíncrona para enviar mensagem via WhatsApp API.
+
+    Retry automático:
+    - 3 tentativas com exponential backoff (5s, 10s, 20s)
+    - Retry em httpx.HTTPError e httpx.TimeoutException
+    - Jitter aleatório para evitar sobrecarga
 
     Args:
         to: Número do destinatário
@@ -24,28 +54,53 @@ def enviar_mensagem_whatsapp(to: str, message: str, message_type: str = "text"):
     Returns:
         dict: Resultado do envio
     """
+    start_time = time.time()
     try:
-        url = f"https://graph.facebook.com/v18.0/{settings.PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        # Função interna para envio (protegida pelo circuit breaker)
+        def send_whatsapp_request():
+            api_start = time.time()
+            url = f"https://graph.facebook.com/v18.0/{settings.PHONE_NUMBER_ID}/messages"
+            headers = {
+                "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}",
+                "Content-Type": "application/json"
+            }
 
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "text",
-            "text": {"body": message}
-        }
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "text",
+                "text": {"body": message}
+            }
 
-        response = httpx.post(url, headers=headers, json=payload, timeout=30.0)
-        response.raise_for_status()
+            response = httpx.post(url, headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status()
 
-        result = response.json()
+            # Métrica de latência da API
+            if METRICS_ENABLED:
+                whatsapp_api_latency.observe(time.time() - api_start)
+
+            return response.json()
+
+        # Executar com circuit breaker
+        result = whatsapp_circuit_breaker.call(send_whatsapp_request)
         message_id = result["messages"][0]["id"]
 
         print(f"✅ Mensagem enviada para {to}: {message_id}")
+
+        # Métricas de sucesso
+        if METRICS_ENABLED:
+            whatsapp_sent_total.labels(status="success").inc()
+            task_processing_latency.labels(task_name="enviar_mensagem_whatsapp").observe(
+                time.time() - start_time
+            )
+            # Atualizar estado do circuit breaker
+            cb_state = whatsapp_circuit_breaker.get_state()
+            update_circuit_breaker_metrics(
+                "whatsapp_api",
+                cb_state["state"],
+                cb_state["failures"]
+            )
 
         return {
             "success": True,
@@ -55,6 +110,18 @@ def enviar_mensagem_whatsapp(to: str, message: str, message_type: str = "text"):
 
     except Exception as e:
         print(f"❌ Erro enviando mensagem: {e}")
+
+        # Métricas de erro
+        if METRICS_ENABLED:
+            whatsapp_sent_total.labels(status="error").inc()
+            # Atualizar estado do circuit breaker
+            cb_state = whatsapp_circuit_breaker.get_state()
+            update_circuit_breaker_metrics(
+                "whatsapp_api",
+                cb_state["state"],
+                cb_state["failures"]
+            )
+
         return {
             "success": False,
             "error": str(e),
@@ -152,6 +219,18 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         message_id = message.get("id")
         message_type = message.get("type")
 
+        # ========== DEDUPLICAÇÃO VIA REDIS ==========
+        # Protege contra duplicatas do WhatsApp (webhook pode ser chamado 2x)
+        dedup_key = f"msg:processed:{message_id}"
+
+        if redis_cache.client.exists(dedup_key):
+            print(f"⚠️ Mensagem duplicada detectada (ignorada): {message_id}")
+            return  # Skip processamento
+
+        # Marcar como processada (TTL 24h = 86400 segundos)
+        redis_cache.client.setex(dedup_key, 86400, "1")
+        print(f"✅ Mensagem {message_id} marcada como processada")
+
         # Extrair conteúdo
         content = ""
         if message_type == "text":
@@ -241,7 +320,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             ).order_by(MensagemLog.timestamp.desc()).first()
 
             if mensagem_log:
-                # Enviar broadcast via HTTP POST para API interna
+                # Enviar broadcast via Redis Pub/Sub (elimina hop HTTP ~100ms)
                 broadcast_data = {
                     "empresa_id": empresa.id,
                     "event": "nova_mensagem",
@@ -261,19 +340,15 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     }
                 }
 
-                # HTTP POST para API interna
-                response = httpx.post(
-                    f"{settings.INTERNAL_API_URL}{settings.API_V1_STR}/ws/internal-broadcast",
-                    json=broadcast_data,
-                    headers={"X-Internal-Key": settings.INTERNAL_API_KEY},
-                    timeout=5.0
-                )
+                # Publicar diretamente em Redis Pub/Sub (sem HTTP)
+                channel = f"ws:broadcast:emp:{empresa.id}"
+                message_data = json.dumps(broadcast_data, default=str)
 
-                if response.status_code == 200:
-                    result = response.json()
-                    print(f"🔔 Broadcast enviado para empresa {empresa.id} - {result.get('usuarios_notificados', 0)} usuários notificados")
-                else:
-                    print(f"⚠️  Broadcast falhou: HTTP {response.status_code}")
+                try:
+                    redis_cache.client.publish(channel, message_data)
+                    print(f"🔔 Broadcast publicado via Redis Pub/Sub para empresa {empresa.id}")
+                except Exception as pub_error:
+                    print(f"⚠️  Erro ao publicar no Redis Pub/Sub: {pub_error}")
 
         except Exception as e:
             print(f"⚠️  Erro no broadcast: {e}")
