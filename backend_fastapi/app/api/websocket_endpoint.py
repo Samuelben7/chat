@@ -2,16 +2,72 @@
 Endpoint WebSocket para comunicação em tempo real
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from app.core.websocket_manager import manager
 from app.core.auth import decodificar_token
+from app.core.config import settings
 from app.database.database import get_db
 from app.models.models import Atendente
+from pydantic import BaseModel
+from typing import Dict, Any
 import json
 from datetime import datetime
 
 router = APIRouter()
+
+
+class BroadcastMessage(BaseModel):
+    """Schema para mensagem de broadcast interno"""
+    empresa_id: int
+    event: str
+    data: Dict[str, Any]
+
+
+@router.post("/ws/internal-broadcast")
+async def internal_broadcast(
+    message: BroadcastMessage,
+    x_internal_key: str = Header(..., alias="X-Internal-Key")
+):
+    """
+    Endpoint INTERNO para Celery enviar broadcasts via WebSocket.
+
+    Segurança: Requer header X-Internal-Key com chave interna.
+    Este endpoint não deve ser exposto publicamente.
+
+    Args:
+        message: Dados do broadcast (empresa_id, event, data)
+        x_internal_key: Chave de autenticação interna
+
+    Returns:
+        Status do broadcast
+    """
+    # Validar chave interna
+    if x_internal_key != settings.INTERNAL_API_KEY:
+        raise HTTPException(status_code=403, detail="Chave interna inválida")
+
+    try:
+        # Fazer broadcast via WebSocket
+        await manager.broadcast_to_empresa(
+            empresa_id=message.empresa_id,
+            message={
+                "event": message.event,
+                "data": message.data
+            }
+        )
+
+        usuarios_conectados = len(manager.get_connected_users(message.empresa_id))
+
+        return {
+            "success": True,
+            "empresa_id": message.empresa_id,
+            "event": message.event,
+            "usuarios_notificados": usuarios_conectados
+        }
+
+    except Exception as e:
+        print(f"❌ Erro no internal broadcast: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.websocket("/ws")

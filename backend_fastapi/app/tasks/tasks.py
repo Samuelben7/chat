@@ -233,23 +233,18 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             except Exception as e:
                 print(f"❌ Erro no bot: {e}")
 
-        # WebSocket broadcast via Redis Pub/Sub
+        # WebSocket broadcast via HTTP interno
         try:
-            import redis
-            import json
-
             mensagem_log = db.query(MensagemLog).filter(
                 MensagemLog.empresa_id == empresa.id,
                 MensagemLog.whatsapp_number == from_number
             ).order_by(MensagemLog.timestamp.desc()).first()
 
             if mensagem_log:
-                # Publicar no Redis para a API repassar aos WebSockets
-                redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
-
-                message_data = {
-                    "event": "nova_mensagem",
+                # Enviar broadcast via HTTP POST para API interna
+                broadcast_data = {
                     "empresa_id": empresa.id,
+                    "event": "nova_mensagem",
                     "data": {
                         "mensagem": {
                             "id": mensagem_log.id,
@@ -266,8 +261,19 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     }
                 }
 
-                redis_client.publish('websocket_broadcast', json.dumps(message_data))
-                print(f"🔔 Broadcast publicado no Redis para empresa {empresa.id}")
+                # HTTP POST para API interna
+                response = httpx.post(
+                    f"{settings.INTERNAL_API_URL}{settings.API_V1_STR}/ws/internal-broadcast",
+                    json=broadcast_data,
+                    headers={"X-Internal-Key": settings.INTERNAL_API_KEY},
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    print(f"🔔 Broadcast enviado para empresa {empresa.id} - {result.get('usuarios_notificados', 0)} usuários notificados")
+                else:
+                    print(f"⚠️  Broadcast falhou: HTTP {response.status_code}")
 
         except Exception as e:
             print(f"⚠️  Erro no broadcast: {e}")

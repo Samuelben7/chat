@@ -33,39 +33,6 @@ uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
-async def redis_websocket_bridge():
-    """
-    Ponte entre Redis Pub/Sub e WebSocket connections.
-    Escuta mensagens publicadas pelo Celery no Redis e repassa para os WebSockets.
-    """
-    import redis.asyncio as aioredis
-    import json
-    from app.core.websocket_manager import manager as ws_manager
-
-    try:
-        redis_client = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        pubsub = redis_client.pubsub()
-        await pubsub.subscribe('websocket_broadcast')
-
-        print("📡 Redis WebSocket bridge ativo - escutando broadcasts...")
-
-        async for message in pubsub.listen():
-            if message['type'] == 'message':
-                try:
-                    data = json.loads(message['data'])
-                    empresa_id = data.pop('empresa_id')
-
-                    await ws_manager.broadcast_to_empresa(empresa_id, data)
-                    print(f"✅ Broadcast repassado para empresa {empresa_id}")
-                except Exception as e:
-                    print(f"❌ Erro ao processar broadcast: {e}")
-
-    except Exception as e:
-        print(f"❌ Erro no Redis WebSocket bridge: {e}")
-        import traceback
-        traceback.print_exc()
-
-
 @app.on_event("startup")
 async def startup_event():
     """Evento de inicialização da aplicação."""
@@ -73,14 +40,7 @@ async def startup_event():
     print(f"📊 Database: {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'configured'}")
     print(f"🔴 Redis: {settings.REDIS_URL}")
     print(f"🔌 WebSocket: ws://localhost:8000{settings.API_V1_STR}/ws/{{atendente_id}}")
-
-    # Iniciar listener Redis apenas no worker principal (evita múltiplos listeners)
-    import os
-    import asyncio
-    # Uvicorn workers: apenas o processo com WORKER_ID não definido inicia o bridge
-    if not os.getenv('UVICORN_WORKER_ID') or os.getenv('UVICORN_WORKER_ID') == '0':
-        asyncio.create_task(redis_websocket_bridge())
-        print("🎯 Redis WebSocket bridge inicializado neste worker")
+    print(f"📡 WebSocket via HTTP interno (sem Redis Pub/Sub)")
 
 
 @app.on_event("shutdown")

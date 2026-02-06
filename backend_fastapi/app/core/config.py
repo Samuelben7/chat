@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: Optional[str] = "http://localhost:3000"
 
+    # Internal API (for Celery -> API communication)
+    INTERNAL_API_KEY: str = "celery-internal-key-2026"
+    INTERNAL_API_URL: str = "http://api:8000"
+
     # App
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"

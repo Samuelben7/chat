@@ -67,6 +67,10 @@ services:
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
       VERIFY_TOKEN: ${VERIFY_TOKEN}
 
+      # Internal API
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}
+      INTERNAL_API_URL: http://api:8000
+
       # App
       DEBUG: ${DEBUG:-False}
       ENVIRONMENT: ${ENVIRONMENT:-production}
@@ -109,6 +113,10 @@ services:
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
       VERIFY_TOKEN: ${VERIFY_TOKEN}
+
+      # Internal API
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}
+      INTERNAL_API_URL: http://api:8000
 
       # App
       DEBUG: ${DEBUG:-False}
