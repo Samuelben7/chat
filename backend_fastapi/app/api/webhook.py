@@ -199,6 +199,20 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
             processar_bot = False
             print(f"ℹ️  Mensagem em atendimento humano, não processar bot")
 
+        # CRÍTICO: Verificar se humano respondeu recentemente (últimos 5 min)
+        # Se sim, NÃO processar bot (evita conflito humano vs bot)
+        from datetime import timedelta
+        ultima_enviada = db.query(MensagemLog).filter(
+            MensagemLog.whatsapp_number == from_number,
+            MensagemLog.empresa_id == empresa.id,
+            MensagemLog.direcao == 'enviada',
+            MensagemLog.timestamp >= datetime.now(timezone.utc) - timedelta(minutes=5)
+        ).order_by(MensagemLog.timestamp.desc()).first()
+
+        if ultima_enviada:
+            processar_bot = False
+            print(f"🚫 Humano respondeu recentemente ({ultima_enviada.timestamp}) - Bot pausado")
+
         if not atendimento:
             # Busca na tabela de mensagens para ver se já existe registro
             msg_existente = db.query(MensagemLog).filter(
@@ -245,32 +259,34 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                 traceback.print_exc()
 
         # Broadcast via WebSocket para atendentes conectados
+        # BROADCAST AMBAS: mensagem recebida E resposta do bot (se houver)
         if WS_AVAILABLE:
-            # Busca mensagem mais recente salva pelo bot
-            mensagem_log = db.query(MensagemLog).filter(
+            # Busca últimas 2 mensagens (recebida + resposta bot)
+            mensagens_recentes = db.query(MensagemLog).filter(
                 MensagemLog.empresa_id == empresa.id,
                 MensagemLog.whatsapp_number == from_number
-            ).order_by(MensagemLog.timestamp.desc()).first()
+            ).order_by(MensagemLog.timestamp.desc()).limit(2).all()
 
-            if mensagem_log:
+            for msg in reversed(mensagens_recentes):  # Broadcast em ordem cronológica
                 await ws_manager.broadcast_to_empresa(empresa.id, {
                     "event": "nova_mensagem",
                     "data": {
                         "mensagem": {
-                            "id": mensagem_log.id,
-                            "whatsapp_number": mensagem_log.whatsapp_number,
-                            "conteudo": mensagem_log.conteudo,
-                            "direcao": mensagem_log.direcao,
-                            "tipo_mensagem": mensagem_log.tipo_mensagem,
-                            "timestamp": mensagem_log.timestamp.isoformat(),
-                            "lida": mensagem_log.lida
+                            "id": msg.id,
+                            "whatsapp_number": msg.whatsapp_number,
+                            "message_id": msg.message_id,
+                            "conteudo": msg.conteudo,
+                            "direcao": msg.direcao,
+                            "tipo_mensagem": msg.tipo_mensagem,
+                            "timestamp": msg.timestamp.isoformat(),
+                            "lida": msg.lida
                         },
                         "atendimento": {
                             "status": atendimento.status if atendimento else "bot"
                         }
                     }
                 })
-                print(f"🔔 Broadcast enviado via WebSocket para empresa {empresa.id}")
+                print(f"🔔 Broadcast {msg.direcao}: {msg.conteudo[:50]}")
 
     except Exception as e:
         print(f"❌ Erro processando mensagem: {e}")

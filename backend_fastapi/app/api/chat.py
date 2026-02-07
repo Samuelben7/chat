@@ -107,10 +107,9 @@ async def listar_conversas(
         Atendimento.whatsapp_number == ultima_recebida_subq.c.whatsapp_number
     )
 
-    # FILTRO AUTOMÁTICO: Apenas atendentes da mesma empresa OU sem atendente (bot)
-    query = query.filter(
-        (Atendente.empresa_id == empresa_id) | (Atendimento.atendente_id.is_(None))
-    )
+    # FILTRO POR EMPRESA: Filtrar conversas via MensagemLog (tem empresa_id)
+    # Atendimento não tem empresa_id, então precisamos filtrar via mensagens
+    query = query.filter(MensagemLog.empresa_id == empresa_id)
 
     # PERMISSÃO: Atendente vê apenas suas conversas
     if user.role == "atendente":
