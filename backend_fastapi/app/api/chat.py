@@ -72,6 +72,15 @@ async def listar_conversas(
         MensagemLog.empresa_id == empresa_id
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
+    # Subquery para última mensagem RECEBIDA (para calcular presença online)
+    ultima_recebida_subq = db.query(
+        MensagemLog.whatsapp_number,
+        func.max(MensagemLog.timestamp).label('ultima_recebida_em')
+    ).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.direcao == 'recebida'
+    ).group_by(MensagemLog.whatsapp_number).subquery()
+
     # Query principal com JOIN nas subqueries
     query = db.query(
         Atendimento.whatsapp_number,
@@ -79,7 +88,8 @@ async def listar_conversas(
         MensagemLog.timestamp,
         Atendimento.status,
         Atendente.nome_exibicao.label('atendente_nome'),
-        func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label('nao_lidas')
+        func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label('nao_lidas'),
+        ultima_recebida_subq.c.ultima_recebida_em
     ).outerjoin(
         Atendente, Atendimento.atendente_id == Atendente.id
     ).outerjoin(
@@ -92,6 +102,9 @@ async def listar_conversas(
     ).outerjoin(
         nao_lidas_subq,
         Atendimento.whatsapp_number == nao_lidas_subq.c.whatsapp_number
+    ).outerjoin(
+        ultima_recebida_subq,
+        Atendimento.whatsapp_number == ultima_recebida_subq.c.whatsapp_number
     )
 
     # FILTRO AUTOMÁTICO: Apenas atendentes da mesma empresa OU sem atendente (bot)
@@ -118,13 +131,26 @@ async def listar_conversas(
     # Montar resposta
     conversas = []
     for r in resultados:
+        # Calcular status de presença baseado em última mensagem RECEBIDA (otimizado com subquery)
+        online_status = None
+        if r.ultima_recebida_em:
+            from datetime import datetime, timezone
+            tempo_inativo = (datetime.now(timezone.utc) - r.ultima_recebida_em).total_seconds() / 60  # minutos
+
+            if tempo_inativo < 5:
+                online_status = 'online'  # Ativo há menos de 5 min
+            elif tempo_inativo < 30:
+                online_status = 'ausente'  # Ativo há 5-30 min
+            # else: offline ou None (sem indicador)
+
         conversas.append(ConversaPreview(
             whatsapp_number=r.whatsapp_number,
             ultima_mensagem=r.ultima_mensagem,
             timestamp=r.timestamp,
             nao_lidas=r.nao_lidas,
             atendente_nome=r.atendente_nome,
-            status=r.status or 'bot'
+            status=r.status or 'bot',
+            online_status=online_status
         ))
 
     # Salvar no cache (30 segundos)
@@ -296,8 +322,8 @@ async def finalizar_atendimento(
     db: Session = Depends(get_db)
 ):
     """
-    Finaliza um atendimento.
-    Muda status para 'finalizado' ou volta para 'bot'.
+    Finaliza um atendimento e reseta o estado do bot.
+    Quando cliente enviar próxima mensagem, bot começa do zero.
     """
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
@@ -310,9 +336,20 @@ async def finalizar_atendimento(
     atendimento.status = 'finalizado'
     atendimento.finalizado_em = datetime.now()
 
+    # RESETAR ESTADO DO BOT - Bot recomeça do zero quando cliente voltar
+    from app.models.models import ChatSessao
+    sessao = db.query(ChatSessao).filter(
+        ChatSessao.empresa_id == atendimento.empresa_id,
+        ChatSessao.whatsapp_number == whatsapp_number
+    ).first()
+
+    if sessao:
+        sessao.estado_atual = 'inicio'  # Reset para início
+        print(f"🔄 Bot resetado para 'inicio' - {whatsapp_number}")
+
     db.commit()
 
-    return {"status": "success", "message": "Atendimento finalizado"}
+    return {"status": "success", "message": "Atendimento finalizado e bot resetado"}
 
 
 @router.post("/chat/atendimento/{whatsapp_number}/transferir-bot")
@@ -334,6 +371,17 @@ async def transferir_para_bot(
     atendimento.status = 'bot'
     atendimento.atendente_id = None
 
+    # RESETAR ESTADO DO BOT - Bot recomeça do zero
+    from app.models.models import ChatSessao
+    sessao = db.query(ChatSessao).filter(
+        ChatSessao.empresa_id == atendimento.empresa_id,
+        ChatSessao.whatsapp_number == whatsapp_number
+    ).first()
+
+    if sessao:
+        sessao.estado_atual = 'inicio'  # Reset para início
+        print(f"🔄 Bot resetado para 'inicio' - {whatsapp_number}")
+
     db.commit()
 
-    return {"status": "success", "message": "Atendimento transferido para o bot"}
+    return {"status": "success", "message": "Atendimento transferido para o bot (resetado)"}

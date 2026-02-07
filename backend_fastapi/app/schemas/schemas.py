@@ -133,6 +133,7 @@ class ConversaPreview(BaseModel):
     nao_lidas: int = 0
     atendente_nome: Optional[str] = None
     status: str = "bot"
+    online_status: Optional[str] = None  # 'online', 'ausente', 'offline', None
 
     class Config:
         from_attributes = True

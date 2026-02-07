@@ -87,6 +87,21 @@ class ConnectionManager:
 
         print(f"✅ WebSocket conectado: empresa={empresa_id}, user={user_id}, role={role}")
 
+        # Broadcast presença online para outros usuários da empresa
+        await self.broadcast_to_empresa(
+            empresa_id,
+            {
+                "event": "user_presence",
+                "data": {
+                    "user_id": user_id,
+                    "role": role,
+                    "status": "online",
+                    "timestamp": datetime.now().isoformat()
+                }
+            },
+            exclude_user=user_id  # Não enviar para o próprio usuário
+        )
+
     def disconnect(self, empresa_id: int, user_id: str):
         """
         Desconecta um cliente WebSocket
@@ -96,6 +111,10 @@ class ConnectionManager:
             user_id: ID do usuário
         """
         connection_key = f"{empresa_id}_{user_id}"
+
+        # Salvar metadados antes de deletar (para broadcast de presença)
+        metadata = self.connection_metadata.get(connection_key, {})
+        user_role = metadata.get("role", "unknown")
 
         # Remover da estrutura de empresa
         if empresa_id in self.connections_by_empresa:
@@ -121,6 +140,22 @@ class ConnectionManager:
             websocket_total_active.dec()
 
         print(f"❌ WebSocket desconectado: empresa={empresa_id}, user={user_id}")
+
+        # Broadcast presença offline para outros usuários da empresa (async call)
+        asyncio.create_task(
+            self.broadcast_to_empresa(
+                empresa_id,
+                {
+                    "event": "user_presence",
+                    "data": {
+                        "user_id": user_id,
+                        "role": user_role,
+                        "status": "offline",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }
+            )
+        )
 
     async def send_personal_message(
         self,

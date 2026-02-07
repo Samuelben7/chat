@@ -280,14 +280,17 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
 
 
 async def process_message_status(status: Dict[str, Any], empresa: Empresa, db: Session):
-    """Processa status de mensagem enviada."""
+    """Processa status de mensagem enviada (sent/delivered/read/failed)."""
     try:
+        from app.core.redis_client import redis_cache
+        from app.core.websocket_manager import manager
+
         message_id = status.get("id")
         status_type = status.get("status")  # sent, delivered, read, failed
 
         print(f"📊 Status da mensagem {message_id}: {status_type}")
 
-        # Atualizar status da mensagem no log
+        # Atualizar status da mensagem no banco
         mensagem = db.query(MensagemLog).filter(
             MensagemLog.empresa_id == empresa.id,
             MensagemLog.message_id == message_id
@@ -296,12 +299,35 @@ async def process_message_status(status: Dict[str, Any], empresa: Empresa, db: S
         if mensagem:
             if status_type == "read":
                 mensagem.lida = True
+
+                # REDIS: Marcar como lida (performance - evita queries futuras)
+                read_key = f"msg:read:{message_id}"
+                redis_cache.client.setex(read_key, 86400, "1")  # TTL 24h
+
+                print(f"✅ Mensagem marcada como lida no Redis: {message_id}")
+
             elif status_type == "failed":
                 error = status.get("errors", [{}])[0]
                 mensagem.erro = error.get("message", "Erro desconhecido")
 
             db.commit()
-            print(f"✅ Status atualizado")
+
+            # WEBSOCKET BROADCAST: Notificar frontend em tempo real
+            if status_type in ["read", "delivered"]:
+                await manager.broadcast_to_empresa(
+                    empresa.id,
+                    {
+                        "event": "message_status_update",
+                        "data": {
+                            "message_id": message_id,
+                            "whatsapp_number": mensagem.whatsapp_number,
+                            "status": status_type,
+                            "lida": mensagem.lida,
+                            "id": mensagem.id
+                        }
+                    }
+                )
+                print(f"🔔 Broadcast status '{status_type}' para empresa {empresa.id}")
 
     except Exception as e:
         print(f"❌ Erro processando status: {e}")
