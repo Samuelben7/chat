@@ -141,3 +141,27 @@ async def contar_nao_lidas(
     ).count()
 
     return {"whatsapp_number": whatsapp_number, "nao_lidas": count}
+
+
+@router.patch("/mensagens/{whatsapp_number}/marcar-todas-lidas")
+async def marcar_todas_lidas(
+    whatsapp_number: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Marca todas as mensagens recebidas de um número como lidas.
+    """
+    # Atualizar todas as mensagens recebidas não lidas
+    updated = db.query(MensagemLog).filter(
+        MensagemLog.whatsapp_number == whatsapp_number,
+        MensagemLog.direcao == "recebida",
+        MensagemLog.lida == False
+    ).update({"lida": True})
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "whatsapp_number": whatsapp_number,
+        "mensagens_marcadas": updated
+    }
