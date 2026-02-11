@@ -19,6 +19,7 @@ class TemplateComponent(BaseModel):
     text: Optional[str] = None
     buttons: Optional[List[TemplateButton]] = None
     example: Optional[Dict[str, Any]] = None
+    limited_time_offer: Optional[Dict[str, Any]] = None
 
 
 # ==================== CREATE / UPDATE ====================
@@ -72,12 +73,16 @@ class TemplateSend(BaseModel):
     template_id: Optional[int] = None
     language: str = 'pt_BR'
     components: Optional[List[Dict[str, Any]]] = None
+    parameter_values: Optional[Dict[str, str]] = None
+    media_url: Optional[str] = None
 
 
 class TemplateSendBulk(BaseModel):
     template_id: int
     language: str = 'pt_BR'
     components: Optional[List[Dict[str, Any]]] = None
+    parameter_values: Optional[Dict[str, str]] = None
+    media_url: Optional[str] = None
     whatsapp_numbers: Optional[List[str]] = None
     lista_id: Optional[int] = None
 
@@ -103,3 +108,29 @@ class TemplateSyncResponse(BaseModel):
     atualizados: int
     removidos: int
     total: int
+
+
+# ==================== CHECK STATUS ====================
+
+class TemplateStatusCheckResponse(BaseModel):
+    id: int
+    meta_template_id: Optional[str] = None
+    status: str
+    quality_score: Optional[str] = None
+    rejected_reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ==================== CONTACT NAME ====================
+
+class ContactNameResponse(BaseModel):
+    nome: Optional[str] = None
+
+
+# ==================== MEDIA UPLOAD ====================
+
+class MediaUploadResponse(BaseModel):
+    url: str
+    filename: str

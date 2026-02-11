@@ -2,18 +2,21 @@
 Endpoints para gerenciamento de Templates de Mensagem WhatsApp
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Optional
+from pathlib import Path
+import uuid
 
 from app.database.database import get_db
-from app.models.models import Empresa, MessageTemplate, ListaContatosMembro
+from app.models.models import Empresa, MessageTemplate, ListaContatosMembro, Cliente, MensagemLog
 from app.core.dependencies import CurrentEmpresa
 from app.services.template_service import TemplateService
 from app.schemas.templates import (
     TemplateCreate, TemplateUpdate, TemplateResponse, TemplateListResponse,
     TemplateSend, TemplateSendBulk, TemplateSendResponse, TemplateBulkSendResponse,
-    TemplateSyncResponse,
+    TemplateSyncResponse, TemplateStatusCheckResponse, ContactNameResponse,
+    MediaUploadResponse,
 )
 
 router = APIRouter()
@@ -223,12 +226,21 @@ async def enviar_template(
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
 
+    # Build components from parameter_values if provided (auto-build)
+    send_components = dados.components
+    if dados.parameter_values and template.components:
+        send_components = TemplateService.build_send_components(
+            template_components=template.components,
+            parameter_values=dados.parameter_values,
+            media_url=dados.media_url,
+        )
+
     try:
         message_id = await service.send_template_message(
             to=dados.whatsapp_number,
             template_name=template.name,
             language_code=dados.language,
-            components=dados.components,
+            components=send_components,
         )
         service.log_template_send(db, dados.whatsapp_number, template.name, message_id)
         return TemplateSendResponse(
@@ -281,6 +293,15 @@ async def enviar_template_massa(
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
 
+    # Build components from parameter_values if provided
+    send_components = dados.components
+    if dados.parameter_values and template.components:
+        send_components = TemplateService.build_send_components(
+            template_components=template.components,
+            parameter_values=dados.parameter_values,
+            media_url=dados.media_url,
+        )
+
     resultados = []
     enviados = 0
     erros = 0
@@ -291,7 +312,7 @@ async def enviar_template_massa(
                 to=number,
                 template_name=template.name,
                 language_code=dados.language,
-                components=dados.components,
+                components=send_components,
             )
             service.log_template_send(db, number, template.name, message_id)
             resultados.append(TemplateSendResponse(
@@ -345,4 +366,133 @@ async def sincronizar_templates(
         atualizados=atualizados,
         removidos=removidos,
         total=total
+    )
+
+
+# ========== CHECK STATUS ==========
+
+@router.get("/templates/{template_id}/check-status", response_model=TemplateStatusCheckResponse)
+async def check_template_status(
+    template_id: int,
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db),
+):
+    """Verifica status atualizado de um template na Meta API."""
+    template = db.query(MessageTemplate).filter(
+        MessageTemplate.id == template_id,
+        MessageTemplate.empresa_id == empresa_id
+    ).first()
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+
+    if not template.meta_template_id:
+        raise HTTPException(status_code=400, detail="Template sem ID da Meta")
+
+    empresa = _get_empresa(empresa_id, db)
+    service = _get_template_service(empresa)
+
+    try:
+        result = await service.check_template_status(template.meta_template_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao consultar Meta API: {str(e)}")
+
+    # Atualizar registro local
+    template.status = result.get("status", template.status)
+    qs = result.get("quality_score")
+    if isinstance(qs, dict):
+        template.quality_score = qs.get("score")
+    elif qs:
+        template.quality_score = str(qs)
+    template.rejected_reason = result.get("rejected_reason", template.rejected_reason)
+
+    db.commit()
+    db.refresh(template)
+
+    return template
+
+
+# ========== CONTACT NAME ===========
+
+@router.get("/templates/contact-name", response_model=ContactNameResponse)
+async def get_contact_name(
+    number: str = Query(..., description="Número WhatsApp do contato"),
+    empresa_id: CurrentEmpresa = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Busca nome do contato com fallback em 3 níveis:
+    1. Tabela Cliente (nome_completo)
+    2. MensagemLog (profile.name do webhook em dados_extras)
+    3. Retorna null
+    """
+    # Nível 1: Buscar no Cliente
+    cliente = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.whatsapp_number == number
+    ).first()
+
+    if cliente and cliente.nome_completo:
+        nome = cliente.nome_completo.split()[0] if cliente.nome_completo else None
+        return ContactNameResponse(nome=nome)
+
+    # Nível 2: Buscar no MensagemLog (profile.name do webhook)
+    msg = db.query(MensagemLog).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.whatsapp_number == number,
+        MensagemLog.direcao == 'recebida'
+    ).order_by(MensagemLog.timestamp.desc()).first()
+
+    if msg and msg.dados_extras:
+        profile_name = None
+        extras = msg.dados_extras if isinstance(msg.dados_extras, dict) else {}
+        profile_name = extras.get("profile", {}).get("name") if isinstance(extras.get("profile"), dict) else extras.get("profile_name")
+        if profile_name:
+            return ContactNameResponse(nome=profile_name.split()[0])
+
+    # Nível 3: Não encontrado
+    return ContactNameResponse(nome=None)
+
+
+# ========== UPLOAD MEDIA ==========
+
+@router.post("/templates/upload-media", response_model=MediaUploadResponse)
+async def upload_template_media(
+    file: UploadFile = File(...),
+    empresa_id: CurrentEmpresa = None,
+    db: Session = Depends(get_db),
+):
+    """Upload de mídia para header de template (preview e envio)."""
+    allowed_types = [
+        "image/jpeg", "image/jpg", "image/png", "image/webp",
+        "video/mp4", "video/3gpp",
+        "application/pdf",
+    ]
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de arquivo não suportado: {file.content_type}. Tipos aceitos: {', '.join(allowed_types)}"
+        )
+
+    # Max 16MB
+    contents = await file.read()
+    if len(contents) > 16 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Arquivo muito grande (máximo 16MB)")
+
+    # Criar diretório
+    upload_dir = Path("uploads/templates")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Gerar nome único
+    ext = Path(file.filename or "file").suffix
+    filename = f"template_{empresa_id}_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = upload_dir / filename
+
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    return MediaUploadResponse(
+        url=f"/uploads/templates/{filename}",
+        filename=filename
     )

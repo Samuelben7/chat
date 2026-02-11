@@ -1,3 +1,4 @@
+import re
 import httpx
 from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -200,6 +201,95 @@ class TemplateService:
 
         db.commit()
         return criados, atualizados, removidos
+
+    async def check_template_status(self, meta_template_id: str) -> Dict:
+        """Busca status atualizado de um template individual na Meta API."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/{meta_template_id}",
+                headers=self.headers,
+                params={"fields": "status,quality_score,rejected_reason"},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @staticmethod
+    def build_send_components(
+        template_components: List[Dict],
+        parameter_values: Optional[Dict[str, str]] = None,
+        media_url: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        Monta os components para envio baseado nos parâmetros do template.
+        Converte parameter_values (dict de posição→valor) em formato Meta API.
+        """
+        send_components = []
+
+        for comp in template_components:
+            comp_type = comp.get("type", "")
+
+            # Header com mídia
+            if comp_type == "HEADER":
+                fmt = comp.get("format", "TEXT")
+                if fmt in ("IMAGE", "VIDEO", "DOCUMENT") and media_url:
+                    media_type = fmt.lower()
+                    if media_type == "document":
+                        send_components.append({
+                            "type": "header",
+                            "parameters": [{"type": media_type, media_type: {"link": media_url}}]
+                        })
+                    else:
+                        send_components.append({
+                            "type": "header",
+                            "parameters": [{"type": media_type, media_type: {"link": media_url}}]
+                        })
+                elif fmt == "TEXT" and parameter_values:
+                    # Check for header params like {{1}}
+                    text = comp.get("text", "")
+                    params_in_header = re.findall(r'\{\{(\d+)\}\}', text)
+                    if params_in_header:
+                        header_params = []
+                        for p in params_in_header:
+                            val = parameter_values.get(f"header_{p}", parameter_values.get(p, ""))
+                            header_params.append({"type": "text", "text": val})
+                        send_components.append({"type": "header", "parameters": header_params})
+
+            # Body com parâmetros
+            elif comp_type == "BODY" and parameter_values:
+                text = comp.get("text", "")
+                params_in_body = re.findall(r'\{\{(\d+)\}\}', text)
+                if params_in_body:
+                    body_params = []
+                    for p in params_in_body:
+                        val = parameter_values.get(p, parameter_values.get(f"body_{p}", ""))
+                        body_params.append({"type": "text", "text": val})
+                    send_components.append({"type": "body", "parameters": body_params})
+
+            # Buttons - COPY_CODE precisa de parâmetro coupon_code
+            elif comp_type == "BUTTONS":
+                buttons = comp.get("buttons", [])
+                for idx, btn in enumerate(buttons):
+                    if btn.get("type") == "COPY_CODE" and parameter_values:
+                        code = parameter_values.get("coupon_code", parameter_values.get("copy_code", ""))
+                        if code:
+                            send_components.append({
+                                "type": "button",
+                                "sub_type": "copy_code",
+                                "index": str(idx),
+                                "parameters": [{"type": "coupon_code", "coupon_code": code}]
+                            })
+                    elif btn.get("type") == "URL" and parameter_values:
+                        url_suffix = parameter_values.get(f"url_{idx}", "")
+                        if url_suffix:
+                            send_components.append({
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": str(idx),
+                                "parameters": [{"type": "text", "text": url_suffix}]
+                            })
+
+        return send_components
 
     def log_template_send(self, db: Session, to: str, template_name: str,
                           message_id: str, error: Optional[str] = None):
