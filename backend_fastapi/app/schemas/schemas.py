@@ -184,6 +184,7 @@ class EmpresaCreate(EmpresaBase):
     whatsapp_token: str
     phone_number_id: str
     verify_token: str
+    waba_id: Optional[str] = None
     mercadopago_access_token: Optional[str] = None
     mercadopago_public_key: Optional[str] = None
 
@@ -196,6 +197,7 @@ class EmpresaUpdate(BaseModel):
     whatsapp_token: Optional[str] = None
     phone_number_id: Optional[str] = None
     verify_token: Optional[str] = None
+    waba_id: Optional[str] = None
     mercadopago_access_token: Optional[str] = None
     mercadopago_public_key: Optional[str] = None
     ativa: Optional[bool] = None
@@ -216,6 +218,7 @@ class EmpresaComCredenciais(EmpresaResponse):
     """Schema com credenciais completas (apenas para admin)."""
     whatsapp_token: str
     verify_token: str
+    waba_id: Optional[str] = None
     mercadopago_access_token: Optional[str] = None
     mercadopago_public_key: Optional[str] = None
 

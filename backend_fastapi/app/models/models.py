@@ -20,6 +20,7 @@ class Empresa(Base):
     whatsapp_token = Column(Text, nullable=False)
     phone_number_id = Column(String(50), unique=True, nullable=False, index=True)
     verify_token = Column(String(255), nullable=False)
+    waba_id = Column(String(50), index=True)  # WhatsApp Business Account ID
 
     # Credenciais Mercado Pago (opcional)
     mercadopago_access_token = Column(Text)
@@ -41,6 +42,8 @@ class Empresa(Base):
     atendentes = relationship("Atendente", back_populates="empresa")
     vagas_agenda = relationship("VagaAgenda", back_populates="empresa")
     auth = relationship("EmpresaAuth", back_populates="empresa", uselist=False)
+    templates = relationship("MessageTemplate", back_populates="empresa", cascade="all, delete-orphan")
+    listas_contatos = relationship("ListaContatos", back_populates="empresa", cascade="all, delete-orphan")
 
 
 class ConfiguracaoBot(Base):
@@ -379,3 +382,78 @@ class TokenConfirmacaoEmail(Base):
     usado = Column(Boolean, default=False)
     expira_em = Column(DateTime(timezone=True), nullable=False)
     criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ==================== TEMPLATES ====================
+
+class MessageTemplate(Base):
+    """
+    Templates de mensagem do WhatsApp Business API
+    """
+    __tablename__ = "message_template"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    meta_template_id = Column(String(100))  # ID retornado pela Meta API
+    waba_id = Column(String(50))
+    name = Column(String(512), nullable=False)
+    category = Column(String(50), nullable=False)  # MARKETING, UTILITY, AUTHENTICATION
+    language = Column(String(10), nullable=False, default='pt_BR')
+    status = Column(String(20), nullable=False, default='PENDING')  # PENDING, APPROVED, REJECTED, PAUSED, DISABLED, DELETED
+    components = Column(JSON, default=list)
+    parameter_format = Column(String(20))
+    quality_score = Column(String(20))
+    rejected_reason = Column(Text)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    empresa = relationship("Empresa", back_populates="templates")
+
+    __table_args__ = (
+        Index('idx_template_empresa_name_lang', 'empresa_id', 'name', 'language', unique=True),
+        Index('idx_template_empresa_status', 'empresa_id', 'status'),
+    )
+
+
+# ==================== LISTAS DE CONTATOS ====================
+
+class ListaContatos(Base):
+    """
+    Listas de contatos para envio em massa
+    """
+    __tablename__ = "lista_contatos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(255), nullable=False)
+    descricao = Column(Text)
+    cor = Column(String(7), default='#3B82F6')  # Hex color for UI badge
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    empresa = relationship("Empresa", back_populates="listas_contatos")
+    membros = relationship("ListaContatosMembro", back_populates="lista", cascade="all, delete-orphan")
+
+
+class ListaContatosMembro(Base):
+    """
+    Membros de uma lista de contatos
+    """
+    __tablename__ = "lista_contatos_membro"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lista_id = Column(Integer, ForeignKey("lista_contatos.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("whatsapp_bot_cliente.id", ondelete="SET NULL"))
+    whatsapp_number = Column(String(20), nullable=False)
+    nome = Column(String(255))
+    adicionado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    lista = relationship("ListaContatos", back_populates="membros")
+    cliente = relationship("Cliente")
+
+    __table_args__ = (
+        Index('idx_lista_membro_unico', 'lista_id', 'whatsapp_number', unique=True),
+    )

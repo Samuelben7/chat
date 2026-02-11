@@ -209,11 +209,14 @@ async def obter_conversa_detalhes(
                 detail="Esta conversa está sendo atendida por outro atendente"
             )
 
+    # Buscar mensagens (últimas 100, filtradas por empresa)
+    # Ordena DESC para pegar as mais recentes, depois inverte para ASC
     mensagens = db.query(MensagemLog).filter(
         MensagemLog.whatsapp_number == whatsapp_number,
         MensagemLog.empresa_id == empresa_id
     ).order_by(MensagemLog.timestamp.desc()).limit(100).all()
 
+    # Inverter para ordem cronológica (mais antigas primeiro)
     mensagens = list(reversed(mensagens))
 
     return ConversaDetalhes(
@@ -267,7 +270,7 @@ async def assumir_atendimento(
     Atendente ou Empresa assume um atendimento.
     Envia mensagem automática ao cliente informando quem está atendendo.
     """
-    # Buscar atendimento
+    # Buscar atendimento (inclui finalizado para re-assumir e em_atendimento para verificação)
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
         Atendimento.status.in_(["aguardando", "bot", "em_atendimento", "finalizado"])

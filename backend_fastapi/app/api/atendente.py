@@ -336,7 +336,7 @@ async def assumir_conversa(
                 "atendente": db.query(Atendente).filter(Atendente.id == atendente_id).first().nome_exibicao
             }
 
-    # Verificar se está disponível para assumir
+    # Verificar se está disponível para assumir (inclui finalizado para re-assumir)
     if atendimento.status not in ['bot', 'aguardando', 'finalizado']:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

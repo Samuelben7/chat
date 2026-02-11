@@ -9,7 +9,7 @@ from pathlib import Path
 import asyncio
 
 # Import routers
-from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder
+from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos
 
 # Import Redis Pub/Sub e WebSocket Manager
 from app.core.redis_pubsub import pubsub_manager
@@ -139,3 +139,5 @@ app.include_router(atendentes.router, prefix=settings.API_V1_STR, tags=["atenden
 app.include_router(websocket.router, prefix=settings.API_V1_STR, tags=["websocket"])
 app.include_router(empresas.router, prefix=f"{settings.API_V1_STR}/empresas", tags=["empresas"])
 app.include_router(bot_builder.router, prefix=settings.API_V1_STR, tags=["bot-builder"])
+app.include_router(templates.router, prefix=settings.API_V1_STR, tags=["templates"])
+app.include_router(contatos.router, prefix=settings.API_V1_STR, tags=["contatos"])
