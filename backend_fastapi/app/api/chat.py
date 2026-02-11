@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from typing import List, Optional
 from datetime import datetime
 
@@ -17,6 +17,35 @@ from app.core.redis_client import redis_cache
 router = APIRouter()
 
 
+def enviar_mensagem_sistema(db: Session, whatsapp_number: str, empresa_id: int, mensagem: str):
+    """
+    Envia uma mensagem do sistema para o cliente via WhatsApp.
+    Registra no banco e dispara via Celery.
+    """
+    from app.tasks.tasks import enviar_mensagem_whatsapp
+    
+    # Salvar mensagem no banco
+    msg_log = MensagemLog(
+        empresa_id=empresa_id,
+        whatsapp_number=whatsapp_number,
+        direcao="enviada",
+        tipo_mensagem="text",
+        conteudo=mensagem,
+        estado_sessao="sistema"
+    )
+    db.add(msg_log)
+    db.commit()
+    
+    # Enviar via Celery
+    enviar_mensagem_whatsapp.delay(
+        to=whatsapp_number,
+        message=mensagem,
+        message_type="text"
+    )
+    
+    print(f"📤 Mensagem sistema enviada para {whatsapp_number}: {mensagem}")
+
+
 @router.get("/chat/conversas", response_model=List[ConversaPreview])
 async def listar_conversas(
     user: CurrentUser,
@@ -28,67 +57,62 @@ async def listar_conversas(
 ):
     """
     Lista todas as conversas ativas com preview.
-    Retorna lista lateral do painel de chat.
-
+    
     PERMISSÕES:
-    - Empresa: Vê todas as conversas da empresa
-    - Atendente: Vê apenas suas conversas (atribuídas a ele)
-
-    OTIMIZAÇÕES:
-    - Cache Redis (30 segundos)
-    - Subquery para contagem de não lidas (sem N+1)
+    - Empresa: Vê TODAS as conversas da empresa
+    - Atendente: Vê apenas:
+      * Suas próprias conversas (atribuídas a ele)
+      * Conversas na fila SEM atendente (aguardando/bot com atendente_id = NULL)
+      * NÃO vê conversas de outros atendentes
     """
-    # Gerar chave de cache baseada nos filtros
+    # Cache key
     cache_key_parts = [f"conversas:emp:{empresa_id}"]
     if user.role == "atendente":
         cache_key_parts.append(f"atd:{user.atendente_id}")
     if status:
         cache_key_parts.append(f"st:{status}")
-    if atendente_id:
-        cache_key_parts.append(f"aid:{atendente_id}")
-
     cache_key = ":".join(cache_key_parts)
 
-    # Tentar buscar do cache
+    # Tentar cache
     cached = redis_cache.get_json(cache_key)
     if cached:
         return [ConversaPreview(**item) for item in cached]
 
-    # Subquery para contar mensagens não lidas (FIX N+1)
+    # Subquery para não lidas
     nao_lidas_subq = db.query(
         MensagemLog.whatsapp_number,
-        func.count(MensagemLog.id).label('nao_lidas')
+        func.count(MensagemLog.id).label("nao_lidas")
     ).filter(
         MensagemLog.empresa_id == empresa_id,
         MensagemLog.direcao == "recebida",
         MensagemLog.lida == False
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
-    # Subquery para última mensagem (filtrada por empresa)
+    # Subquery para última mensagem
     ultima_msg_subq = db.query(
         MensagemLog.whatsapp_number,
-        func.max(MensagemLog.timestamp).label('max_timestamp')
+        func.max(MensagemLog.timestamp).label("max_timestamp")
     ).filter(
         MensagemLog.empresa_id == empresa_id
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
-    # Subquery para última mensagem RECEBIDA (para calcular presença online)
+    # Subquery para última recebida (presença)
     ultima_recebida_subq = db.query(
         MensagemLog.whatsapp_number,
-        func.max(MensagemLog.timestamp).label('ultima_recebida_em')
+        func.max(MensagemLog.timestamp).label("ultima_recebida_em")
     ).filter(
         MensagemLog.empresa_id == empresa_id,
-        MensagemLog.direcao == 'recebida'
+        MensagemLog.direcao == "recebida"
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
-    # Query principal com JOIN nas subqueries
+    # Query principal
     query = db.query(
         Atendimento.whatsapp_number,
-        MensagemLog.conteudo.label('ultima_mensagem'),
+        MensagemLog.conteudo.label("ultima_mensagem"),
         MensagemLog.timestamp,
         Atendimento.status,
-        Atendente.nome_exibicao.label('atendente_nome'),
-        func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label('nao_lidas'),
+        Atendente.nome_exibicao.label("atendente_nome"),
+        func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label("nao_lidas"),
         ultima_recebida_subq.c.ultima_recebida_em
     ).outerjoin(
         Atendente, Atendimento.atendente_id == Atendente.id
@@ -107,40 +131,36 @@ async def listar_conversas(
         Atendimento.whatsapp_number == ultima_recebida_subq.c.whatsapp_number
     )
 
-    # FILTRO POR EMPRESA: Filtrar conversas via MensagemLog (tem empresa_id)
-    # Atendimento não tem empresa_id, então precisamos filtrar via mensagens
+    # Filtrar por empresa
     query = query.filter(MensagemLog.empresa_id == empresa_id)
 
-    # PERMISSÃO: Atendente vê apenas suas conversas
+    # PERMISSÃO: Atendente vê apenas SUAS conversas OU conversas SEM atendente
     if user.role == "atendente":
-        query = query.filter(Atendimento.atendente_id == user.atendente_id)
+        query = query.filter(
+            or_(
+                Atendimento.atendente_id == user.atendente_id,  # Suas conversas
+                Atendimento.atendente_id == None  # Conversas na fila (sem atendente)
+            )
+        )
 
-    # Filtros adicionais
+    # Filtros opcionais
     if status:
         query = query.filter(Atendimento.status == status)
-    if atendente_id:
-        # Empresa pode filtrar por qualquer atendente, atendente ignora este filtro
-        if user.role == "empresa":
-            query = query.filter(Atendimento.atendente_id == atendente_id)
 
     query = query.order_by(desc(Atendimento.ultima_mensagem_em)).limit(limit)
-
     resultados = query.all()
 
     # Montar resposta
     conversas = []
     for r in resultados:
-        # Calcular status de presença baseado em última mensagem RECEBIDA (otimizado com subquery)
         online_status = None
         if r.ultima_recebida_em:
-            from datetime import datetime, timezone
-            tempo_inativo = (datetime.now(timezone.utc) - r.ultima_recebida_em).total_seconds() / 60  # minutos
-
+            from datetime import timezone
+            tempo_inativo = (datetime.now(timezone.utc) - r.ultima_recebida_em).total_seconds() / 60
             if tempo_inativo < 5:
-                online_status = 'online'  # Ativo há menos de 5 min
+                online_status = "online"
             elif tempo_inativo < 30:
-                online_status = 'ausente'  # Ativo há 5-30 min
-            # else: offline ou None (sem indicador)
+                online_status = "ausente"
 
         conversas.append(ConversaPreview(
             whatsapp_number=r.whatsapp_number,
@@ -148,17 +168,12 @@ async def listar_conversas(
             timestamp=r.timestamp,
             nao_lidas=r.nao_lidas,
             atendente_nome=r.atendente_nome,
-            status=r.status or 'bot',
+            status=r.status or "bot",
             online_status=online_status
         ))
 
-    # Salvar no cache (30 segundos)
-    redis_cache.set_json(
-        cache_key,
-        [c.model_dump() for c in conversas],
-        ttl=30
-    )
-
+    # Cache 30s
+    redis_cache.set_json(cache_key, [c.model_dump() for c in conversas], ttl=30)
     return conversas
 
 
@@ -170,45 +185,36 @@ async def obter_conversa_detalhes(
     db: Session = Depends(get_db)
 ):
     """
-    Obtém detalhes completos de uma conversa específica.
-    Inclui dados do cliente, atendimento e todas as mensagens.
-
+    Obtém detalhes de uma conversa.
+    
     PERMISSÕES:
     - Empresa: Pode ver qualquer conversa
-    - Atendente: Pode ver apenas conversas atribuídas a ele
+    - Atendente: Pode ver apenas suas conversas OU conversas na fila
     """
-    # Buscar cliente (filtrado por empresa)
     cliente = db.query(Cliente).filter(
         Cliente.whatsapp_number == whatsapp_number,
         Cliente.empresa_id == empresa_id
     ).first()
 
-    # Buscar atendimento ativo
-    atendimento_query = db.query(Atendimento).filter(
+    atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
-        Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])
-    )
+        Atendimento.status.in_(["bot", "aguardando", "em_atendimento"])
+    ).order_by(Atendimento.iniciado_em.desc()).first()
 
-    # PERMISSÃO: Atendente vê apenas suas conversas
+    # PERMISSÃO: Atendente só vê suas conversas ou conversas na fila
     if user.role == "atendente":
-        atendimento_query = atendimento_query.filter(
-            Atendimento.atendente_id == user.atendente_id
-        )
+        if atendimento and atendimento.atendente_id and atendimento.atendente_id != user.atendente_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Esta conversa está sendo atendida por outro atendente"
+            )
 
-    atendimento = atendimento_query.order_by(Atendimento.iniciado_em.desc()).first()
-
-    # Verificar se atendente tem permissão
-    if user.role == "atendente" and not atendimento:
-        raise HTTPException(
-            status_code=403,
-            detail="Você não tem permissão para ver esta conversa"
-        )
-
-    # Buscar mensagens (últimas 100, filtradas por empresa)
     mensagens = db.query(MensagemLog).filter(
         MensagemLog.whatsapp_number == whatsapp_number,
         MensagemLog.empresa_id == empresa_id
-    ).order_by(MensagemLog.timestamp.asc()).limit(100).all()
+    ).order_by(MensagemLog.timestamp.desc()).limit(100).all()
+
+    mensagens = list(reversed(mensagens))
 
     return ConversaDetalhes(
         whatsapp_number=whatsapp_number,
@@ -224,10 +230,7 @@ async def atualizar_atendimento(
     update_data: AtendimentoUpdate,
     db: Session = Depends(get_db)
 ):
-    """
-    Atualiza dados de um atendimento.
-    Usado para atribuir atendente, mudar status, adicionar notas, etc.
-    """
+    """Atualiza dados de um atendimento."""
     atendimento = db.query(Atendimento).filter(
         Atendimento.id == atendimento_id
     ).first()
@@ -235,7 +238,6 @@ async def atualizar_atendimento(
     if not atendimento:
         raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
-    # Atualizar campos
     if update_data.atendente_id is not None:
         atendimento.atendente_id = update_data.atendente_id
         if not atendimento.atribuido_em:
@@ -243,7 +245,7 @@ async def atualizar_atendimento(
 
     if update_data.status:
         atendimento.status = update_data.status
-        if update_data.status == 'finalizado' and not atendimento.finalizado_em:
+        if update_data.status == "finalizado" and not atendimento.finalizado_em:
             atendimento.finalizado_em = datetime.now()
 
     if update_data.notas_internas is not None:
@@ -251,7 +253,6 @@ async def atualizar_atendimento(
 
     db.commit()
     db.refresh(atendimento)
-
     return atendimento
 
 
@@ -263,90 +264,179 @@ async def assumir_atendimento(
     db: Session = Depends(get_db)
 ):
     """
-    Atendente assume um atendimento da fila.
-    Muda status de 'aguardando' ou 'bot' para 'em_atendimento'.
-
-    PERMISSÕES:
-    - Atendente: Pode assumir para si mesmo
-    - Empresa: Pode assumir e atribuir a qualquer atendente (atendente_id opcional no body)
+    Atendente ou Empresa assume um atendimento.
+    Envia mensagem automática ao cliente informando quem está atendendo.
     """
-    # Determinar qual atendente vai assumir
-    if user.role == "atendente":
-        atendente_id = user.atendente_id
-    else:
-        # Empresa precisa informar qual atendente (implementar body depois)
-        raise HTTPException(
-            status_code=400,
-            detail="Empresa deve usar endpoint específico para atribuir atendimento"
-        )
-
-    # Verificar se atendente existe e pertence à empresa
-    atendente = db.query(Atendente).filter(
-        Atendente.id == atendente_id,
-        Atendente.empresa_id == empresa_id
-    ).first()
-
-    if not atendente:
-        raise HTTPException(status_code=404, detail="Atendente não encontrado")
-
-    # Buscar atendimento disponível na fila
+    # Buscar atendimento
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
-        Atendimento.status.in_(['aguardando', 'bot'])
+        Atendimento.status.in_(["aguardando", "bot", "em_atendimento", "finalizado"])
     ).order_by(Atendimento.iniciado_em.desc()).first()
 
     if not atendimento:
-        raise HTTPException(
-            status_code=404,
-            detail="Atendimento não encontrado ou já está sendo atendido"
-        )
+        raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
-    # Atribuir atendente
+    # Verificar se já está sendo atendido por outro
+    if atendimento.atendente_id and atendimento.status == "em_atendimento":
+        atendente_atual = db.query(Atendente).filter(
+            Atendente.id == atendimento.atendente_id
+        ).first()
+        
+        if user.role == "atendente" and atendimento.atendente_id != user.atendente_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Esta conversa já está sendo atendida por {atendente_atual.nome_exibicao if atendente_atual else 'outro atendente'}"
+            )
+
+    # Determinar quem vai assumir e nome para mensagem
+    if user.role == "atendente":
+        atendente_id = user.atendente_id
+        atendente = db.query(Atendente).filter(Atendente.id == atendente_id).first()
+        nome_atendente = atendente.nome_exibicao if atendente else "Atendente"
+        tipo_assuncao = "atendente"
+    else:
+        # Empresa assumindo diretamente
+        atendente_id = None
+        nome_atendente = "Suporte"  # Nome genérico para empresa
+        tipo_assuncao = "empresa"
+
+    # Atualizar atendimento
     atendimento.atendente_id = atendente_id
-    atendimento.status = 'em_atendimento'
+    atendimento.status = "em_atendimento"
     atendimento.atribuido_em = datetime.now()
-
+    
     db.commit()
+
+    # Enviar mensagem ao cliente
+    mensagem = f"👋 Olá! {nome_atendente} está assumindo seu atendimento. Como posso ajudá-lo?"
+    enviar_mensagem_sistema(db, whatsapp_number, empresa_id, mensagem)
+
+    # Invalidar cache
+    redis_cache.invalidate_pattern(f"conversas:emp:{empresa_id}*")
 
     return {
         "status": "success",
         "message": "Atendimento assumido com sucesso",
-        "atendente_id": atendente_id
+        "atendente": nome_atendente
+    }
+
+
+@router.post("/chat/atendimento/{whatsapp_number}/transferir")
+async def transferir_atendimento(
+    whatsapp_number: str,
+    body: dict,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """
+    Transfere atendimento para outro atendente.
+    Apenas empresa ou o próprio atendente pode transferir.
+    Envia mensagem ao cliente informando a transferência.
+    """
+    novo_atendente_id = body.get("atendente_id")
+    observacao = body.get("observacao")
+
+    if not novo_atendente_id:
+        raise HTTPException(status_code=400, detail="atendente_id é obrigatório")
+
+    # Buscar atendimento
+    atendimento = db.query(Atendimento).filter(
+        Atendimento.whatsapp_number == whatsapp_number,
+        Atendimento.status.in_(["aguardando", "em_atendimento"])
+    ).order_by(Atendimento.iniciado_em.desc()).first()
+
+    if not atendimento:
+        raise HTTPException(status_code=404, detail="Atendimento não encontrado")
+
+    # Verificar permissão (empresa pode sempre, atendente só se for dele)
+    if user.role == "atendente" and atendimento.atendente_id != user.atendente_id:
+        raise HTTPException(status_code=403, detail="Você não pode transferir este atendimento")
+
+    # Buscar novo atendente
+    novo_atendente = db.query(Atendente).filter(
+        Atendente.id == novo_atendente_id,
+        Atendente.empresa_id == empresa_id
+    ).first()
+
+    if not novo_atendente:
+        raise HTTPException(status_code=404, detail="Atendente destino não encontrado")
+
+    # Guardar nome do atendente anterior
+    atendente_anterior = None
+    if atendimento.atendente_id:
+        atendente_anterior = db.query(Atendente).filter(
+            Atendente.id == atendimento.atendente_id
+        ).first()
+
+    # Transferir
+    atendimento.atendente_id = novo_atendente_id
+    atendimento.status = "em_atendimento"
+    atendimento.atribuido_em = datetime.now()
+    
+    if observacao:
+        notas = atendimento.notas_internas or ""
+        atendimento.notas_internas = notas + " [Transferido] " + str(observacao)
+
+    db.commit()
+
+    # Enviar mensagem ao cliente
+    mensagem = f"🔄 Seu atendimento foi transferido. {novo_atendente.nome_exibicao} está assumindo. Como posso ajudá-lo?"
+    enviar_mensagem_sistema(db, whatsapp_number, empresa_id, mensagem)
+
+    # Invalidar cache
+    redis_cache.invalidate_pattern(f"conversas:emp:{empresa_id}*")
+
+    return {
+        "status": "success",
+        "message": f"Atendimento transferido para {novo_atendente.nome_exibicao}",
+        "de": atendente_anterior.nome_exibicao if atendente_anterior else None,
+        "para": novo_atendente.nome_exibicao
     }
 
 
 @router.post("/chat/atendimento/{whatsapp_number}/finalizar")
 async def finalizar_atendimento(
     whatsapp_number: str,
+    body: dict = {},
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
     db: Session = Depends(get_db)
 ):
     """
     Finaliza um atendimento e reseta o estado do bot.
-    Quando cliente enviar próxima mensagem, bot começa do zero.
     """
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
-        Atendimento.status == 'em_atendimento'
+        Atendimento.status == "em_atendimento"
     ).order_by(Atendimento.iniciado_em.desc()).first()
 
     if not atendimento:
         raise HTTPException(status_code=404, detail="Atendimento ativo não encontrado")
 
-    atendimento.status = 'finalizado'
-    atendimento.finalizado_em = datetime.now()
+    # Verificar permissão
+    if user and user.role == "atendente" and atendimento.atendente_id != user.atendente_id:
+        raise HTTPException(status_code=403, detail="Você não pode finalizar este atendimento")
 
-    # RESETAR ESTADO DO BOT - Bot recomeça do zero quando cliente voltar
-    from app.models.models import ChatSessao
+    atendimento.status = "finalizado"
+    atendimento.finalizado_em = datetime.now()
+    atendimento.motivo_encerramento = body.get("motivo")
+    atendimento.observacao_encerramento = body.get("observacao")
+
+    # Resetar bot
     sessao = db.query(ChatSessao).filter(
-        ChatSessao.empresa_id == atendimento.empresa_id,
         ChatSessao.whatsapp_number == whatsapp_number
     ).first()
 
     if sessao:
-        sessao.estado_atual = 'inicio'  # Reset para início
+        sessao.estado_atual = "inicio"
         print(f"🔄 Bot resetado para 'inicio' - {whatsapp_number}")
 
     db.commit()
+
+    # Invalidar cache
+    if empresa_id:
+        redis_cache.invalidate_pattern(f"conversas:emp:{empresa_id}*")
 
     return {"status": "success", "message": "Atendimento finalizado e bot resetado"}
 
@@ -354,33 +444,43 @@ async def finalizar_atendimento(
 @router.post("/chat/atendimento/{whatsapp_number}/transferir-bot")
 async def transferir_para_bot(
     whatsapp_number: str,
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
     db: Session = Depends(get_db)
 ):
-    """
-    Transfere atendimento de volta para o bot.
-    """
+    """Transfere atendimento de volta para o bot."""
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
-        Atendimento.status.in_(['aguardando', 'em_atendimento'])
+        Atendimento.status.in_(["aguardando", "em_atendimento"])
     ).order_by(Atendimento.iniciado_em.desc()).first()
 
     if not atendimento:
         raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
-    atendimento.status = 'bot'
+    atendimento.status = "bot"
     atendimento.atendente_id = None
 
-    # RESETAR ESTADO DO BOT - Bot recomeça do zero
-    from app.models.models import ChatSessao
     sessao = db.query(ChatSessao).filter(
-        ChatSessao.empresa_id == atendimento.empresa_id,
         ChatSessao.whatsapp_number == whatsapp_number
     ).first()
 
     if sessao:
-        sessao.estado_atual = 'inicio'  # Reset para início
+        sessao.estado_atual = "inicio"
         print(f"🔄 Bot resetado para 'inicio' - {whatsapp_number}")
 
     db.commit()
 
-    return {"status": "success", "message": "Atendimento transferido para o bot (resetado)"}
+    # Invalidar cache
+    if empresa_id:
+        redis_cache.invalidate_pattern(f"conversas:emp:{empresa_id}*")
+
+    return {"status": "success", "message": "Atendimento transferido para o bot"}
+
+
+@router.get("/motivos-encerramento")
+async def listar_motivos_encerramento(db: Session = Depends(get_db)):
+    """Lista motivos de encerramento disponíveis"""
+    from sqlalchemy import text
+    result = db.execute(text("SELECT codigo, nome, emoji FROM motivos_encerramento WHERE ativo = true ORDER BY ordem"))
+    motivos = [{"codigo": row[0], "nome": row[1], "emoji": row[2]} for row in result]
+    return motivos

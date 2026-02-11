@@ -295,11 +295,12 @@ async def assumir_conversa(
 
     - Altera status da conversa de 'bot'/'aguardando' para 'em_atendimento'
     - Atribui atendente_id
+    - Envia mensagem automática ao cliente
+    - Verifica se já está sendo atendido por outro
     """
     atendente_id, empresa_id = atendente_info
 
     # Buscar conversa
-    # Precisamos validar que o cliente pertence à empresa
     atendimento = db.query(Atendimento).join(
         Cliente, Cliente.whatsapp_number == Atendimento.whatsapp_number
     ).filter(
@@ -315,8 +316,28 @@ async def assumir_conversa(
             detail="Conversa não encontrada"
         )
 
+    # Verificar se já está sendo atendido por OUTRO atendente
+    if atendimento.status == 'em_atendimento' and atendimento.atendente_id:
+        if atendimento.atendente_id != atendente_id:
+            outro_atendente = db.query(Atendente).filter(
+                Atendente.id == atendimento.atendente_id
+            ).first()
+            nome_outro = outro_atendente.nome_exibicao if outro_atendente else "outro atendente"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Esta conversa já está sendo atendida por {nome_outro}"
+            )
+        else:
+            # Já é o próprio atendente - retornar sucesso sem mudar nada
+            return {
+                "sucesso": True,
+                "mensagem": "Você já está atendendo esta conversa",
+                "whatsapp_number": whatsapp_number,
+                "atendente": db.query(Atendente).filter(Atendente.id == atendente_id).first().nome_exibicao
+            }
+
     # Verificar se está disponível para assumir
-    if atendimento.status not in ['bot', 'aguardando']:
+    if atendimento.status not in ['bot', 'aguardando', 'finalizado']:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Conversa não está disponível para assumir (status atual: {atendimento.status})"
@@ -336,6 +357,33 @@ async def assumir_conversa(
     atendimento.atribuido_em = datetime.now()
 
     db.commit()
+
+    # Enviar mensagem automática ao cliente via WhatsApp
+    try:
+        from app.tasks.tasks import enviar_mensagem_whatsapp
+        mensagem = f"👋 Olá! {atendente.nome_exibicao} está assumindo seu atendimento. Como posso ajudá-lo?"
+        
+        # Salvar mensagem no banco
+        msg_log = MensagemLog(
+            empresa_id=empresa_id,
+            whatsapp_number=whatsapp_number,
+            direcao="enviada",
+            tipo_mensagem="text",
+            conteudo=mensagem,
+            estado_sessao="sistema"
+        )
+        db.add(msg_log)
+        db.commit()
+        
+        # Enviar via Celery
+        enviar_mensagem_whatsapp.delay(
+            to=whatsapp_number,
+            message=mensagem,
+            message_type="text"
+        )
+        print(f"📤 Mensagem de boas-vindas enviada para {whatsapp_number}")
+    except Exception as e:
+        print(f"⚠️ Erro ao enviar mensagem de boas-vindas: {e}")
 
     # Notificar via WebSocket
     try:
@@ -432,6 +480,33 @@ async def transferir_conversa(
         atendimento.notas_internas = f'[{datetime.now().strftime("%Y-%m-%d %H:%M")}] {nota_transferencia}'
 
     db.commit()
+
+    # Enviar mensagem automática ao cliente via WhatsApp
+    try:
+        from app.tasks.tasks import enviar_mensagem_whatsapp
+        mensagem = f"🔄 Seu atendimento foi transferido. {atendente_destino.nome_exibicao} está assumindo. Como posso ajudá-lo?"
+        
+        # Salvar mensagem no banco
+        msg_log = MensagemLog(
+            empresa_id=empresa_id,
+            whatsapp_number=dados.whatsapp_number,
+            direcao="enviada",
+            tipo_mensagem="text",
+            conteudo=mensagem,
+            estado_sessao="sistema"
+        )
+        db.add(msg_log)
+        db.commit()
+        
+        # Enviar via Celery
+        enviar_mensagem_whatsapp.delay(
+            to=dados.whatsapp_number,
+            message=mensagem,
+            message_type="text"
+        )
+        print(f"📤 Mensagem de transferência enviada para {dados.whatsapp_number}")
+    except Exception as e:
+        print(f"⚠️ Erro ao enviar mensagem de transferência: {e}")
 
     # Notificar via WebSocket
     try:

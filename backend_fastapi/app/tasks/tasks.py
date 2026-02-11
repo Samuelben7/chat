@@ -292,6 +292,23 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
         db.commit()
 
+        # SEMPRE salvar a mensagem recebida no log (mesmo se em atendimento humano)
+        if not processar_bot:
+            # Mensagem recebida durante atendimento humano - salvar manualmente
+            mensagem_recebida = MensagemLog(
+                empresa_id=empresa.id,
+                whatsapp_number=from_number,
+                message_id=message_id,
+                direcao="recebida",
+                tipo_mensagem=message_type,
+                conteudo=content,
+                dados_extras={},
+                estado_sessao="em_atendimento"
+            )
+            db.add(mensagem_recebida)
+            db.commit()
+            print(f"💾 Mensagem recebida salva (em atendimento humano)")
+
         # Processar com bot
         if processar_bot:
             try:
