@@ -462,7 +462,10 @@ async def upload_template_media(
     empresa_id: CurrentEmpresa = None,
     db: Session = Depends(get_db),
 ):
-    """Upload de mídia para header de template (preview e envio)."""
+    """Upload de mídia para header de template.
+    Salva localmente para preview E faz upload via Meta Resumable Upload API
+    para obter o header_handle necessário na criação de templates.
+    """
     allowed_types = [
         "image/jpeg", "image/jpg", "image/png", "image/webp",
         "video/mp4", "video/3gpp",
@@ -480,11 +483,10 @@ async def upload_template_media(
     if len(contents) > 16 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Arquivo muito grande (máximo 16MB)")
 
-    # Criar diretório
+    # Criar diretório e salvar localmente (para preview)
     upload_dir = Path("uploads/templates")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Gerar nome único
     ext = Path(file.filename or "file").suffix
     filename = f"template_{empresa_id}_{uuid.uuid4().hex[:8]}{ext}"
     file_path = upload_dir / filename
@@ -492,7 +494,28 @@ async def upload_template_media(
     with open(file_path, "wb") as f:
         f.write(contents)
 
+    local_url = f"/uploads/templates/{filename}"
+
+    # Upload para Meta Resumable Upload API → header_handle
+    header_handle = None
+    try:
+        empresa = _get_empresa(empresa_id, db)
+        service = _get_template_service(empresa)
+        header_handle = await service.upload_media_to_meta(
+            file_data=contents,
+            file_name=file.filename or filename,
+            file_type=file.content_type or "application/octet-stream",
+        )
+    except Exception as e:
+        # Se falhar o upload na Meta, retorna URL local sem handle
+        # O frontend mostrará aviso
+        import logging
+        logging.getLogger("template_upload").warning(
+            f"Meta upload failed (local file saved): {e}"
+        )
+
     return MediaUploadResponse(
-        url=f"/uploads/templates/{filename}",
-        filename=filename
+        url=local_url,
+        filename=filename,
+        header_handle=header_handle,
     )

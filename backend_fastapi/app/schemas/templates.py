@@ -134,3 +134,4 @@ class ContactNameResponse(BaseModel):
 class MediaUploadResponse(BaseModel):
     url: str
     filename: str
+    header_handle: Optional[str] = None

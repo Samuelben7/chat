@@ -1,9 +1,13 @@
+import os
 import re
 import httpx
+import logging
 from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.models import Empresa, MessageTemplate, MensagemLog
 from datetime import datetime
+
+logger = logging.getLogger("template_service")
 
 
 class TemplateService:
@@ -16,10 +20,90 @@ class TemplateService:
         self.empresa = empresa
         self.waba_id = empresa.waba_id
         self.phone_number_id = empresa.phone_number_id
+        self.token = empresa.whatsapp_token
         self.headers = {
             "Authorization": f"Bearer {empresa.whatsapp_token}",
             "Content-Type": "application/json"
         }
+
+    async def upload_media_to_meta(self, file_data: bytes, file_name: str,
+                                    file_type: str) -> str:
+        """
+        Upload media via Meta Resumable Upload API.
+        Returns the header_handle string for use in template creation.
+
+        Steps:
+        1. POST /{APP_ID}/uploads → creates upload session → returns session id
+        2. POST /{session_id} → uploads file bytes → returns handle (h)
+        """
+        app_id = os.getenv("META_APP_ID")
+        if not app_id:
+            raise ValueError(
+                "META_APP_ID não configurado. Adicione META_APP_ID no .env "
+                "(encontre em Meta Developer Dashboard > App Settings > Basic)"
+            )
+
+        # Step 1: Create upload session
+        async with httpx.AsyncClient() as client:
+            session_resp = await client.post(
+                f"{self.BASE_URL}/{app_id}/uploads",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                },
+                json={
+                    "file_length": len(file_data),
+                    "file_name": file_name,
+                    "file_type": file_type,
+                },
+                timeout=30.0
+            )
+            if session_resp.status_code >= 400:
+                try:
+                    err = session_resp.json().get("error", {})
+                    raise ValueError(
+                        f"Upload session error [{err.get('code')}]: {err.get('message')}"
+                    )
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"Upload session failed: {session_resp.text}")
+
+            session_data = session_resp.json()
+            upload_session_id = session_data.get("id")
+            if not upload_session_id:
+                raise ValueError(f"Upload session sem ID: {session_data}")
+
+            logger.info(f"Upload session created: {upload_session_id}")
+
+            # Step 2: Upload file bytes
+            upload_resp = await client.post(
+                f"{self.BASE_URL}/{upload_session_id}",
+                headers={
+                    "Authorization": f"OAuth {self.token}",
+                    "file_offset": "0",
+                    "Content-Type": file_type,
+                },
+                content=file_data,
+                timeout=60.0
+            )
+            if upload_resp.status_code >= 400:
+                try:
+                    err = upload_resp.json().get("error", {})
+                    raise ValueError(
+                        f"File upload error [{err.get('code')}]: {err.get('message')}"
+                    )
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"File upload failed: {upload_resp.text}")
+
+            upload_data = upload_resp.json()
+            handle = upload_data.get("h")
+            if not handle:
+                raise ValueError(f"Upload sem handle: {upload_data}")
+
+            logger.info(f"Media uploaded, handle: {handle[:30]}...")
+            return handle
 
     async def create_template(self, name: str, category: str, language: str,
                               components: List[Dict],
