@@ -134,6 +134,11 @@ class TemplateService:
         if parameter_format:
             payload["parameter_format"] = parameter_format
 
+        import json as _json
+        import logging
+        logger = logging.getLogger("template_service")
+        logger.warning(f"[META API] Sending payload: {_json.dumps(payload, ensure_ascii=False, indent=2)}")
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.BASE_URL}/{self.waba_id}/message_templates",
@@ -142,12 +147,26 @@ class TemplateService:
                 timeout=30.0
             )
             if response.status_code >= 400:
-                # Return the actual Meta API error message
+                # Return the actual Meta API error message with full details
                 try:
                     error_data = response.json()
-                    error_msg = error_data.get("error", {}).get("message", response.text)
-                    error_code = error_data.get("error", {}).get("code", "")
-                    raise ValueError(f"[{error_code}] {error_msg}")
+                    logger.warning(f"[META API] Error response: {_json.dumps(error_data, ensure_ascii=False, indent=2)}")
+                    err = error_data.get("error", {})
+                    error_code = err.get("code", "")
+                    error_subcode = err.get("error_subcode", "")
+                    error_msg = err.get("message", response.text)
+                    error_user_title = err.get("error_user_title", "")
+                    error_user_msg = err.get("error_user_msg", "")
+                    # Build detailed message
+                    detail = f"[{error_code}"
+                    if error_subcode:
+                        detail += f"/{error_subcode}"
+                    detail += f"] {error_msg}"
+                    if error_user_title:
+                        detail += f" | {error_user_title}"
+                    if error_user_msg:
+                        detail += f": {error_user_msg}"
+                    raise ValueError(detail)
                 except ValueError:
                     raise
                 except Exception:
