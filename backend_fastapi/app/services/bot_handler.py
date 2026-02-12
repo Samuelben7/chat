@@ -161,7 +161,35 @@ class BotMessageHandler:
     async def process_message(self):
         """
         Processa a mensagem recebida baseado no estado atual da sessão.
+        Verifica primeiro se há um fluxo dinâmico ativo (BotBuilder).
+        Se sim, delega para o DynamicFlowHandler.
+        Se não, usa o handler hardcoded padrão.
         """
+        # Verificar se empresa tem fluxo dinâmico ativo
+        from app.services.dynamic_flow_handler import get_active_flow, DynamicFlowHandler
+
+        fluxo_ativo = get_active_flow(self.db, self.empresa.id)
+
+        if fluxo_ativo:
+            # Verificar se o estado atual é do fluxo dinâmico ou inicio
+            estado = self.session.estado_atual or ""
+            is_dynamic = estado.startswith("fluxo:") or estado == "inicio"
+
+            if is_dynamic:
+                logger.info(f"Usando fluxo dinâmico: {fluxo_ativo.nome} (empresa {self.empresa.id})")
+                dynamic_handler = DynamicFlowHandler(
+                    empresa=self.empresa,
+                    fluxo=fluxo_ativo,
+                    from_number=self.from_number,
+                    message_content=self.message_content,
+                    message_id=self.message_id,
+                    session=self.session,
+                    db=self.db,
+                )
+                await dynamic_handler.process_message()
+                return
+
+        # Fallback: handler hardcoded padrão
         # Log da mensagem recebida
         self.log_message_received()
 
