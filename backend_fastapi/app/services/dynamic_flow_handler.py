@@ -619,7 +619,7 @@ class DynamicFlowHandler:
         await self._execute_lista(node)
 
     async def _handle_collect_response(self, node: BotFluxoNo):
-        """Processa dado coletado do usuario."""
+        """Processa dado coletado do usuario e salva no Cliente (banco de dados)."""
         dados_extras = node.dados_extras or {}
         variavel = dados_extras.get("variavel", f"dado_{node.identificador}")
         validacao = dados_extras.get("validacao", "")
@@ -633,11 +633,76 @@ class DynamicFlowHandler:
                 await self._send_text(error_msg)
                 return
 
-        # Salvar dado
+        # Salvar dado na sessao
         self._update_state(node.identificador, {variavel: valor})
+
+        # ========== SALVAR NO CLIENTE (BANCO DE DADOS) ==========
+        # Mapeia nome da variavel para campo do Cliente
+        self._persist_to_cliente(variavel, valor)
 
         # Avancar
         await self._advance_to_next(node)
+
+    def _persist_to_cliente(self, variavel: str, valor: str):
+        """Salva dado coletado diretamente no registro do Cliente no banco."""
+        # Mapeamento: nome da variavel -> campo do modelo Cliente
+        FIELD_MAP = {
+            "nome": "nome_completo",
+            "nome_completo": "nome_completo",
+            "name": "nome_completo",
+            "cpf": "cpf",
+            "documento": "cpf",
+            "email": "email",
+            "e-mail": "email",
+            "cidade": "cidade",
+            "city": "cidade",
+            "endereco": "endereco_residencial",
+            "endereço": "endereco_residencial",
+            "endereco_residencial": "endereco_residencial",
+            "cep": "cep",
+            "complemento": "complemento",
+        }
+
+        campo_db = FIELD_MAP.get(variavel.lower())
+        if not campo_db:
+            return  # Variavel nao mapeada, so fica na sessao
+
+        try:
+            cliente = self.db.query(Cliente).filter(
+                Cliente.empresa_id == self.empresa.id,
+                Cliente.whatsapp_number == self.from_number,
+            ).first()
+
+            if cliente:
+                # Formatar CPF se necessario
+                if campo_db == "cpf" and valor:
+                    from app.services.validators import formatar_cpf
+                    try:
+                        valor = formatar_cpf(valor)
+                    except:
+                        pass
+
+                setattr(cliente, campo_db, valor)
+                self.db.commit()
+                logger.info(f"Cliente {self.from_number} atualizado: {campo_db} = {valor[:20]}...")
+            else:
+                # Criar cliente se nao existe (raro, pois o webhook ja cria)
+                new_data = {
+                    "empresa_id": self.empresa.id,
+                    "whatsapp_number": self.from_number,
+                    "nome_completo": valor if campo_db == "nome_completo" else f"Contato {self.from_number[-4:]}",
+                }
+                if campo_db != "nome_completo":
+                    new_data[campo_db] = valor
+
+                cliente = Cliente(**new_data)
+                self.db.add(cliente)
+                self.db.commit()
+                logger.info(f"Novo Cliente criado via coletar_dado: {self.from_number}")
+
+        except Exception as e:
+            logger.error(f"Erro ao salvar dado no Cliente: {e}")
+            self.db.rollback()
 
     # ==================== UTILIDADES ====================
 

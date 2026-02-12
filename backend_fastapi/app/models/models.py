@@ -74,12 +74,13 @@ class Cliente(Base):
     id = Column(Integer, primary_key=True, index=True)
     empresa_id = Column(Integer, ForeignKey("empresa.id"), nullable=False, index=True)
     nome_completo = Column(String(255), nullable=False)
-    cpf = Column(String(14), nullable=False, index=True)
+    cpf = Column(String(14), nullable=True, index=True)  # Nullable para contatos auto-criados
     endereco_residencial = Column(String(255))
     cep = Column(String(9))
     complemento = Column(String(100))
     cidade = Column(String(100))
     whatsapp_number = Column(String(20), nullable=False, index=True)
+    email = Column(String(255))
 
     # Novos campos
     data_nascimento = Column(Date)
@@ -100,7 +101,7 @@ class Cliente(Base):
         return self.nome_completo
 
     __table_args__ = (
-        Index('idx_empresa_cpf', 'empresa_id', 'cpf', unique=True),
+        Index('idx_empresa_cpf', 'empresa_id', 'cpf'),
         Index('idx_empresa_whatsapp', 'empresa_id', 'whatsapp_number', unique=True),
     )
 

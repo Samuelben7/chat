@@ -184,11 +184,19 @@ def processar_webhook_completo(webhook_data: dict):
 
                 print(f"🏢 Processando para: {empresa.nome}")
 
+                # Extrair nomes dos contatos do webhook
+                contacts_info = {}
+                for contact in value.get("contacts", []):
+                    wa_id = contact.get("wa_id", "")
+                    profile_name = contact.get("profile", {}).get("name", "")
+                    if wa_id and profile_name:
+                        contacts_info[wa_id] = profile_name
+
                 # Processar mensagens recebidas
                 if "messages" in value:
                     messages = value.get("messages", [])
                     for message in messages:
-                        _process_incoming_message_sync(message, empresa, db)
+                        _process_incoming_message_sync(message, empresa, db, contacts_info)
 
                 # Processar status
                 if "statuses" in value:
@@ -216,7 +224,7 @@ def processar_webhook_completo(webhook_data: dict):
         }
 
 
-def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db: Session):
+def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db: Session, contacts_info: Dict[str, str] = None):
     """Processa mensagem recebida (versão síncrona para Celery)."""
     try:
         from app.services.bot_handler import BotMessageHandler
@@ -226,16 +234,47 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         message_type = message.get("type")
 
         # ========== DEDUPLICAÇÃO VIA REDIS ==========
-        # Protege contra duplicatas do WhatsApp (webhook pode ser chamado 2x)
         dedup_key = f"msg:processed:{message_id}"
 
         if redis_cache.client.exists(dedup_key):
             print(f"⚠️ Mensagem duplicada detectada (ignorada): {message_id}")
-            return  # Skip processamento
+            return
 
-        # Marcar como processada (TTL 24h = 86400 segundos)
         redis_cache.client.setex(dedup_key, 86400, "1")
         print(f"✅ Mensagem {message_id} marcada como processada")
+
+        # ========== AUTO-SALVAR CONTATO ==========
+        # Cria Cliente automaticamente se nao existe para esta empresa
+        try:
+            existing_client = db.query(Cliente).filter(
+                Cliente.empresa_id == empresa.id,
+                Cliente.whatsapp_number == from_number,
+            ).first()
+
+            if not existing_client:
+                # Buscar nome do perfil WhatsApp
+                profile_name = (contacts_info or {}).get(from_number, "")
+                if not profile_name:
+                    profile_name = f"Contato {from_number[-4:]}"
+
+                new_client = Cliente(
+                    empresa_id=empresa.id,
+                    nome_completo=profile_name,
+                    whatsapp_number=from_number,
+                )
+                db.add(new_client)
+                db.commit()
+                print(f"📇 Novo contato salvo: {profile_name} ({from_number}) para empresa {empresa.nome}")
+            else:
+                # Atualizar nome se veio do WhatsApp e o atual e generico
+                profile_name = (contacts_info or {}).get(from_number, "")
+                if profile_name and existing_client.nome_completo.startswith("Contato "):
+                    existing_client.nome_completo = profile_name
+                    db.commit()
+                    print(f"📇 Nome do contato atualizado: {profile_name} ({from_number})")
+        except Exception as e:
+            logger.warning(f"Erro ao auto-salvar contato {from_number}: {e}")
+            db.rollback()
 
         # Extrair conteúdo
         content = ""

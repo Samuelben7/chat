@@ -5,7 +5,7 @@ from typing import Dict, Any
 from datetime import datetime
 
 from app.database.database import get_db
-from app.models.models import MensagemLog, ChatSessao, Atendimento, Empresa
+from app.models.models import MensagemLog, ChatSessao, Atendimento, Empresa, Cliente
 from app.services.whatsapp import extract_message_data
 from app.services.bot_handler import BotMessageHandler
 from app.core.redis_client import redis_cache
@@ -125,11 +125,19 @@ async def process_webhook_sync(body: dict, db: Session):
                     if not empresa:
                         continue
 
+                    # Extrair nomes dos contatos do webhook
+                    contacts_info = {}
+                    for contact in value.get("contacts", []):
+                        wa_id = contact.get("wa_id", "")
+                        profile_name = contact.get("profile", {}).get("name", "")
+                        if wa_id and profile_name:
+                            contacts_info[wa_id] = profile_name
+
                     # Processar mensagens recebidas
                     if "messages" in value:
                         messages = value.get("messages", [])
                         for message in messages:
-                            await process_incoming_message(message, empresa, db)
+                            await process_incoming_message(message, empresa, db, contacts_info)
 
                     # Processar status de mensagens enviadas
                     if "statuses" in value:
@@ -143,11 +151,40 @@ async def process_webhook_sync(body: dict, db: Session):
         traceback.print_exc()
 
 
-async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db: Session):
+async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db: Session, contacts_info: dict = None):
     """Processa mensagem recebida do WhatsApp."""
     try:
         from_number = message.get("from")
         message_id = message.get("id")
+
+        # ========== AUTO-SALVAR CONTATO ==========
+        try:
+            existing_client = db.query(Cliente).filter(
+                Cliente.empresa_id == empresa.id,
+                Cliente.whatsapp_number == from_number,
+            ).first()
+
+            if not existing_client:
+                profile_name = (contacts_info or {}).get(from_number, "")
+                if not profile_name:
+                    profile_name = f"Contato {from_number[-4:]}"
+
+                new_client = Cliente(
+                    empresa_id=empresa.id,
+                    nome_completo=profile_name,
+                    whatsapp_number=from_number,
+                )
+                db.add(new_client)
+                db.commit()
+                print(f"📇 Novo contato salvo: {profile_name} ({from_number})")
+            else:
+                profile_name = (contacts_info or {}).get(from_number, "")
+                if profile_name and existing_client.nome_completo.startswith("Contato "):
+                    existing_client.nome_completo = profile_name
+                    db.commit()
+        except Exception as e:
+            print(f"⚠️ Erro ao auto-salvar contato: {e}")
+            db.rollback()
         timestamp = message.get("timestamp")
         message_type = message.get("type")
 
