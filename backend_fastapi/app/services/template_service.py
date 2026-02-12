@@ -28,11 +28,108 @@ class TemplateService:
         if not self.waba_id:
             raise ValueError("waba_id não configurado para esta empresa")
 
+        # Clean components before sending to Meta API (per official docs)
+        clean_components = []
+        for comp in components:
+            c = dict(comp)
+            comp_type = c.get("type", "").upper()
+            # Ensure component type is uppercase
+            c["type"] = comp_type
+
+            # HEADER handling
+            if comp_type == "HEADER":
+                fmt = c.get("format", "TEXT").upper()
+                c["format"] = fmt
+
+                if fmt in ("IMAGE", "VIDEO", "DOCUMENT"):
+                    # Media headers: validate header_handle, remove text
+                    if "example" in c:
+                        handle = c["example"].get("header_handle", [])
+                        if not handle or any("example.com" in str(h) for h in handle):
+                            del c["example"]
+                    c.pop("text", None)
+
+                elif fmt == "TEXT":
+                    # Text headers: ensure header_text example for params
+                    text = c.get("text", "")
+                    header_params = re.findall(r'\{\{(\d+)\}\}', text)
+                    if header_params and "example" not in c:
+                        # Auto-generate example values
+                        c["example"] = {
+                            "header_text": [f"exemplo_{p}" for p in header_params]
+                        }
+                    elif "example" in c:
+                        # Ensure header_text is a list
+                        ht = c["example"].get("header_text")
+                        if ht and not isinstance(ht, list):
+                            c["example"]["header_text"] = [ht]
+
+            # BODY handling: ensure body_text example format
+            elif comp_type == "BODY":
+                if "example" in c:
+                    bt = c["example"].get("body_text")
+                    if bt is not None:
+                        # Must be array of arrays: [["val1", "val2"]]
+                        if isinstance(bt, list) and len(bt) > 0:
+                            if not isinstance(bt[0], list):
+                                # Wrap flat list in outer list
+                                c["example"]["body_text"] = [bt]
+                        elif isinstance(bt, str):
+                            c["example"]["body_text"] = [[bt]]
+
+            # BUTTONS: fix button structures per Meta API spec
+            elif comp_type == "BUTTONS" and "buttons" in c:
+                fixed_buttons = []
+                for btn in c["buttons"]:
+                    btn = dict(btn)
+                    btn_type = btn.get("type", "").upper()
+
+                    if btn_type == "COPY_CODE":
+                        # COPY_CODE: only "type" + "example" (string, no "text")
+                        example_val = btn.get("example", btn.get("text", "CODE123"))
+                        # Ensure example is a string, not a list
+                        if isinstance(example_val, list):
+                            example_val = example_val[0] if example_val else "CODE123"
+                        fixed_buttons.append({
+                            "type": "COPY_CODE",
+                            "example": str(example_val),
+                        })
+                    elif btn_type == "URL":
+                        # URL: "type" + "text" + "url" (+ optional "example" list)
+                        url_btn: Dict = {
+                            "type": "URL",
+                            "text": btn.get("text", "Link"),
+                            "url": btn.get("url", ""),
+                        }
+                        if btn.get("example"):
+                            ex = btn["example"]
+                            # Must be list of strings
+                            url_btn["example"] = ex if isinstance(ex, list) else [ex]
+                        fixed_buttons.append(url_btn)
+                    elif btn_type == "PHONE_NUMBER":
+                        # PHONE_NUMBER: "type" + "text" + "phone_number"
+                        fixed_buttons.append({
+                            "type": "PHONE_NUMBER",
+                            "text": btn.get("text", "Call"),
+                            "phone_number": btn.get("phone_number", ""),
+                        })
+                    elif btn_type == "QUICK_REPLY":
+                        # QUICK_REPLY: "type" + "text"
+                        fixed_buttons.append({
+                            "type": "QUICK_REPLY",
+                            "text": btn.get("text", ""),
+                        })
+                    else:
+                        fixed_buttons.append(btn)
+                c["buttons"] = fixed_buttons
+
+            clean_components.append(c)
+
         payload = {
             "name": name,
             "category": category,
             "language": language,
-            "components": components,
+            "components": clean_components,
         }
         if parameter_format:
             payload["parameter_format"] = parameter_format
@@ -44,7 +141,17 @@ class TemplateService:
                 json=payload,
                 timeout=30.0
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                # Return the actual Meta API error message
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", response.text)
+                    error_code = error_data.get("error", {}).get("code", "")
+                    raise ValueError(f"[{error_code}] {error_msg}")
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"HTTP {response.status_code}: {response.text}")
             return response.json()
 
     async def list_templates_from_meta(self, limit: int = 100,
@@ -82,7 +189,16 @@ class TemplateService:
                 json=payload,
                 timeout=30.0
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", response.text)
+                    error_code = error_data.get("error", {}).get("code", "")
+                    raise ValueError(f"[{error_code}] {error_msg}")
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"HTTP {response.status_code}: {response.text}")
             return response.json()
 
     async def delete_template(self, name: str) -> Dict:

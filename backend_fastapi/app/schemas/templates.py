@@ -7,10 +7,10 @@ from datetime import datetime
 
 class TemplateButton(BaseModel):
     type: str  # QUICK_REPLY, URL, PHONE_NUMBER, COPY_CODE
-    text: str
+    text: Optional[str] = None  # Not required for COPY_CODE
     url: Optional[str] = None
     phone_number: Optional[str] = None
-    example: Optional[List[str]] = None
+    example: Optional[Any] = None  # str for COPY_CODE, List[str] for URL
 
 
 class TemplateComponent(BaseModel):
