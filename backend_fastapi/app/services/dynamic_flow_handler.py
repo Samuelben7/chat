@@ -192,12 +192,19 @@ class DynamicFlowHandler:
             self._log_sent(text, "text", erro=str(e))
             return False
 
-    async def _send_buttons(self, body: str, buttons: list, header: str = None, footer: str = None) -> bool:
+    async def _send_buttons(self, body: str, buttons: list, header: str = None, footer: str = None, header_image_url: str = None) -> bool:
         body = self._interpolate_text(body)
         header = self._interpolate_text(header) if header else None
+        header_image_url = self._interpolate_text(header_image_url) if header_image_url else None
         try:
-            await self.whatsapp.send_button_message(self.from_number, body, buttons, header, footer)
-            self._log_sent(body, "button", dados_extras={"buttons": buttons, "header": header, "footer": footer})
+            await self.whatsapp.send_button_message(
+                self.from_number, body, buttons, header, footer,
+                header_image_url=header_image_url
+            )
+            self._log_sent(body, "button", dados_extras={
+                "buttons": buttons, "header": header, "footer": footer,
+                "header_image_url": header_image_url
+            })
             return True
         except Exception as e:
             logger.error(f"Erro ao enviar botoes: {e}")
@@ -297,8 +304,24 @@ class DynamicFlowHandler:
     # ==================== HANDLERS DE TIPO DE NO ====================
 
     async def _execute_mensagem(self, node: BotFluxoNo):
-        """Envia mensagem de texto e avanca automaticamente."""
-        if node.conteudo:
+        """Envia mensagem de texto (com imagem opcional) e avanca automaticamente."""
+        dados_extras = node.dados_extras or {}
+        header_image_url = dados_extras.get("header_image_url")
+
+        if header_image_url:
+            # Enviar imagem com legenda
+            caption = self._interpolate_text(node.conteudo) if node.conteudo else None
+            try:
+                await self.whatsapp.send_image_message(
+                    self.from_number, header_image_url, caption
+                )
+                self._log_sent(caption or header_image_url, "image", dados_extras={"image_url": header_image_url})
+            except Exception as e:
+                logger.error(f"Erro ao enviar imagem: {e}")
+                # Fallback: enviar como texto
+                if node.conteudo:
+                    await self._send_text(node.conteudo)
+        elif node.conteudo:
             await self._send_text(node.conteudo)
         # Mensagem simples: avanca automaticamente
         await self._advance_to_next(node)
@@ -324,12 +347,14 @@ class DynamicFlowHandler:
         dados_extras = node.dados_extras or {}
         header = dados_extras.get("header") or node.titulo
         footer = dados_extras.get("footer")
+        header_image_url = dados_extras.get("header_image_url")
 
         await self._send_buttons(
             body=node.conteudo or "Escolha uma opcao:",
             buttons=buttons,
             header=header,
             footer=footer,
+            header_image_url=header_image_url,
         )
         self._update_state(node.identificador)
 

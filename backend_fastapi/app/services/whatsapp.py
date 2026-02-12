@@ -80,7 +80,8 @@ class WhatsAppService:
         body_text: str,
         buttons: List[Dict[str, str]],
         header: Optional[str] = None,
-        footer: Optional[str] = None
+        footer: Optional[str] = None,
+        header_image_url: Optional[str] = None
     ) -> str:
         """
         Envia mensagem com botões interativos (máximo 3 botões).
@@ -91,6 +92,7 @@ class WhatsAppService:
             buttons: Lista de botões [{"id": "btn_1", "title": "Texto"}]
             header: Texto opcional do cabeçalho
             footer: Texto opcional do rodapé
+            header_image_url: URL de imagem para o header (prioridade sobre texto)
 
         Returns:
             message_id: ID da mensagem enviada
@@ -114,7 +116,10 @@ class WhatsAppService:
             "action": {"buttons": interactive_buttons}
         }
 
-        if header:
+        # Header: imagem tem prioridade sobre texto
+        if header_image_url:
+            interactive["header"] = {"type": "image", "image": {"link": header_image_url}}
+        elif header:
             interactive["header"] = {"type": "text", "text": header}
         if footer:
             interactive["footer"] = {"text": footer}
@@ -182,6 +187,47 @@ class WhatsAppService:
             "to": to,
             "type": "interactive",
             "interactive": interactive
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/messages",
+                headers=self.headers,
+                json=payload,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            return data["messages"][0]["id"]
+
+    async def send_image_message(
+        self,
+        to: str,
+        image_url: str,
+        caption: Optional[str] = None
+    ) -> str:
+        """
+        Envia mensagem com imagem.
+
+        Args:
+            to: Numero de WhatsApp do destinatario
+            image_url: URL publica da imagem
+            caption: Legenda opcional da imagem
+
+        Returns:
+            message_id: ID da mensagem enviada
+        """
+        image_data = {"link": image_url}
+        if caption:
+            image_data["caption"] = caption
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "image",
+            "image": image_data
         }
 
         async with httpx.AsyncClient() as client:
