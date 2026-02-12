@@ -286,9 +286,10 @@ async def assumir_atendimento(
         ).first()
         
         if user.role == "atendente" and atendimento.atendente_id != user.atendente_id:
+            nome_outro = atendente_atual.nome_exibicao if atendente_atual else "outro atendente"
             raise HTTPException(
                 status_code=400,
-                detail=f"Esta conversa já está sendo atendida por {atendente_atual.nome_exibicao if atendente_atual else 'outro atendente'}"
+                detail=f"⚠️ Este chat já está sendo atendido por *{nome_outro}*. Aguarde a finalização ou peça a transferência."
             )
 
     # Determinar quem vai assumir e nome para mensagem
@@ -310,8 +311,8 @@ async def assumir_atendimento(
     
     db.commit()
 
-    # Enviar mensagem ao cliente
-    mensagem = f"👋 Olá! {nome_atendente} está assumindo seu atendimento. Como posso ajudá-lo?"
+    # Enviar mensagem ao cliente com nome em negrito
+    mensagem = f"👋 Olá! Você agora está sendo atendido por *{nome_atendente}*. Como posso ajudá-lo?"
     enviar_mensagem_sistema(db, whatsapp_number, empresa_id, mensagem)
 
     # Invalidar cache

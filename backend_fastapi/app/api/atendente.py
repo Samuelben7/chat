@@ -325,7 +325,7 @@ async def assumir_conversa(
             nome_outro = outro_atendente.nome_exibicao if outro_atendente else "outro atendente"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Esta conversa já está sendo atendida por {nome_outro}"
+                detail=f"⚠️ Este chat já está sendo atendido por *{nome_outro}*. Aguarde a finalização ou peça a transferência."
             )
         else:
             # Já é o próprio atendente - retornar sucesso sem mudar nada
@@ -361,7 +361,7 @@ async def assumir_conversa(
     # Enviar mensagem automática ao cliente via WhatsApp
     try:
         from app.tasks.tasks import enviar_mensagem_whatsapp
-        mensagem = f"👋 Olá! {atendente.nome_exibicao} está assumindo seu atendimento. Como posso ajudá-lo?"
+        mensagem = f"👋 Olá! Você agora está sendo atendido por *{atendente.nome_exibicao}*. Como posso ajudá-lo?"
         
         # Salvar mensagem no banco
         msg_log = MensagemLog(
