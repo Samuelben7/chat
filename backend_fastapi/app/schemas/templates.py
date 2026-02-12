@@ -51,6 +51,7 @@ class TemplateResponse(BaseModel):
     parameter_format: Optional[str] = None
     quality_score: Optional[str] = None
     rejected_reason: Optional[str] = None
+    header_image_path: Optional[str] = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -79,12 +80,16 @@ class TemplateSend(BaseModel):
 
 class TemplateSendBulk(BaseModel):
     template_id: int
-    language: str = 'pt_BR'
+    language: Optional[str] = None  # None = usar language do template
     components: Optional[List[Dict[str, Any]]] = None
     parameter_values: Optional[Dict[str, str]] = None
     media_url: Optional[str] = None
     whatsapp_numbers: Optional[List[str]] = None
     lista_id: Optional[int] = None
+    # Novos campos para envio personalizado
+    use_contact_name: bool = True  # {{1}} usa nome do contato
+    fallback_name: str = "Olá"  # Fallback quando não tem nome
+    coupon_code: Optional[str] = None  # Código para botão COPY_CODE
 
 
 class TemplateSendResponse(BaseModel):
@@ -99,6 +104,7 @@ class TemplateBulkSendResponse(BaseModel):
     enviados: int
     erros: int
     resultados: List[TemplateSendResponse]
+    task_id: Optional[str] = None  # Celery task ID para listas grandes
 
 
 # ==================== SYNC ====================

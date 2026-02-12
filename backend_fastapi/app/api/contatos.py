@@ -2,13 +2,15 @@
 Endpoints para gerenciamento de Contatos e Listas de Contatos
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 from typing import Optional
 import io
 import csv
+import re
+import logging
 
 from app.database.database import get_db
 from app.models.models import Cliente, MensagemLog, ListaContatos, ListaContatosMembro
@@ -18,6 +20,8 @@ from app.schemas.contatos import (
     ListaContatosCreate, ListaContatosUpdate, ListaContatosResponse,
     ListaContatosMembroAdd, ListaContatosMembroResponse,
 )
+
+logger = logging.getLogger("contatos_api")
 
 router = APIRouter()
 
@@ -162,6 +166,164 @@ async def exportar_contatos_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=contatos.csv"}
     )
+
+
+# ========== IMPORTAR CSV ==========
+
+def _normalize_phone(number: str) -> Optional[str]:
+    """Normaliza número de telefone: remove caracteres especiais, garante formato."""
+    digits = re.sub(r'\D', '', number.strip())
+    if not digits or len(digits) < 10:
+        return None
+    # Se não começar com 55, adicionar (Brasil)
+    if len(digits) == 10 or len(digits) == 11:
+        digits = "55" + digits
+    return digits
+
+
+@router.post("/contatos/importar-csv")
+async def importar_csv(
+    file: UploadFile = File(...),
+    lista_id: Optional[int] = Query(None, description="ID da lista para adicionar os contatos importados"),
+    empresa_id: CurrentEmpresa = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Importa contatos de um arquivo CSV.
+    Colunas aceitas: whatsapp_number (obrigatório), nome (opcional), cidade (opcional), cpf (opcional)
+    """
+    if not file.filename or not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Apenas arquivos CSV são aceitos")
+
+    contents = await file.read()
+
+    # Tentar decodificar como UTF-8, fallback para latin-1
+    try:
+        text = contents.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text = contents.decode('latin-1')
+
+    reader = csv.DictReader(io.StringIO(text))
+
+    # Validar que tem a coluna obrigatória
+    fieldnames = [f.strip().lower() for f in (reader.fieldnames or [])]
+    number_col = None
+    for possible in ['whatsapp_number', 'whatsapp', 'numero', 'telefone', 'phone', 'number']:
+        if possible in fieldnames:
+            number_col = possible
+            break
+
+    if not number_col:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV deve ter coluna 'whatsapp_number', 'whatsapp', 'numero', 'telefone' ou 'phone'"
+        )
+
+    # Mapear colunas flexíveis
+    nome_col = None
+    for possible in ['nome', 'name', 'nome_completo']:
+        if possible in fieldnames:
+            nome_col = possible
+            break
+
+    cidade_col = None
+    for possible in ['cidade', 'city']:
+        if possible in fieldnames:
+            cidade_col = possible
+            break
+
+    cpf_col = None
+    for possible in ['cpf', 'documento']:
+        if possible in fieldnames:
+            cpf_col = possible
+            break
+
+    criados = 0
+    atualizados = 0
+    erros = 0
+    adicionados_lista = 0
+    numeros_importados = []
+
+    # Renormalizar fieldnames no reader
+    for row in reader:
+        # Normalizar chaves do row para lowercase
+        row_lower = {k.strip().lower(): v.strip() if v else '' for k, v in row.items()}
+
+        raw_number = row_lower.get(number_col, '')
+        phone = _normalize_phone(raw_number)
+        if not phone:
+            erros += 1
+            continue
+
+        nome = row_lower.get(nome_col, '') if nome_col else ''
+        cidade = row_lower.get(cidade_col, '') if cidade_col else ''
+        cpf = row_lower.get(cpf_col, '') if cpf_col else ''
+
+        # Verificar se já existe como Cliente
+        existing = db.query(Cliente).filter(
+            Cliente.empresa_id == empresa_id,
+            Cliente.whatsapp_number == phone,
+        ).first()
+
+        if existing:
+            # Atualizar dados se fornecidos
+            if nome and not existing.nome_completo:
+                existing.nome_completo = nome
+            if cidade and not existing.cidade:
+                existing.cidade = cidade
+            atualizados += 1
+        else:
+            # Criar novo Cliente (CPF pode ser vazio para importados)
+            new_client = Cliente(
+                empresa_id=empresa_id,
+                nome_completo=nome or f"Contato {phone[-4:]}",
+                cpf=cpf or f"IMPORT-{phone[-11:]}",
+                whatsapp_number=phone,
+                cidade=cidade or None,
+            )
+            db.add(new_client)
+            criados += 1
+
+        numeros_importados.append(phone)
+
+    db.commit()
+
+    # Adicionar à lista se informada
+    if lista_id and numeros_importados:
+        lista = db.query(ListaContatos).filter(
+            ListaContatos.id == lista_id,
+            ListaContatos.empresa_id == empresa_id,
+        ).first()
+
+        if lista:
+            for phone in numeros_importados:
+                exists = db.query(ListaContatosMembro).filter(
+                    ListaContatosMembro.lista_id == lista_id,
+                    ListaContatosMembro.whatsapp_number == phone,
+                ).first()
+                if not exists:
+                    # Buscar nome e cliente_id
+                    cliente = db.query(Cliente).filter(
+                        Cliente.empresa_id == empresa_id,
+                        Cliente.whatsapp_number == phone,
+                    ).first()
+                    membro = ListaContatosMembro(
+                        lista_id=lista_id,
+                        whatsapp_number=phone,
+                        nome=cliente.nome_completo if cliente else None,
+                        cliente_id=cliente.id if cliente else None,
+                    )
+                    db.add(membro)
+                    adicionados_lista += 1
+            db.commit()
+
+    return {
+        "criados": criados,
+        "atualizados": atualizados,
+        "erros": erros,
+        "total_importados": len(numeros_importados),
+        "adicionados_lista": adicionados_lista,
+    }
 
 
 # ========== LISTAS DE CONTATOS ==========

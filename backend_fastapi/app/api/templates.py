@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from pathlib import Path
 import uuid
+import re
+import os
+import logging
 
 from app.database.database import get_db
 from app.models.models import Empresa, MessageTemplate, ListaContatosMembro, Cliente, MensagemLog
@@ -18,6 +21,8 @@ from app.schemas.templates import (
     TemplateSyncResponse, TemplateStatusCheckResponse, ContactNameResponse,
     MediaUploadResponse,
 )
+
+logger = logging.getLogger("templates_api")
 
 router = APIRouter()
 
@@ -106,6 +111,23 @@ async def criar_template(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
 
+    # Detectar image path do header (se houver)
+    header_image_path = None
+    for comp in components_dict:
+        if comp.get("type", "").upper() == "HEADER":
+            fmt = comp.get("format", "").upper()
+            if fmt in ("IMAGE", "VIDEO"):
+                example = comp.get("example", {})
+                handle = example.get("header_handle", [])
+                # Se tem URL local salva no upload
+                if isinstance(handle, list) and handle:
+                    # Tentar encontrar imagem local correspondente
+                    pass
+                # Verificar se tem url local no example
+                local_url = comp.get("_local_url")
+                if local_url:
+                    header_image_path = local_url
+
     # Salvar localmente
     template = MessageTemplate(
         empresa_id=empresa_id,
@@ -117,6 +139,7 @@ async def criar_template(
         status=result.get("status", "PENDING"),
         components=components_dict,
         parameter_format=dados.parameter_format,
+        header_image_path=header_image_path,
     )
     db.add(template)
     db.commit()
@@ -195,6 +218,16 @@ async def deletar_template(
         await service.delete_template(name=template.name)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
+
+    # Limpar imagem de header associada
+    if template.header_image_path:
+        try:
+            image_file = Path(template.header_image_path.lstrip("/"))
+            if image_file.exists():
+                image_file.unlink()
+                logger.info(f"Imagem removida: {image_file}")
+        except Exception as e:
+            logger.warning(f"Erro ao remover imagem {template.header_image_path}: {e}")
 
     db.delete(template)
     db.commit()
@@ -293,25 +326,75 @@ async def enviar_template_massa(
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
 
-    # Build components from parameter_values if provided
-    send_components = dados.components
-    if dados.parameter_values and template.components:
-        send_components = TemplateService.build_send_components(
-            template_components=template.components,
-            parameter_values=dados.parameter_values,
-            media_url=dados.media_url,
-        )
+    # Language: usar do template como fallback
+    language_code = dados.language or template.language or "pt_BR"
 
+    # Detectar parâmetros do template body
+    body_params = []
+    has_body_params = False
+    for comp in (template.components or []):
+        if comp.get("type", "").upper() == "BODY":
+            body_params = re.findall(r'\{\{(\d+)\}\}', comp.get("text", ""))
+            has_body_params = len(body_params) > 0
+            break
+
+    # Para listas grandes (>50), usar Celery task
+    if len(numbers) > 50:
+        try:
+            from app.tasks.tasks import enviar_template_massa_task
+            task = enviar_template_massa_task.delay(
+                empresa_id=empresa_id,
+                template_id=dados.template_id,
+                numbers=numbers,
+                language_code=language_code,
+                parameter_values=dados.parameter_values or {},
+                media_url=dados.media_url,
+                use_contact_name=dados.use_contact_name,
+                fallback_name=dados.fallback_name,
+                coupon_code=dados.coupon_code,
+            )
+            return TemplateBulkSendResponse(
+                total=len(numbers),
+                enviados=0,
+                erros=0,
+                resultados=[],
+                task_id=task.id,
+            )
+        except ImportError:
+            logger.warning("Celery task não disponível, processando sincronamente")
+
+    # Processamento síncrono para listas pequenas (<=50)
     resultados = []
     enviados = 0
     erros = 0
 
     for number in numbers:
         try:
+            # Construir parameter_values personalizado por contato
+            pv = dict(dados.parameter_values or {})
+
+            # {{1}} = nome do contato (se use_contact_name)
+            if dados.use_contact_name and has_body_params and "1" not in pv:
+                contact_name = _get_contact_name_for_number(db, empresa_id, number)
+                pv["1"] = contact_name or dados.fallback_name
+
+            # Coupon code
+            if dados.coupon_code and "coupon_code" not in pv:
+                pv["coupon_code"] = dados.coupon_code
+
+            # Build components personalizados para este contato
+            send_components = dados.components
+            if pv and template.components:
+                send_components = TemplateService.build_send_components(
+                    template_components=template.components,
+                    parameter_values=pv,
+                    media_url=dados.media_url,
+                )
+
             message_id = await service.send_template_message(
                 to=number,
                 template_name=template.name,
-                language_code=dados.language,
+                language_code=language_code,
                 components=send_components,
             )
             service.log_template_send(db, number, template.name, message_id)
@@ -329,7 +412,7 @@ async def enviar_template_massa(
         total=len(numbers),
         enviados=enviados,
         erros=erros,
-        resultados=resultados
+        resultados=resultados,
     )
 
 
@@ -355,6 +438,24 @@ async def sincronizar_templates(
         criados, atualizados, removidos = await service.sync_templates(db)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao sincronizar: {str(e)}")
+
+    # Limpar imagens de templates que ficaram DELETED
+    deleted_templates = db.query(MessageTemplate).filter(
+        MessageTemplate.empresa_id == empresa_id,
+        MessageTemplate.status == "DELETED",
+        MessageTemplate.header_image_path.isnot(None),
+    ).all()
+    for tmpl in deleted_templates:
+        try:
+            image_file = Path(tmpl.header_image_path.lstrip("/"))
+            if image_file.exists():
+                image_file.unlink()
+                logger.info(f"Imagem de template DELETED removida: {image_file}")
+            tmpl.header_image_path = None
+        except Exception as e:
+            logger.warning(f"Erro ao limpar imagem de template deletado: {e}")
+    if deleted_templates:
+        db.commit()
 
     total = db.query(MessageTemplate).filter(
         MessageTemplate.empresa_id == empresa_id,
@@ -410,6 +511,36 @@ async def check_template_status(
     db.refresh(template)
 
     return template
+
+
+def _get_contact_name_for_number(db: Session, empresa_id: int, number: str) -> Optional[str]:
+    """Busca primeiro nome do contato (Cliente → MensagemLog → None)."""
+    # 1. Tabela Cliente
+    cliente = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.whatsapp_number == number,
+    ).first()
+    if cliente and cliente.nome_completo:
+        return cliente.nome_completo.split()[0]
+
+    # 2. MensagemLog (profile.name do webhook)
+    msg = db.query(MensagemLog).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.whatsapp_number == number,
+        MensagemLog.direcao == "recebida",
+    ).order_by(MensagemLog.timestamp.desc()).first()
+
+    if msg and msg.dados_extras:
+        extras = msg.dados_extras if isinstance(msg.dados_extras, dict) else {}
+        profile_name = (
+            extras.get("profile", {}).get("name")
+            if isinstance(extras.get("profile"), dict)
+            else extras.get("profile_name")
+        )
+        if profile_name:
+            return profile_name.split()[0]
+
+    return None
 
 
 # ========== CONTACT NAME ===========
@@ -514,8 +645,33 @@ async def upload_template_media(
             f"Meta upload failed (local file saved): {e}"
         )
 
+    # Associar imagem a template existente (se template_id informado via query)
+    # Isso será feito pelo frontend ao criar o template
+
     return MediaUploadResponse(
         url=local_url,
         filename=filename,
         header_handle=header_handle,
     )
+
+
+# ========== ASSOCIATE IMAGE TO TEMPLATE ==========
+
+@router.patch("/templates/{template_id}/set-image")
+async def set_template_image(
+    template_id: int,
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db),
+    image_path: str = Query(..., description="Path local da imagem"),
+):
+    """Associa uma imagem de header a um template existente."""
+    template = db.query(MessageTemplate).filter(
+        MessageTemplate.id == template_id,
+        MessageTemplate.empresa_id == empresa_id,
+    ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+
+    template.header_image_path = image_path
+    db.commit()
+    return {"detail": "Imagem associada com sucesso"}

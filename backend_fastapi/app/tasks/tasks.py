@@ -2,16 +2,22 @@ from celery import shared_task
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 import json
+import re
+import os
+import logging
+from pathlib import Path
 
 from app.tasks.celery_app import celery_app
 from app.database.database import SessionLocal
-from app.models.models import MensagemLog, Atendimento, Atendente, Empresa
+from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente
 from app.core.config import settings
 from app.core.redis_client import redis_cache
 from app.core.circuit_breaker import whatsapp_circuit_breaker
 import time
+
+logger = logging.getLogger("celery_tasks")
 
 # Import métricas
 try:
@@ -596,3 +602,213 @@ def enviar_email_confirmacao_task(destinatario: str, nome_empresa: str, token: s
             "email": destinatario,
             "error": str(e)
         }
+
+
+# ========== TASK: ENVIO EM MASSA DE TEMPLATE ==========
+
+def _get_contact_name_sync(db: Session, empresa_id: int, number: str) -> Optional[str]:
+    """Busca primeiro nome do contato (Cliente → MensagemLog → None)."""
+    cliente = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.whatsapp_number == number,
+    ).first()
+    if cliente and cliente.nome_completo:
+        return cliente.nome_completo.split()[0]
+
+    msg = db.query(MensagemLog).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.whatsapp_number == number,
+        MensagemLog.direcao == "recebida",
+    ).order_by(MensagemLog.timestamp.desc()).first()
+
+    if msg and msg.dados_extras:
+        extras = msg.dados_extras if isinstance(msg.dados_extras, dict) else {}
+        profile_name = (
+            extras.get("profile", {}).get("name")
+            if isinstance(extras.get("profile"), dict)
+            else extras.get("profile_name")
+        )
+        if profile_name:
+            return profile_name.split()[0]
+
+    return None
+
+
+@celery_app.task(
+    name="app.tasks.tasks.enviar_template_massa_task",
+    bind=True,
+    max_retries=0,
+    time_limit=600,  # 10 min max
+)
+def enviar_template_massa_task(
+    self,
+    empresa_id: int,
+    template_id: int,
+    numbers: List[str],
+    language_code: str = "pt_BR",
+    parameter_values: Optional[Dict[str, str]] = None,
+    media_url: Optional[str] = None,
+    use_contact_name: bool = True,
+    fallback_name: str = "Olá",
+    coupon_code: Optional[str] = None,
+):
+    """
+    Task Celery para envio em massa de template.
+    Rate limit: ~80 msgs/segundo (limite Meta tier 1).
+    """
+    import asyncio
+    from app.services.template_service import TemplateService
+
+    db: Session = SessionLocal()
+    enviados = 0
+    erros = 0
+    resultados = []
+
+    try:
+        empresa = db.query(Empresa).filter(
+            Empresa.id == empresa_id,
+            Empresa.ativa == True,
+        ).first()
+        if not empresa:
+            return {"success": False, "error": "Empresa não encontrada"}
+
+        template = db.query(MessageTemplate).filter(
+            MessageTemplate.id == template_id,
+            MessageTemplate.empresa_id == empresa_id,
+        ).first()
+        if not template:
+            return {"success": False, "error": "Template não encontrado"}
+
+        service = TemplateService(empresa)
+
+        # Detectar parâmetros do body
+        body_params = []
+        for comp in (template.components or []):
+            if comp.get("type", "").upper() == "BODY":
+                body_params = re.findall(r'\{\{(\d+)\}\}', comp.get("text", ""))
+                break
+        has_body_params = len(body_params) > 0
+
+        total = len(numbers)
+        rate_limit_interval = 1.0 / 80.0  # ~12.5ms entre mensagens
+
+        for idx, number in enumerate(numbers):
+            try:
+                # Construir parameter_values personalizado
+                pv = dict(parameter_values or {})
+
+                if use_contact_name and has_body_params and "1" not in pv:
+                    contact_name = _get_contact_name_sync(db, empresa_id, number)
+                    pv["1"] = contact_name or fallback_name
+
+                if coupon_code and "coupon_code" not in pv:
+                    pv["coupon_code"] = coupon_code
+
+                # Build components
+                send_components = None
+                if pv and template.components:
+                    send_components = TemplateService.build_send_components(
+                        template_components=template.components,
+                        parameter_values=pv,
+                        media_url=media_url,
+                    )
+
+                # Enviar (async → sync para Celery)
+                message_id = asyncio.run(service.send_template_message(
+                    to=number,
+                    template_name=template.name,
+                    language_code=language_code,
+                    components=send_components,
+                ))
+                service.log_template_send(db, number, template.name, message_id)
+                enviados += 1
+                resultados.append({"success": True, "number": number, "message_id": message_id})
+
+            except Exception as e:
+                erros += 1
+                resultados.append({"success": False, "number": number, "error": str(e)})
+                logger.warning(f"Erro enviando para {number}: {e}")
+
+            # Rate limiting
+            time.sleep(rate_limit_interval)
+
+            # Atualizar progresso
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": idx + 1,
+                    "total": total,
+                    "enviados": enviados,
+                    "erros": erros,
+                },
+            )
+
+        logger.info(f"Envio em massa concluído: {enviados}/{total} enviados, {erros} erros")
+
+        return {
+            "success": True,
+            "total": total,
+            "enviados": enviados,
+            "erros": erros,
+            "resultados": resultados,
+        }
+
+    except Exception as e:
+        logger.error(f"Erro no envio em massa: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+# ========== TASK: LIMPAR IMAGENS ÓRFÃS DE TEMPLATES ==========
+
+@celery_app.task(name="app.tasks.tasks.limpar_imagens_orfas_templates")
+def limpar_imagens_orfas_templates():
+    """
+    Task periódica para limpar imagens de templates órfãs (sem template associado) >7 dias.
+    """
+    try:
+        db: Session = SessionLocal()
+        upload_dir = Path("uploads/templates")
+
+        if not upload_dir.exists():
+            return {"success": True, "deleted": 0, "message": "Diretório não existe"}
+
+        # Coletar todos os paths referenciados
+        referenced_paths = set()
+        templates = db.query(MessageTemplate).filter(
+            MessageTemplate.header_image_path.isnot(None)
+        ).all()
+        for t in templates:
+            # Normalizar path
+            path = t.header_image_path.lstrip("/")
+            referenced_paths.add(path)
+
+        deleted = 0
+        cutoff = datetime.now() - timedelta(days=7)
+
+        for file_path in upload_dir.iterdir():
+            if not file_path.is_file():
+                continue
+
+            relative_path = str(file_path)
+            normalized = f"uploads/templates/{file_path.name}"
+
+            # Verificar se é órfã e tem mais de 7 dias
+            if normalized not in referenced_paths:
+                file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+                if file_mtime < cutoff:
+                    file_path.unlink()
+                    deleted += 1
+                    logger.info(f"Imagem órfã removida: {file_path}")
+
+        db.close()
+        logger.info(f"Limpeza de imagens órfãs: {deleted} removidas")
+
+        return {"success": True, "deleted": deleted}
+
+    except Exception as e:
+        logger.error(f"Erro na limpeza de imagens órfãs: {e}")
+        return {"success": False, "error": str(e)}

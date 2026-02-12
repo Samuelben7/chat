@@ -404,6 +404,7 @@ class MessageTemplate(Base):
     parameter_format = Column(String(20))
     quality_score = Column(String(20))
     rejected_reason = Column(Text)
+    header_image_path = Column(String(500))  # Path local da imagem de header
     criado_em = Column(DateTime(timezone=True), server_default=func.now())
     atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
