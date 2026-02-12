@@ -621,13 +621,20 @@ class DynamicFlowHandler:
     async def _handle_collect_response(self, node: BotFluxoNo):
         """Processa dado coletado do usuario e salva no Cliente (banco de dados)."""
         dados_extras = node.dados_extras or {}
-        variavel = dados_extras.get("variavel", f"dado_{node.identificador}")
-        validacao = dados_extras.get("validacao", "")
+        variavel = dados_extras.get("variavel", "")
+
+        # Se variavel nao esta na lista de dados coletaveis, rejeitar
+        if variavel not in self.DADOS_COLETAVEIS:
+            logger.warning(f"Variavel '{variavel}' nao esta nos dados coletaveis fixos")
+            await self._send_text("Erro de configuracao. Entrando em contato com suporte...")
+            await self._advance_to_next(node)
+            return
 
         valor = self.message_content.strip()
 
-        # Validacao basica
-        if validacao:
+        # Usar validacao definida no DADOS_COLETAVEIS (ignora config manual)
+        validacao = self.DADOS_COLETAVEIS[variavel]["validacao"]
+        if validacao and validacao != "texto":
             is_valid, error_msg = self._validate_input(valor, validacao)
             if not is_valid:
                 await self._send_text(error_msg)
@@ -637,35 +644,41 @@ class DynamicFlowHandler:
         self._update_state(node.identificador, {variavel: valor})
 
         # ========== SALVAR NO CLIENTE (BANCO DE DADOS) ==========
-        # Mapeia nome da variavel para campo do Cliente
         self._persist_to_cliente(variavel, valor)
 
         # Avancar
         await self._advance_to_next(node)
 
+    # ==================== DADOS COLETAVEIS (FIXOS) ====================
+    # Unico lugar que define quais dados podem ser coletados e onde salvar.
+    # O frontend usa a mesma lista (espelhada em BotBuilder.tsx).
+    DADOS_COLETAVEIS = {
+        "nome_completo":        {"campo": "nome_completo",        "label": "Nome Completo",        "validacao": "nao_vazio"},
+        "cpf":                  {"campo": "cpf",                  "label": "CPF",                  "validacao": "cpf"},
+        "rg":                   {"campo": "rg",                   "label": "RG",                   "validacao": "nao_vazio"},
+        "email":                {"campo": "email",                "label": "E-mail",               "validacao": "email"},
+        "data_nascimento":      {"campo": "data_nascimento",      "label": "Data de Nascimento",   "validacao": "data"},
+        "telefone_secundario":  {"campo": "telefone_secundario",  "label": "Telefone Secundario",  "validacao": "telefone"},
+        "endereco":             {"campo": "endereco_residencial", "label": "Endereco (Rua/Numero)","validacao": "nao_vazio"},
+        "complemento":          {"campo": "complemento",          "label": "Complemento",          "validacao": "texto"},
+        "bairro":               {"campo": "bairro",               "label": "Bairro",               "validacao": "nao_vazio"},
+        "cidade":               {"campo": "cidade",               "label": "Cidade",               "validacao": "nao_vazio"},
+        "estado":               {"campo": "estado",               "label": "Estado (UF)",          "validacao": "nao_vazio"},
+        "pais":                 {"campo": "pais",                 "label": "Pais",                 "validacao": "nao_vazio"},
+        "cep":                  {"campo": "cep",                  "label": "CEP",                  "validacao": "cep"},
+        "chave_pix":            {"campo": "chave_pix",            "label": "Chave PIX",            "validacao": "nao_vazio"},
+        "profissao":            {"campo": "profissao",            "label": "Profissao",            "validacao": "texto"},
+        "empresa_cliente":      {"campo": "empresa_cliente",      "label": "Nome da Empresa",      "validacao": "texto"},
+    }
+
     def _persist_to_cliente(self, variavel: str, valor: str):
         """Salva dado coletado diretamente no registro do Cliente no banco."""
-        # Mapeamento: nome da variavel -> campo do modelo Cliente
-        FIELD_MAP = {
-            "nome": "nome_completo",
-            "nome_completo": "nome_completo",
-            "name": "nome_completo",
-            "cpf": "cpf",
-            "documento": "cpf",
-            "email": "email",
-            "e-mail": "email",
-            "cidade": "cidade",
-            "city": "cidade",
-            "endereco": "endereco_residencial",
-            "endereço": "endereco_residencial",
-            "endereco_residencial": "endereco_residencial",
-            "cep": "cep",
-            "complemento": "complemento",
-        }
+        config = self.DADOS_COLETAVEIS.get(variavel)
+        if not config:
+            logger.warning(f"Variavel '{variavel}' nao esta na lista de dados coletaveis - ignorando")
+            return
 
-        campo_db = FIELD_MAP.get(variavel.lower())
-        if not campo_db:
-            return  # Variavel nao mapeada, so fica na sessao
+        campo_db = config["campo"]
 
         try:
             cliente = self.db.query(Cliente).filter(
@@ -676,13 +689,26 @@ class DynamicFlowHandler:
             if cliente:
                 # Formatar CPF se necessario
                 if campo_db == "cpf" and valor:
-                    from app.services.validators import formatar_cpf
                     try:
+                        from app.services.validators import formatar_cpf
                         valor = formatar_cpf(valor)
                     except:
                         pass
 
-                setattr(cliente, campo_db, valor)
+                # Data de nascimento: converter string para date
+                if campo_db == "data_nascimento" and valor:
+                    try:
+                        from datetime import datetime as dt
+                        # Aceita dd/mm/aaaa ou dd-mm-aaaa
+                        valor_limpo = valor.replace("-", "/")
+                        parsed = dt.strptime(valor_limpo, "%d/%m/%Y").date()
+                        setattr(cliente, campo_db, parsed)
+                    except:
+                        setattr(cliente, campo_db, None)
+                        logger.warning(f"Data invalida: {valor}")
+                else:
+                    setattr(cliente, campo_db, valor)
+
                 self.db.commit()
                 logger.info(f"Cliente {self.from_number} atualizado: {campo_db} = {valor[:20]}...")
             else:
@@ -693,7 +719,15 @@ class DynamicFlowHandler:
                     "nome_completo": valor if campo_db == "nome_completo" else f"Contato {self.from_number[-4:]}",
                 }
                 if campo_db != "nome_completo":
-                    new_data[campo_db] = valor
+                    if campo_db == "data_nascimento":
+                        try:
+                            from datetime import datetime as dt
+                            valor_limpo = valor.replace("-", "/")
+                            new_data[campo_db] = dt.strptime(valor_limpo, "%d/%m/%Y").date()
+                        except:
+                            pass
+                    else:
+                        new_data[campo_db] = valor
 
                 cliente = Cliente(**new_data)
                 self.db.add(cliente)
@@ -778,11 +812,22 @@ class DynamicFlowHandler:
                 return False, "CEP invalido. Informe um CEP com 8 digitos:"
             return True, ""
 
+        if validacao == "data":
+            # Aceita dd/mm/aaaa
+            valor_limpo = valor.strip().replace("-", "/")
+            try:
+                from datetime import datetime as dt
+                dt.strptime(valor_limpo, "%d/%m/%Y")
+                return True, ""
+            except:
+                return False, "Data invalida. Use o formato DD/MM/AAAA (ex: 15/03/1990):"
+
         if validacao == "nao_vazio":
             if not valor.strip():
                 return False, "Por favor, informe um valor:"
             return True, ""
 
+        # "texto" - aceita qualquer coisa
         return True, ""
 
 

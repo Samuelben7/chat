@@ -82,8 +82,22 @@ class Cliente(Base):
     whatsapp_number = Column(String(20), nullable=False, index=True)
     email = Column(String(255))
 
-    # Novos campos
+    # Dados pessoais
     data_nascimento = Column(Date)
+    rg = Column(String(20))
+    telefone_secundario = Column(String(20))
+
+    # Endereço completo
+    bairro = Column(String(100))
+    estado = Column(String(50))
+    pais = Column(String(100))
+
+    # Profissional / Financeiro
+    profissao = Column(String(100))
+    empresa_cliente = Column(String(255))
+    chave_pix = Column(String(255))
+
+    # Sistema
     foto_url = Column(String(500))
 
     # Relationships
