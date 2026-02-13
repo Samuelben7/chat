@@ -318,7 +318,9 @@ async def atualizar_opcao(
     db: Session = Depends(get_db)
 ):
     """Atualiza uma opção"""
-    opcao = db.query(BotFluxoOpcao).join(BotFluxoNo).join(BotFluxo).filter(
+    opcao = db.query(BotFluxoOpcao).join(
+        BotFluxoNo, BotFluxoOpcao.no_id == BotFluxoNo.id
+    ).join(BotFluxo).filter(
         BotFluxoOpcao.id == opcao_id,
         BotFluxo.empresa_id == empresa_id
     ).first()
@@ -345,7 +347,9 @@ async def deletar_opcao(
     db: Session = Depends(get_db)
 ):
     """Deleta uma opção"""
-    opcao = db.query(BotFluxoOpcao).join(BotFluxoNo).join(BotFluxo).filter(
+    opcao = db.query(BotFluxoOpcao).join(
+        BotFluxoNo, BotFluxoOpcao.no_id == BotFluxoNo.id
+    ).join(BotFluxo).filter(
         BotFluxoOpcao.id == opcao_id,
         BotFluxo.empresa_id == empresa_id
     ).first()
