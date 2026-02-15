@@ -74,6 +74,9 @@ services:
       # App
       DEBUG: ${DEBUG:-False}
       ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      # Public URL (for WhatsApp image access)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,12 +124,16 @@ services:
       # App
       DEBUG: ${DEBUG:-False}
       ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      # Public URL (for WhatsApp image access)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
+      - ./backend_fastapi/uploads:/app/uploads
       - ./backend_fastapi/logs:/app/logs
     networks:
       - whatsapp_network
@@ -148,10 +155,23 @@ services:
 
       # JWT
       SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+
+      # WhatsApp API
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
+      PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
+      VERIFY_TOKEN: ${VERIFY_TOKEN}
+
+      # Internal API
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}
+      INTERNAL_API_URL: http://api:8000
 
       # App
       DEBUG: ${DEBUG:-False}
       ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      # Public URL (for WhatsApp image access)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     depends_on:
       postgres:
         condition: service_healthy

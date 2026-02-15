@@ -37,6 +37,7 @@ app.add_middleware(
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 (uploads_dir / "avatars").mkdir(exist_ok=True)
+(uploads_dir / "bot-builder").mkdir(exist_ok=True)
 
 # Servir arquivos estáticos (fotos)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

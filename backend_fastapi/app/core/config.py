@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: Optional[str] = "http://localhost:3000"
 
+    # Public URL (for WhatsApp to access uploaded images)
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+
     # Internal API (for Celery -> API communication)
     INTERNAL_API_KEY: str = "celery-internal-key-2026"
     INTERNAL_API_URL: str = "http://api:8000"

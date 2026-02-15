@@ -1,7 +1,10 @@
 """
 API para Bot Builder - Criação visual de fluxos de bot
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -362,3 +365,43 @@ async def deletar_opcao(
 
     db.delete(opcao)
     db.commit()
+
+
+# ==================== UPLOAD DE IMAGEM ====================
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+@router.post("/upload-imagem")
+async def upload_imagem_bot(
+    empresa_id: CurrentEmpresa,
+    file: UploadFile = File(...),
+):
+    """Upload de imagem para uso nos nós do Bot Builder."""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tipo de arquivo não permitido. Use JPEG, PNG, WebP ou GIF."
+        )
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Arquivo muito grande. Máximo 5MB."
+        )
+
+    # Gerar nome único
+    ext = Path(file.filename).suffix if file.filename else ".jpg"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+    filename = f"{uuid.uuid4().hex}{ext}"
+
+    upload_dir = Path("uploads/bot-builder")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = upload_dir / filename
+    file_path.write_bytes(content)
+
+    return {"url": f"/uploads/bot-builder/{filename}", "filename": filename}

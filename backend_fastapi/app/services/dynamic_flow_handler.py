@@ -33,6 +33,7 @@ from app.models.models import (
     Cliente,
 )
 from app.services.whatsapp import WhatsAppService
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,37 @@ class DynamicFlowHandler:
         self.session.dados_temporarios = {}
         self.db.commit()
 
+    def _get_cliente(self) -> Optional[Cliente]:
+        """Busca cliente pelo numero (com cache na instancia)."""
+        if not hasattr(self, '_cliente_cache'):
+            self._cliente_cache = self.db.query(Cliente).filter(
+                Cliente.empresa_id == self.empresa.id,
+                Cliente.whatsapp_number == self.from_number,
+            ).first()
+        return self._cliente_cache
+
+    # Mapeamento de variavel {{...}} -> campo do Cliente
+    _CLIENTE_VARS = {
+        "nome_cliente":       "nome_completo",
+        "cpf_cliente":        "cpf",
+        "rg_cliente":         "rg",
+        "email_cliente":      "email",
+        "data_nascimento_cliente": "data_nascimento",
+        "telefone2_cliente":  "telefone_secundario",
+        "endereco_cliente":   "endereco_residencial",
+        "complemento_cliente":"complemento",
+        "bairro_cliente":     "bairro",
+        "cidade_cliente":     "cidade",
+        "estado_cliente":     "estado",
+        "pais_cliente":       "pais",
+        "cep_cliente":        "cep",
+        "chave_pix_cliente":  "chave_pix",
+        "profissao_cliente":  "profissao",
+        "empresa_do_cliente": "empresa_cliente",
+    }
+
     def _interpolate_text(self, text: str) -> str:
-        """Substitui variaveis {{var}} no texto com dados da sessao."""
+        """Substitui variaveis {{var}} no texto com dados da sessao e do Cliente."""
         if not text:
             return text
         dados = self.session.dados_temporarios or {}
@@ -135,17 +165,32 @@ class DynamicFlowHandler:
                 return self.empresa.nome
             if var_name == "numero_cliente":
                 return self.from_number
-            if var_name == "nome_cliente":
-                cliente = self.db.query(Cliente).filter(
-                    Cliente.empresa_id == self.empresa.id,
-                    Cliente.whatsapp_number == self.from_number,
-                ).first()
+
+            # Variaveis do Cliente ({{nome_cliente}}, {{cpf_cliente}}, etc.)
+            if var_name in self._CLIENTE_VARS:
+                cliente = self._get_cliente()
                 if cliente:
-                    return cliente.nome_completo.split()[0]
-                return "Cliente"
+                    campo = self._CLIENTE_VARS[var_name]
+                    valor = getattr(cliente, campo, None)
+                    if valor:
+                        # nome_cliente: retorna apenas primeiro nome
+                        if var_name == "nome_cliente":
+                            return str(valor).split()[0]
+                        return str(valor)
+                # Fallback para nome
+                if var_name == "nome_cliente":
+                    return "Cliente"
+                return ""
+
             return match.group(0)  # Manter original se nao encontrar
 
         return re.sub(r'\{\{(\w+)\}\}', replacer, text)
+
+    def _resolve_image_url(self, url: str) -> str:
+        """Converte path local (/uploads/...) em URL publica para o WhatsApp acessar."""
+        if url and url.startswith("/uploads/"):
+            return f"{settings.PUBLIC_BASE_URL}{url}"
+        return url
 
     # ==================== LOGGING ====================
 
@@ -307,6 +352,8 @@ class DynamicFlowHandler:
         """Envia mensagem de texto (com imagem opcional) e avanca automaticamente."""
         dados_extras = node.dados_extras or {}
         header_image_url = dados_extras.get("header_image_url")
+        if header_image_url:
+            header_image_url = self._resolve_image_url(header_image_url)
 
         if header_image_url:
             # Enviar imagem com legenda
@@ -348,6 +395,8 @@ class DynamicFlowHandler:
         header = dados_extras.get("header") or node.titulo
         footer = dados_extras.get("footer")
         header_image_url = dados_extras.get("header_image_url")
+        if header_image_url:
+            header_image_url = self._resolve_image_url(header_image_url)
 
         await self._send_buttons(
             body=node.conteudo or "Escolha uma opcao:",
@@ -393,7 +442,25 @@ class DynamicFlowHandler:
         self._update_state(node.identificador)
 
     async def _execute_coletar_dado(self, node: BotFluxoNo):
-        """Envia pergunta e aguarda input do usuario."""
+        """Envia pergunta e aguarda input do usuario.
+        Se pular_se_preenchido=True e o campo ja tem valor no Cliente, pula automaticamente."""
+        dados_extras = node.dados_extras or {}
+        variavel = dados_extras.get("variavel", "")
+        pular_se_preenchido = dados_extras.get("pular_se_preenchido", False)
+
+        # Auto-skip: se o campo ja esta preenchido no Cliente
+        if pular_se_preenchido and variavel and variavel in self.DADOS_COLETAVEIS:
+            cliente = self._get_cliente()
+            if cliente:
+                campo_db = self.DADOS_COLETAVEIS[variavel]["campo"]
+                valor_atual = getattr(cliente, campo_db, None)
+                if valor_atual:
+                    logger.info(f"Auto-skip coletar_dado '{variavel}': ja preenchido = {str(valor_atual)[:20]}")
+                    # Salvar nos dados temporarios para uso em interpolacao
+                    self._update_state(node.identificador, {variavel: str(valor_atual)})
+                    await self._advance_to_next(node)
+                    return
+
         if node.conteudo:
             await self._send_text(node.conteudo)
         self._update_state(node.identificador)
@@ -773,11 +840,42 @@ class DynamicFlowHandler:
           - "variavel != valor"
           - "variavel exists"
           - "variavel contains valor"
+          - "cliente_has:campo" - verifica se Cliente tem o campo preenchido
+          - "cliente_is:campo==valor" - verifica valor do campo no Cliente
         """
         if not condicao:
             return True
 
         condicao = condicao.strip()
+
+        # "cliente_has:campo" - verifica se campo do Cliente esta preenchido
+        if condicao.startswith("cliente_has:"):
+            campo_key = condicao.split(":", 1)[1].strip()
+            config = self.DADOS_COLETAVEIS.get(campo_key)
+            if not config:
+                return False
+            cliente = self._get_cliente()
+            if not cliente:
+                return False
+            valor = getattr(cliente, config["campo"], None)
+            return bool(valor)
+
+        # "cliente_is:campo==valor" - verifica valor especifico do Cliente
+        if condicao.startswith("cliente_is:"):
+            rest = condicao.split(":", 1)[1].strip()
+            if "==" in rest:
+                campo_key, expected = rest.split("==", 1)
+                campo_key = campo_key.strip()
+                expected = expected.strip().strip('"').strip("'")
+                config = self.DADOS_COLETAVEIS.get(campo_key)
+                if not config:
+                    return False
+                cliente = self._get_cliente()
+                if not cliente:
+                    return False
+                valor = getattr(cliente, config["campo"], None)
+                return str(valor or "").lower() == expected.lower()
+            return False
 
         # "variavel exists"
         if " exists" in condicao:
