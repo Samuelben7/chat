@@ -113,9 +113,14 @@ async def listar_conversas(
         Atendimento.status,
         Atendente.nome_exibicao.label("atendente_nome"),
         func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label("nao_lidas"),
-        ultima_recebida_subq.c.ultima_recebida_em
+        ultima_recebida_subq.c.ultima_recebida_em,
+        Cliente.nome_completo.label("cliente_nome"),
     ).outerjoin(
         Atendente, Atendimento.atendente_id == Atendente.id
+    ).outerjoin(
+        Cliente,
+        (Cliente.whatsapp_number == Atendimento.whatsapp_number) &
+        (Cliente.empresa_id == empresa_id)
     ).outerjoin(
         ultima_msg_subq,
         Atendimento.whatsapp_number == ultima_msg_subq.c.whatsapp_number
@@ -164,6 +169,7 @@ async def listar_conversas(
 
         conversas.append(ConversaPreview(
             whatsapp_number=r.whatsapp_number,
+            cliente_nome=r.cliente_nome,
             ultima_mensagem=r.ultima_mensagem,
             timestamp=r.timestamp,
             nao_lidas=r.nao_lidas,

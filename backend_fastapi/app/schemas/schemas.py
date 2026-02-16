@@ -128,6 +128,7 @@ class WhatsAppMessage(BaseModel):
 class ConversaPreview(BaseModel):
     """Preview de conversa para lista lateral."""
     whatsapp_number: str
+    cliente_nome: Optional[str] = None
     ultima_mensagem: Optional[str]
     timestamp: Optional[datetime]
     nao_lidas: int = 0
