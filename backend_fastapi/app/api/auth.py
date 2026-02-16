@@ -386,13 +386,14 @@ async def registrar_empresa(
             )
 
     # Criar empresa (INATIVA até confirmar email)
+    import uuid
     nova_empresa = Empresa(
         nome=dados.nome,
         cnpj=dados.cnpj,
         email=dados.email,
         telefone=dados.telefone,
         whatsapp_token=dados.whatsapp_token or "TOKEN_PENDENTE",
-        phone_number_id=dados.phone_number_id or "PHONE_ID_PENDENTE",
+        phone_number_id=dados.phone_number_id or f"PENDENTE_{uuid.uuid4().hex[:12]}",
         verify_token=f"verify_{hash_senha(dados.email)[:32]}",
         ativa=False  # ❗ Inativa até confirmar email
     )
@@ -440,7 +441,7 @@ async def registrar_empresa(
         print(f"⚠️  Celery não disponível, enviando sync: {e}")
         # Fallback: envia síncrono se Celery não estiver disponível
         from app.services.email_service import enviar_email_confirmacao
-        await enviar_email_confirmacao(dados.email, dados.nome, token)
+        enviar_email_confirmacao(dados.email, dados.nome, token)
 
     return RegistroEmpresaResponse(
         mensagem="Cadastro realizado! Verifique seu email para ativar a conta.",

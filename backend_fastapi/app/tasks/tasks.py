@@ -85,7 +85,7 @@ def enviar_mensagem_whatsapp(self, to: str, message: str, message_type: str = "t
         # Função interna para envio (protegida pelo circuit breaker)
         def send_whatsapp_request():
             api_start = time.time()
-            url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+            url = f"https://graph.facebook.com/v21.0/{phone_number_id}/messages"
             headers = {
                 "Authorization": f"Bearer {whatsapp_token}",
                 "Content-Type": "application/json"
@@ -632,16 +632,12 @@ def enviar_email_confirmacao_task(destinatario: str, nome_empresa: str, token: s
     """
     try:
         from app.services.email_service import enviar_email_confirmacao
-        import asyncio
 
-        # Executa função async de forma síncrona no worker do Celery
-        loop = asyncio.get_event_loop()
-        sucesso = loop.run_until_complete(
-            enviar_email_confirmacao(
-                destinatario=destinatario,
-                nome_empresa=nome_empresa,
-                token=token
-            )
+        # Função síncrona - chamar diretamente
+        sucesso = enviar_email_confirmacao(
+            destinatario=destinatario,
+            nome_empresa=nome_empresa,
+            token=token
         )
 
         if sucesso:
