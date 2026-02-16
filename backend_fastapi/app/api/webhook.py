@@ -32,18 +32,29 @@ except:
 @router.get("/webhook")
 async def verify_webhook(
     request: Request,
-    hub_mode: str = Query(alias="hub.mode"),
-    hub_verify_token: str = Query(alias="hub.verify_token"),
-    hub_challenge: str = Query(alias="hub.challenge"),
+    hub_mode: str = Query(default=None, alias="hub.mode"),
+    hub_verify_token: str = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: str = Query(default=None, alias="hub.challenge"),
     db: Session = Depends(get_db)
 ):
     """
     Webhook verification endpoint para WhatsApp (multi-tenant).
     Meta envia GET request para verificar o webhook.
     """
+    # Log completo da requisição para debug
     print(f"🔐 Verificação webhook recebida")
+    print(f"Query params: {dict(request.query_params)}")
     print(f"Mode: {hub_mode}")
     print(f"Token recebido: {hub_verify_token}")
+    print(f"Challenge: {hub_challenge}")
+
+    # Validar que todos os parâmetros foram fornecidos
+    if not hub_mode or not hub_verify_token or not hub_challenge:
+        print("❌ Parâmetros ausentes na verificação do webhook")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required parameters: hub.mode, hub.verify_token, hub.challenge"
+        )
 
     if hub_mode == "subscribe":
         # Busca empresa pelo verify_token
@@ -164,8 +175,10 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                 Cliente.whatsapp_number == from_number,
             ).first()
 
+            # Extrair profile_name dos dados do webhook
+            profile_name = (contacts_info or {}).get(from_number, "")
+
             if not existing_client:
-                profile_name = (contacts_info or {}).get(from_number, "")
                 if not profile_name:
                     profile_name = f"Contato {from_number[-4:]}"
 
@@ -178,10 +191,11 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                 db.commit()
                 print(f"📇 Novo contato salvo: {profile_name} ({from_number})")
             else:
-                profile_name = (contacts_info or {}).get(from_number, "")
+                # Atualizar nome se for genérico E tiver profile_name do webhook
                 if profile_name and existing_client.nome_completo.startswith("Contato "):
                     existing_client.nome_completo = profile_name
                     db.commit()
+                    print(f"📝 Nome atualizado: {existing_client.nome_completo} -> {profile_name}")
         except Exception as e:
             print(f"⚠️ Erro ao auto-salvar contato: {e}")
             db.rollback()
@@ -316,7 +330,8 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                             "direcao": msg.direcao,
                             "tipo_mensagem": msg.tipo_mensagem,
                             "timestamp": msg.timestamp.isoformat(),
-                            "lida": msg.lida
+                            "lida": msg.lida,
+                            "dados_extras": msg.dados_extras or {}  # CRÍTICO: incluir dados_extras para renderizar listas/botões
                         },
                         "atendimento": {
                             "status": atendimento.status if atendimento else "bot"
