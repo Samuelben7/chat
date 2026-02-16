@@ -43,9 +43,9 @@ except ImportError:
     retry_backoff_max=60,      # Máximo 60s de espera
     retry_jitter=True          # Evita thundering herd
 )
-def enviar_mensagem_whatsapp(self, to: str, message: str, message_type: str = "text"):
+def enviar_mensagem_whatsapp(self, to: str, message: str, message_type: str = "text", empresa_id: int = None):
     """
-    Task assíncrona para enviar mensagem via WhatsApp API.
+    Task assíncrona para enviar mensagem via WhatsApp API (MULTI-TENANT).
 
     Retry automático:
     - 3 tentativas com exponential backoff (5s, 10s, 20s)
@@ -56,18 +56,38 @@ def enviar_mensagem_whatsapp(self, to: str, message: str, message_type: str = "t
         to: Número do destinatário
         message: Conteúdo da mensagem
         message_type: Tipo da mensagem (text, button, list)
+        empresa_id: ID da empresa (obrigatório para multi-tenant)
 
     Returns:
         dict: Resultado do envio
     """
     start_time = time.time()
     try:
+        # MULTI-TENANT: Buscar credenciais da empresa
+        from app.models.models import Empresa
+        from app.database.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            if empresa_id:
+                empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+                if not empresa:
+                    raise Exception(f"Empresa {empresa_id} não encontrada")
+                phone_number_id = empresa.phone_number_id
+                whatsapp_token = empresa.whatsapp_token
+            else:
+                # Fallback para single-tenant (compatibilidade reversa)
+                phone_number_id = settings.PHONE_NUMBER_ID
+                whatsapp_token = settings.WHATSAPP_TOKEN
+        finally:
+            db.close()
+
         # Função interna para envio (protegida pelo circuit breaker)
         def send_whatsapp_request():
             api_start = time.time()
-            url = f"https://graph.facebook.com/v18.0/{settings.PHONE_NUMBER_ID}/messages"
+            url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
             headers = {
-                "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}",
+                "Authorization": f"Bearer {whatsapp_token}",
                 "Content-Type": "application/json"
             }
 
@@ -374,14 +394,16 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             except Exception as e:
                 print(f"❌ Erro no bot: {e}")
 
-        # WebSocket broadcast via HTTP interno
+        # WebSocket broadcast via HTTP interno - BROADCAST AMBAS: recebida + enviada
         try:
-            mensagem_log = db.query(MensagemLog).filter(
+            # Buscar últimas 2 mensagens (recebida + resposta bot)
+            mensagens_recentes = db.query(MensagemLog).filter(
                 MensagemLog.empresa_id == empresa.id,
                 MensagemLog.whatsapp_number == from_number
-            ).order_by(MensagemLog.timestamp.desc()).first()
+            ).order_by(MensagemLog.timestamp.desc()).limit(2).all()
 
-            if mensagem_log:
+            # Broadcast em ordem cronológica (recebida primeiro, depois enviada)
+            for mensagem_log in reversed(mensagens_recentes):
                 # Enviar broadcast via Redis Pub/Sub (elimina hop HTTP ~100ms)
                 broadcast_data = {
                     "empresa_id": empresa.id,
@@ -394,7 +416,8 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             "direcao": mensagem_log.direcao,
                             "tipo_mensagem": mensagem_log.tipo_mensagem,
                             "timestamp": mensagem_log.timestamp.isoformat(),
-                            "lida": mensagem_log.lida
+                            "lida": mensagem_log.lida,
+                            "dados_extras": mensagem_log.dados_extras or {}  # CRÍTICO para listas/botões
                         },
                         "atendimento": {
                             "status": atendimento.status if atendimento else "bot"
@@ -408,7 +431,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
                 try:
                     redis_cache.client.publish(channel, message_data)
-                    print(f"🔔 Broadcast publicado via Redis Pub/Sub para empresa {empresa.id}")
+                    print(f"🔔 Broadcast {mensagem_log.direcao}: {mensagem_log.conteudo[:50]}")
                 except Exception as pub_error:
                     print(f"⚠️  Erro ao publicar no Redis Pub/Sub: {pub_error}")
 

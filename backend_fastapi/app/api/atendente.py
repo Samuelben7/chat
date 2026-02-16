@@ -375,11 +375,12 @@ async def assumir_conversa(
         db.add(msg_log)
         db.commit()
         
-        # Enviar via Celery
+        # Enviar via Celery (MULTI-TENANT: passa empresa_id)
         enviar_mensagem_whatsapp.delay(
             to=whatsapp_number,
             message=mensagem,
-            message_type="text"
+            message_type="text",
+            empresa_id=empresa_id
         )
         print(f"📤 Mensagem de boas-vindas enviada para {whatsapp_number}")
     except Exception as e:
@@ -498,11 +499,12 @@ async def transferir_conversa(
         db.add(msg_log)
         db.commit()
         
-        # Enviar via Celery
+        # Enviar via Celery (MULTI-TENANT: passa empresa_id)
         enviar_mensagem_whatsapp.delay(
             to=dados.whatsapp_number,
             message=mensagem,
-            message_type="text"
+            message_type="text",
+            empresa_id=empresa_id
         )
         print(f"📤 Mensagem de transferência enviada para {dados.whatsapp_number}")
     except Exception as e:

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from app.database.database import get_db
 from app.models.models import (
-    MensagemLog, ChatSessao, Atendimento, Atendente, Cliente
+    MensagemLog, ChatSessao, Atendimento, Atendente, Cliente, Empresa
 )
 from app.schemas.schemas import (
     ConversaPreview, ConversaDetalhes, AtendimentoUpdate, AtendimentoResponse
@@ -23,7 +23,7 @@ def enviar_mensagem_sistema(db: Session, whatsapp_number: str, empresa_id: int, 
     Registra no banco e dispara via Celery.
     """
     from app.tasks.tasks import enviar_mensagem_whatsapp
-    
+
     # Salvar mensagem no banco
     msg_log = MensagemLog(
         empresa_id=empresa_id,
@@ -35,14 +35,15 @@ def enviar_mensagem_sistema(db: Session, whatsapp_number: str, empresa_id: int, 
     )
     db.add(msg_log)
     db.commit()
-    
-    # Enviar via Celery
+
+    # Enviar via Celery (MULTI-TENANT: passa empresa_id)
     enviar_mensagem_whatsapp.delay(
         to=whatsapp_number,
         message=mensagem,
-        message_type="text"
+        message_type="text",
+        empresa_id=empresa_id  # CRÍTICO: passar empresa_id para usar credenciais corretas
     )
-    
+
     print(f"📤 Mensagem sistema enviada para {whatsapp_number}: {mensagem}")
 
 
@@ -316,7 +317,9 @@ async def assumir_atendimento(
     else:
         # Empresa assumindo diretamente
         atendente_id = None
-        nome_atendente = "Suporte"  # Nome genérico para empresa
+        # Buscar nome da empresa no banco
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        nome_atendente = empresa.nome if empresa else "Suporte"
         tipo_assuncao = "empresa"
 
     # Atualizar atendimento
@@ -326,8 +329,8 @@ async def assumir_atendimento(
     
     db.commit()
 
-    # Enviar mensagem ao cliente com nome em negrito
-    mensagem = f"👋 Olá! Você agora está sendo atendido por *{nome_atendente}*. Como posso ajudá-lo?"
+    # Enviar mensagem ao cliente com emoji de pessoa e nome em negrito
+    mensagem = f"👤 Olá! *{nome_atendente}* assumiu seu atendimento. Como posso ajudá-lo?"
     enviar_mensagem_sistema(db, whatsapp_number, empresa_id, mensagem)
 
     # Invalidar cache
