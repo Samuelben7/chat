@@ -105,6 +105,14 @@ async def listar_conversas(
         MensagemLog.direcao == "recebida"
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
+    # Subquery: apenas o atendimento mais recente e ativo por whatsapp_number
+    latest_atend_subq = db.query(
+        Atendimento.whatsapp_number,
+        func.max(Atendimento.id).label("latest_id")
+    ).filter(
+        Atendimento.status.in_(["bot", "aguardando", "em_atendimento"])
+    ).group_by(Atendimento.whatsapp_number).subquery()
+
     # Query principal
     query = db.query(
         Atendimento.whatsapp_number,
@@ -115,6 +123,9 @@ async def listar_conversas(
         func.coalesce(nao_lidas_subq.c.nao_lidas, 0).label("nao_lidas"),
         ultima_recebida_subq.c.ultima_recebida_em,
         Cliente.nome_completo.label("cliente_nome"),
+    ).join(
+        latest_atend_subq,
+        Atendimento.id == latest_atend_subq.c.latest_id
     ).outerjoin(
         Atendente, Atendimento.atendente_id == Atendente.id
     ).outerjoin(
