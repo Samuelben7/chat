@@ -441,6 +441,7 @@ def _process_message_status_sync(status: Dict[str, Any], empresa: Empresa, db: S
             elif status_type == "failed":
                 error = status.get("errors", [{}])[0]
                 mensagem.erro = error.get("message", "Erro desconhecido")
+                print(f"❌ FAILED details: {status.get('errors', 'no errors field')}")
 
             db.commit()
             print(f"✅ Status atualizado")
