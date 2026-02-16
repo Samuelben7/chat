@@ -105,12 +105,10 @@ async def listar_conversas(
         MensagemLog.direcao == "recebida"
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
-    # Subquery: apenas o atendimento mais recente e ativo por whatsapp_number
+    # Subquery: apenas o atendimento mais recente por whatsapp_number (deduplica)
     latest_atend_subq = db.query(
         Atendimento.whatsapp_number,
         func.max(Atendimento.id).label("latest_id")
-    ).filter(
-        Atendimento.status.in_(["bot", "aguardando", "em_atendimento"])
     ).group_by(Atendimento.whatsapp_number).subquery()
 
     # Query principal

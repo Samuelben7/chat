@@ -30,21 +30,21 @@ class MensagemResponse(MensagemBase):
 
 class ClienteBase(BaseModel):
     nome_completo: str
-    cpf: str
+    cpf: Optional[str] = None
     whatsapp_number: str
 
 
 class ClienteCreate(ClienteBase):
-    endereco_residencial: str
-    cep: str
+    endereco_residencial: Optional[str] = None
+    cep: Optional[str] = None
     complemento: Optional[str] = None
-    cidade: str
+    cidade: Optional[str] = None
 
 
 class ClienteResponse(ClienteBase):
     id: int
-    endereco_residencial: str
-    cidade: str
+    endereco_residencial: Optional[str] = None
+    cidade: Optional[str] = None
 
     class Config:
         from_attributes = True
