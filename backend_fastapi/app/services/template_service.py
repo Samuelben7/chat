@@ -338,6 +338,9 @@ class TemplateService:
             "template": template
         }
 
+        import logging
+        logging.getLogger("template_send").warning(f"📤 Template payload: {payload}")
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.BASE_URL}/{self.phone_number_id}/messages",
@@ -345,6 +348,7 @@ class TemplateService:
                 json=payload,
                 timeout=30.0
             )
+            logging.getLogger("template_send").warning(f"📤 Meta response: {response.status_code} {response.text}")
             response.raise_for_status()
             data = response.json()
             return data["messages"][0]["id"]
