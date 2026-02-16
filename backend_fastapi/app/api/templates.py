@@ -259,12 +259,12 @@ async def enviar_template(
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
 
-    # Build components from parameter_values if provided (auto-build)
+    # Build components from parameter_values or media_url (auto-build)
     send_components = dados.components
-    if dados.parameter_values and template.components:
+    if (dados.parameter_values or dados.media_url) and template.components:
         send_components = TemplateService.build_send_components(
             template_components=template.components,
-            parameter_values=dados.parameter_values,
+            parameter_values=dados.parameter_values or {},
             media_url=dados.media_url,
         )
 
