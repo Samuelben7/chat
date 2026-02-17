@@ -19,7 +19,7 @@ def enviar_email_confirmacao(
     destinatario: str,
     nome_empresa: str,
     token: str,
-    frontend_url: str = "https://yoursystem.dev.br"
+    frontend_url: str = None
 ) -> bool:
     """
     Envia email de confirmação para nova empresa
@@ -34,6 +34,11 @@ def enviar_email_confirmacao(
         bool: True se enviou com sucesso
     """
     try:
+        # Usar FRONTEND_URL do settings se não fornecido
+        if not frontend_url:
+            from app.core.config import settings
+            frontend_url = settings.FRONTEND_URL or "http://localhost:3000"
+
         # Link de confirmação
         link_confirmacao = f"{frontend_url}/confirmar-email?token={token}"
 
