@@ -17,7 +17,7 @@ import asyncio
 import logging
 import re
 from typing import Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from sqlalchemy.orm import Session
@@ -274,6 +274,22 @@ class DynamicFlowHandler:
         """Ponto de entrada: processa a mensagem recebida no contexto do fluxo dinamico."""
         self._log_received()
 
+        # ========== TIMEOUT: Resetar sessão se passou mais de 5 minutos ==========
+        if self.session.ultima_interacao:
+            now = datetime.now(self.session.ultima_interacao.tzinfo)
+            tempo_inatividade = now - self.session.ultima_interacao
+
+            if tempo_inatividade > timedelta(minutes=5):
+                logger.info(f"Timeout de 5 minutos atingido para {self.from_number}. Resetando sessão.")
+                self._reset_state()
+                # Atualizar ultima_interacao
+                self.session.ultima_interacao = now
+                self.db.commit()
+
+        # Atualizar ultima_interacao a cada mensagem
+        self.session.ultima_interacao = datetime.now(self.session.ultima_interacao.tzinfo if self.session.ultima_interacao else None)
+        self.db.commit()
+
         # Marcar como lida
         if self.message_id:
             try:
@@ -430,7 +446,9 @@ class DynamicFlowHandler:
         footer = dados_extras.get("footer")
         button_text = dados_extras.get("button_text", "Ver opcoes")
 
-        sections = [{"title": header or "Opcoes", "rows": rows}]
+        # Section title: max 24 chars (WhatsApp limit)
+        section_title = (header or node.titulo or "Opcoes")[:24]
+        sections = [{"title": section_title, "rows": rows}]
 
         await self._send_list(
             body=node.conteudo or "Selecione uma opcao:",

@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 
 from app.database.database import get_db
@@ -81,7 +81,9 @@ async def obter_fluxo(
     db: Session = Depends(get_db)
 ):
     """Obtém detalhes completos de um fluxo com todos os nós e opções"""
-    fluxo = db.query(BotFluxo).filter(
+    fluxo = db.query(BotFluxo).options(
+        joinedload(BotFluxo.nos).joinedload(BotFluxoNo.opcoes)
+    ).filter(
         BotFluxo.id == fluxo_id,
         BotFluxo.empresa_id == empresa_id
     ).first()

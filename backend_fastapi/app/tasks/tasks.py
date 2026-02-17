@@ -308,10 +308,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
             if interactive_type == "button_reply":
                 button_reply = interactive.get("button_reply", {})
-                content = button_reply.get("id", "")
+                content = button_reply.get("title", "") or button_reply.get("id", "")
             elif interactive_type == "list_reply":
                 list_reply = interactive.get("list_reply", {})
-                content = list_reply.get("id", "")
+                content = list_reply.get("title", "") or list_reply.get("id", "")
 
         print(f"📥 Mensagem de {from_number}: {content}")
 
@@ -357,6 +357,12 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
         db.commit()
 
+        # Guardar último ID antes de processar (para saber quais msgs são novas)
+        ultimo_id_antes = db.query(MensagemLog.id).filter(
+            MensagemLog.empresa_id == empresa.id,
+            MensagemLog.whatsapp_number == from_number
+        ).order_by(MensagemLog.id.desc()).limit(1).scalar() or 0
+
         # SEMPRE salvar a mensagem recebida no log (mesmo se em atendimento humano)
         if not processar_bot:
             # Mensagem recebida durante atendimento humano - salvar manualmente
@@ -394,16 +400,19 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             except Exception as e:
                 print(f"❌ Erro no bot: {e}")
 
-        # WebSocket broadcast via HTTP interno - BROADCAST AMBAS: recebida + enviada
+        # WebSocket broadcast - TODAS as mensagens novas (recebida + respostas bot)
         try:
-            # Buscar últimas 2 mensagens (recebida + resposta bot)
+            # Buscar TODAS as mensagens criadas após o último ID (sem limit fixo!)
             mensagens_recentes = db.query(MensagemLog).filter(
                 MensagemLog.empresa_id == empresa.id,
-                MensagemLog.whatsapp_number == from_number
-            ).order_by(MensagemLog.timestamp.desc()).limit(2).all()
+                MensagemLog.whatsapp_number == from_number,
+                MensagemLog.id > ultimo_id_antes
+            ).order_by(MensagemLog.id.asc()).all()
 
-            # Broadcast em ordem cronológica (recebida primeiro, depois enviada)
-            for mensagem_log in reversed(mensagens_recentes):
+            print(f"📡 Broadcasting {len(mensagens_recentes)} mensagens novas")
+
+            # Broadcast em ordem cronológica
+            for mensagem_log in mensagens_recentes:
                 # Enviar broadcast via Redis Pub/Sub (elimina hop HTTP ~100ms)
                 broadcast_data = {
                     "empresa_id": empresa.id,

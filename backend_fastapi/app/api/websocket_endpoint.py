@@ -167,6 +167,7 @@ async def websocket_endpoint(
 
                     # Broadcast para outros atendentes/empresa (exceto quem está digitando)
                     await manager.broadcast_to_empresa(
+                        empresa_id,
                         {
                             "event": "user_typing",
                             "data": {
@@ -176,7 +177,6 @@ async def websocket_endpoint(
                                 "role": role
                             }
                         },
-                        empresa_id,
                         exclude_user=user_id
                     )
 
@@ -213,6 +213,7 @@ async def websocket_endpoint(
 
                 # Notificar OUTROS usuários da empresa (exceto ele mesmo que já desconectou)
                 await manager.broadcast_to_empresa(
+                    empresa_id,
                     {
                         "event": "atendente_offline",
                         "data": {
@@ -221,7 +222,6 @@ async def websocket_endpoint(
                             "timestamp": datetime.now().isoformat()
                         }
                     },
-                    empresa_id,
                     exclude_user=user_id  # Não precisa notificar quem já desconectou
                 )
 

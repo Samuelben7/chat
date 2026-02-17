@@ -217,14 +217,15 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
 
             if interactive_type == "button_reply":
                 button_reply = interactive.get("button_reply", {})
-                content = button_reply.get("id", "")  # Usa ID ao invés de title
+                content = button_reply.get("title", "") or button_reply.get("id", "")
                 dados_extras["button_id"] = button_reply.get("id", "")
                 dados_extras["button_title"] = button_reply.get("title", "")
             elif interactive_type == "list_reply":
                 list_reply = interactive.get("list_reply", {})
-                content = list_reply.get("id", "")  # Usa ID ao invés de title
+                content = list_reply.get("title", "") or list_reply.get("id", "")
                 dados_extras["list_id"] = list_reply.get("id", "")
                 dados_extras["list_title"] = list_reply.get("title", "")
+                dados_extras["list_description"] = list_reply.get("description", "")
 
         print(f"📥 Mensagem de {from_number}: {content}")
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 from app.database.database import get_db
@@ -8,21 +8,23 @@ from app.models.models import Atendente
 from app.schemas.schemas import (
     AtendenteCreate, AtendenteUpdate, AtendenteResponse
 )
+from app.core.dependencies import get_empresa_id_from_token
 
 router = APIRouter()
 
 
 @router.get("/atendentes", response_model=List[AtendenteResponse])
 async def listar_atendentes(
-    status: str = None,
-    pode_atender: bool = None,
+    status: Optional[str] = None,
+    pode_atender: Optional[bool] = None,
+    empresa_id: int = Depends(get_empresa_id_from_token),
     db: Session = Depends(get_db)
 ):
     """
-    Lista todos os atendentes.
+    Lista atendentes da empresa do usuário logado.
     Pode filtrar por status (online, offline, ausente) e disponibilidade.
     """
-    query = db.query(Atendente)
+    query = db.query(Atendente).filter(Atendente.empresa_id == empresa_id)
 
     if status:
         query = query.filter(Atendente.status == status)

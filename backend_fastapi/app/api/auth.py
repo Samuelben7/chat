@@ -301,10 +301,17 @@ async def criar_atendente(
     # Gerar senha temporária (primeiras 4 letras do nome + 2026)
     senha_temporaria = dados.nome_exibicao[:4].lower() + "2026"
 
+    # Buscar próximo user_id disponível para esta empresa
+    from sqlalchemy import func
+    max_user_id = db.query(func.coalesce(func.max(Atendente.user_id), 0)).filter(
+        Atendente.empresa_id == empresa_id
+    ).scalar()
+    next_user_id = max_user_id + 1
+
     # Criar atendente
     novo_atendente = Atendente(
         empresa_id=empresa_id,
-        user_id=0,  # TODO: Ajustar quando necessário
+        user_id=next_user_id,
         nome_exibicao=dados.nome_exibicao,
         email=dados.email,
         cpf=dados.cpf,

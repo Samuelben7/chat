@@ -126,12 +126,17 @@ class TemplateService:
                 c["format"] = fmt
 
                 if fmt in ("IMAGE", "VIDEO", "DOCUMENT"):
-                    # Media headers: validate header_handle, remove text
+                    # Media headers: require header_handle from Meta upload
+                    c.pop("text", None)
                     if "example" in c:
                         handle = c["example"].get("header_handle", [])
                         if not handle or any("example.com" in str(h) for h in handle):
                             del c["example"]
-                    c.pop("text", None)
+                    if "example" not in c:
+                        raise ValueError(
+                            f"Header de {fmt} requer upload de mídia. "
+                            "Faça upload da imagem/vídeo/documento antes de criar o template."
+                        )
 
                 elif fmt == "TEXT":
                     # Text headers: ensure header_text example for params

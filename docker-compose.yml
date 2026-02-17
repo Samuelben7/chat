@@ -66,6 +66,7 @@ services:
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
       VERIFY_TOKEN: ${VERIFY_TOKEN}
+      META_APP_ID: ${META_APP_ID}
 
       # Internal API
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}
@@ -125,6 +126,7 @@ services:
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
       VERIFY_TOKEN: ${VERIFY_TOKEN}
+      META_APP_ID: ${META_APP_ID}
 
       # Internal API
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}
@@ -179,6 +181,7 @@ services:
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN}
       PHONE_NUMBER_ID: ${PHONE_NUMBER_ID}
       VERIFY_TOKEN: ${VERIFY_TOKEN}
+      META_APP_ID: ${META_APP_ID}
 
       # Internal API
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-celery-internal-key-2026}

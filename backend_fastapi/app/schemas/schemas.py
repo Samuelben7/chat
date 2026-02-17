@@ -21,6 +21,7 @@ class MensagemResponse(MensagemBase):
     direcao: str
     timestamp: datetime
     lida: bool
+    dados_extras: Optional[Dict[str, Any]] = {}  # CRÍTICO: para renderizar listas/botões/imagens
 
     class Config:
         from_attributes = True
@@ -96,9 +97,11 @@ class AtendenteUpdate(BaseModel):
 
 class AtendenteResponse(AtendenteBase):
     id: int
+    empresa_id: Optional[int] = None
+    email: Optional[str] = None
     status: str
     pode_atender: bool
-    ultima_atividade: datetime
+    ultima_atividade: Optional[datetime] = None
 
     class Config:
         from_attributes = True
