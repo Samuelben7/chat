@@ -15,7 +15,7 @@ def gerar_token_confirmacao() -> str:
     return secrets.token_urlsafe(32)
 
 
-async def enviar_email_confirmacao(
+def enviar_email_confirmacao(
     destinatario: str,
     nome_empresa: str,
     token: str,
@@ -293,16 +293,16 @@ async def enviar_email_confirmacao(
         </html>
         """
 
-        # Enviar email via SMTP (Gmail)
-        import os
+        # Enviar email via SMTP (Zoho)
+        from app.core.config import settings
 
-        smtp_server = "smtp.gmail.com"
-        smtp_port = 587
-        sender_email = "tami.hta1208@gmail.com"
-        sender_password = os.environ.get('EMAIL_HOST_PASSWORD')
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
 
-        if not sender_password:
-            print("⚠️  EMAIL_HOST_PASSWORD não configurado, enviando modo DEBUG")
+        if not sender_password or not sender_email:
+            print("⚠️  SMTP não configurado, enviando modo DEBUG")
             print("=" * 80)
             print("📧 EMAIL DE CONFIRMAÇÃO (DEBUG)")
             print("=" * 80)
