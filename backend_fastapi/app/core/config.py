@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
-    # Email
-    EMAIL_HOST_PASSWORD: Optional[str] = None
+    # Email / SMTP
+    SMTP_SERVER: str = "smtp.zoho.com"
+    SMTP_PORT: int = 587
+    SMTP_SENDER_EMAIL: str = ""
+    SMTP_PASSWORD: str = ""
 
     # Frontend
     FRONTEND_URL: Optional[str] = "http://localhost:3000"
