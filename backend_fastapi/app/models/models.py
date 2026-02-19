@@ -478,3 +478,60 @@ class ListaContatosMembro(Base):
     __table_args__ = (
         Index('idx_lista_membro_unico', 'lista_id', 'whatsapp_number', unique=True),
     )
+
+
+# ==================== AGENDA INTELIGENTE ====================
+
+class AgendaHorarioFuncionamento(Base):
+    """Horários de funcionamento por dia da semana."""
+    __tablename__ = 'agenda_horario_funcionamento'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id'), nullable=False, index=True)
+    dia_semana = Column(Integer, nullable=False)  # 0=domingo..6=sábado
+    hora_inicio = Column(String(5), nullable=False)  # HH:MM
+    hora_fim = Column(String(5), nullable=False)
+    intervalo_minutos = Column(Integer, default=60)
+    vagas_por_slot = Column(Integer, default=1)
+    ativo = Column(Boolean, default=True)
+
+
+class AgendaSlot(Base):
+    """Slot de tempo disponível para agendamento."""
+    __tablename__ = 'agenda_slot'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id'), nullable=False)
+    data = Column(Date, nullable=False)
+    hora_inicio = Column(String(5), nullable=False)
+    hora_fim = Column(String(5), nullable=False)
+    vagas_total = Column(Integer, default=1)
+    vagas_ocupadas = Column(Integer, default=0)
+    status = Column(String(20), default='disponivel')  # disponivel/lotado/bloqueado
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    agendamentos = relationship('AgendaAgendamento', back_populates='slot', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        Index('idx_slot_empresa_data', 'empresa_id', 'data'),
+    )
+
+
+class AgendaAgendamento(Base):
+    """Agendamento de cliente em um slot."""
+    __tablename__ = 'agenda_agendamento'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id'), nullable=False, index=True)
+    slot_id = Column(Integer, ForeignKey('agenda_slot.id'), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey('whatsapp_bot_cliente.id'), nullable=True)
+    whatsapp_number = Column(String(20), nullable=False)
+    nome_cliente = Column(String(150), nullable=True)
+    status = Column(String(20), default='confirmado')  # pendente/confirmado/cancelado/realizado
+    observacoes = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    slot = relationship('AgendaSlot', back_populates='agendamentos')
+    cliente = relationship('Cliente')
