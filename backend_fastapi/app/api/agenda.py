@@ -123,7 +123,7 @@ async def criar_horario(
     db: Session = Depends(get_db)
 ):
     """Cria um horário de funcionamento."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode gerenciar horários")
 
     horario = AgendaHorarioFuncionamento(
@@ -150,7 +150,7 @@ async def atualizar_horario(
     db: Session = Depends(get_db)
 ):
     """Atualiza um horário de funcionamento."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode gerenciar horários")
 
     horario = db.query(AgendaHorarioFuncionamento).filter(
@@ -176,7 +176,7 @@ async def deletar_horario(
     db: Session = Depends(get_db)
 ):
     """Remove um horário de funcionamento."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode gerenciar horários")
 
     horario = db.query(AgendaHorarioFuncionamento).filter(
@@ -299,7 +299,7 @@ async def gerar_slots(
     Gera slots automaticamente para um período com base nos horários de funcionamento.
     Body: { "data_inicio": "YYYY-MM-DD", "data_fim": "YYYY-MM-DD" }
     """
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode gerar slots")
 
     try:
@@ -336,7 +336,7 @@ async def criar_slot_manual(
     db: Session = Depends(get_db)
 ):
     """Cria um slot manualmente."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode criar slots")
 
     try:
@@ -369,7 +369,7 @@ async def bloquear_slot(
     db: Session = Depends(get_db)
 ):
     """Bloqueia um slot (não aceita mais agendamentos)."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode bloquear slots")
 
     slot = db.query(AgendaSlot).filter(
@@ -413,7 +413,7 @@ async def deletar_slot(
     db: Session = Depends(get_db)
 ):
     """Remove um slot (e seus agendamentos)."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode remover slots")
 
     slot = db.query(AgendaSlot).filter(

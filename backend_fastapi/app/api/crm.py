@@ -34,7 +34,7 @@ def _cliente_to_card(c: Cliente) -> dict:
         "funil_etapa": c.funil_etapa or "novo_lead",
         "valor_estimado": float(c.valor_estimado) if c.valor_estimado else None,
         "responsavel_id": c.responsavel_id,
-        "responsavel_nome": c.responsavel.nome if c.responsavel else None,
+        "responsavel_nome": c.responsavel.nome_exibicao if c.responsavel else None,
         "resumo_conversa": c.resumo_conversa,
         "preferencias": c.preferencias,
         "observacoes_crm": c.observacoes_crm,
@@ -220,7 +220,7 @@ async def criar_tag(
     db: Session = Depends(get_db),
 ):
     """Cria uma nova tag."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode criar tags")
 
     nome = dados.get("nome", "").strip()
@@ -248,7 +248,7 @@ async def atualizar_tag(
     db: Session = Depends(get_db),
 ):
     """Atualiza uma tag."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode editar tags")
 
     tag = db.query(CrmTag).filter(CrmTag.id == tag_id, CrmTag.empresa_id == empresa_id).first()
@@ -270,7 +270,7 @@ async def deletar_tag(
     db: Session = Depends(get_db),
 ):
     """Remove uma tag (e seus vínculos com clientes)."""
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas empresa pode deletar tags")
 
     tag = db.query(CrmTag).filter(CrmTag.id == tag_id, CrmTag.empresa_id == empresa_id).first()
@@ -345,6 +345,6 @@ async def listar_responsaveis(
     """Lista atendentes disponíveis para atribuir como responsável de leads."""
     atendentes = db.query(Atendente).filter(
         Atendente.empresa_id == empresa_id,
-        Atendente.ativo == True
+        Atendente.pode_atender == True
     ).all()
-    return [{"id": a.id, "nome": a.nome, "foto_url": a.foto_url} for a in atendentes]
+    return [{"id": a.id, "nome": a.nome_exibicao, "foto_url": a.foto_url} for a in atendentes]
