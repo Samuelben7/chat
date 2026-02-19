@@ -227,6 +227,35 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                 dados_extras["list_title"] = list_reply.get("title", "")
                 dados_extras["list_description"] = list_reply.get("description", "")
 
+        elif message_type == "image":
+            img = message.get("image", {})
+            content = img.get("caption", "") or "📷 Imagem"
+            dados_extras["media_id"] = img.get("id")
+            dados_extras["mime_type"] = img.get("mime_type", "image/jpeg")
+
+        elif message_type == "audio":
+            audio = message.get("audio", {})
+            content = "🎵 Áudio"
+            dados_extras["media_id"] = audio.get("id")
+            dados_extras["mime_type"] = audio.get("mime_type", "audio/ogg")
+
+        elif message_type == "document":
+            doc = message.get("document", {})
+            filename = doc.get("filename", "documento")
+            content = f"📄 {filename}"
+            dados_extras["media_id"] = doc.get("id")
+            dados_extras["mime_type"] = doc.get("mime_type", "application/octet-stream")
+            dados_extras["filename"] = filename
+
+        elif message_type == "video":
+            video = message.get("video", {})
+            content = video.get("caption", "") or "🎥 Vídeo"
+            dados_extras["media_id"] = video.get("id")
+            dados_extras["mime_type"] = video.get("mime_type", "video/mp4")
+
+        else:
+            content = f"[{message_type}]"
+
         print(f"📥 Mensagem de {from_number}: {content}")
 
         # INVALIDAR CACHE DE CONVERSAS (nova mensagem = atualizar lista)

@@ -298,10 +298,12 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
         # Extrair conteúdo
         content = ""
+        dados_extras: Dict[str, Any] = {}
         if message_type == "text":
             content = message.get("text", {}).get("body", "")
         elif message_type == "button":
             content = message.get("button", {}).get("text", "")
+            dados_extras["button_payload"] = message.get("button", {}).get("payload", "")
         elif message_type == "interactive":
             interactive = message.get("interactive", {})
             interactive_type = interactive.get("type")
@@ -309,9 +311,43 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             if interactive_type == "button_reply":
                 button_reply = interactive.get("button_reply", {})
                 content = button_reply.get("title", "") or button_reply.get("id", "")
+                dados_extras["button_id"] = button_reply.get("id", "")
+                dados_extras["button_title"] = button_reply.get("title", "")
             elif interactive_type == "list_reply":
                 list_reply = interactive.get("list_reply", {})
                 content = list_reply.get("title", "") or list_reply.get("id", "")
+                dados_extras["list_id"] = list_reply.get("id", "")
+                dados_extras["list_title"] = list_reply.get("title", "")
+                dados_extras["list_description"] = list_reply.get("description", "")
+
+        elif message_type == "image":
+            img = message.get("image", {})
+            content = img.get("caption", "") or "📷 Imagem"
+            dados_extras["media_id"] = img.get("id")
+            dados_extras["mime_type"] = img.get("mime_type", "image/jpeg")
+
+        elif message_type == "audio":
+            audio = message.get("audio", {})
+            content = "🎵 Áudio"
+            dados_extras["media_id"] = audio.get("id")
+            dados_extras["mime_type"] = audio.get("mime_type", "audio/ogg")
+
+        elif message_type == "document":
+            doc = message.get("document", {})
+            filename = doc.get("filename", "documento")
+            content = f"📄 {filename}"
+            dados_extras["media_id"] = doc.get("id")
+            dados_extras["mime_type"] = doc.get("mime_type", "application/octet-stream")
+            dados_extras["filename"] = filename
+
+        elif message_type == "video":
+            video = message.get("video", {})
+            content = video.get("caption", "") or "🎥 Vídeo"
+            dados_extras["media_id"] = video.get("id")
+            dados_extras["mime_type"] = video.get("mime_type", "video/mp4")
+
+        else:
+            content = f"[{message_type}]"
 
         print(f"📥 Mensagem de {from_number}: {content}")
 
@@ -334,6 +370,11 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         if atendimento and atendimento.status == 'em_atendimento':
             processar_bot = False
             print(f"ℹ️  Em atendimento humano")
+
+        # Bot não processa mídia — salva manualmente com dados_extras corretos
+        if message_type in {'image', 'audio', 'document', 'video'}:
+            processar_bot = False
+            print(f"📎 Mídia recebida ({message_type}) — salvando sem bot")
 
         if not atendimento:
             msg_existente = db.query(MensagemLog).filter(
@@ -373,7 +414,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                 direcao="recebida",
                 tipo_mensagem=message_type,
                 conteudo=content,
-                dados_extras={},
+                dados_extras=dados_extras,
                 estado_sessao="em_atendimento"
             )
             db.add(mensagem_recebida)

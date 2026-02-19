@@ -268,6 +268,7 @@ class Atendimento(Base):
     __tablename__ = "painel_atendimento"
 
     id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id"), nullable=True, index=True)
     whatsapp_number = Column(String(20), nullable=False, index=True)
     atendente_id = Column(Integer, ForeignKey("painel_atendente.id"))
     status = Column(String(20), default='bot')  # aguardando, em_atendimento, finalizado, bot
@@ -276,12 +277,16 @@ class Atendimento(Base):
     finalizado_em = Column(DateTime(timezone=True))
     ultima_mensagem_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     notas_internas = Column(Text)
+    protocolo = Column(String(10), nullable=True)
+    motivo_encerramento = Column(String(100), nullable=True)
+    observacao_encerramento = Column(Text, nullable=True)
 
     # Relationships
     atendente = relationship("Atendente", back_populates="atendimentos")
 
     __table_args__ = (
         Index('idx_whatsapp_status', 'whatsapp_number', 'status'),
+        Index('idx_atendimento_empresa', 'empresa_id'),
     )
 
 

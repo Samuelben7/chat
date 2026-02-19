@@ -242,6 +242,92 @@ class WhatsAppService:
 
             return data["messages"][0]["id"]
 
+    async def get_media_url(self, media_id: str) -> Dict:
+        """
+        Obtém URL temporária de download para um media_id da Meta.
+
+        Returns:
+            dict com: url, mime_type, file_size, id
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://graph.facebook.com/v21.0/{media_id}",
+                headers={"Authorization": f"Bearer {self.empresa.whatsapp_token}"},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def upload_media(self, file_bytes: bytes, mime_type: str, file_name: str) -> str:
+        """
+        Faz upload de mídia para a Meta e retorna o media_id.
+
+        Args:
+            file_bytes: Bytes do arquivo em memória (sem salvar em disco)
+            mime_type: MIME type do arquivo
+            file_name: Nome do arquivo
+
+        Returns:
+            media_id: ID da mídia na Meta
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/media",
+                headers={"Authorization": f"Bearer {self.empresa.whatsapp_token}"},
+                files={"file": (file_name, file_bytes, mime_type)},
+                data={"messaging_product": "whatsapp", "type": mime_type},
+                timeout=60.0
+            )
+            if not response.is_success:
+                print(f"❌ Meta upload error {response.status_code}: {response.text}")
+            response.raise_for_status()
+            return response.json()["id"]
+
+    async def send_media_message(
+        self,
+        to: str,
+        media_type: str,
+        media_id: str,
+        caption: Optional[str] = None,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        Envia mensagem de mídia (image, audio, document, video) usando media_id.
+
+        Args:
+            to: Número de WhatsApp do destinatário
+            media_type: Tipo da mídia (image, audio, document, video)
+            media_id: ID da mídia obtido via upload_media
+            caption: Legenda opcional (para image, video, document)
+            filename: Nome do arquivo (apenas para document)
+
+        Returns:
+            message_id: ID da mensagem enviada
+        """
+        media_data: Dict = {"id": media_id}
+        if caption and media_type in ("image", "video", "document"):
+            media_data["caption"] = caption
+        if filename and media_type == "document":
+            media_data["filename"] = filename
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": media_type,
+            media_type: media_data
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/messages",
+                headers=self.headers,
+                json=payload,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()["messages"][0]["id"]
+
     async def mark_as_read(self, message_id: str) -> bool:
         """
         Marca mensagem como lida.
