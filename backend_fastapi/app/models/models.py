@@ -100,10 +100,22 @@ class Cliente(Base):
     # Sistema
     foto_url = Column(String(500))
 
+    # CRM - Funil de Vendas
+    funil_etapa = Column(String(30), default='novo_lead')  # novo_lead/pediu_orcamento/orcamento_enviado/negociacao/fechado/perdido
+    valor_estimado = Column(Numeric(12, 2), nullable=True)
+    responsavel_id = Column(Integer, ForeignKey('atendente.id', ondelete='SET NULL'), nullable=True)
+    resumo_conversa = Column(Text, nullable=True)
+    preferencias = Column(Text, nullable=True)
+    observacoes_crm = Column(Text, nullable=True)
+    criado_em_crm = Column(DateTime, server_default=func.now())
+    atualizado_em_crm = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
     # Relationships
     empresa = relationship("Empresa", back_populates="clientes")
     contratacoes = relationship("Contratacao", back_populates="cliente")
     reclamacoes = relationship("Reclamacao", back_populates="cliente")
+    responsavel = relationship("Atendente", foreign_keys=[responsavel_id])
+    crm_tags = relationship("CrmClienteTag", back_populates="cliente", cascade="all, delete-orphan")
 
     # Alias para facilitar uso
     @property
@@ -535,3 +547,33 @@ class AgendaAgendamento(Base):
 
     slot = relationship('AgendaSlot', back_populates='agendamentos')
     cliente = relationship('Cliente')
+
+
+# ==================== CRM - TAGS & KANBAN ====================
+
+class CrmTag(Base):
+    """Tags coloridas para classificar clientes/leads."""
+    __tablename__ = 'crm_tag'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id', ondelete='CASCADE'), nullable=False, index=True)
+    nome = Column(String(50), nullable=False)
+    cor = Column(String(7), default='#3B82F6')   # hex color
+    emoji = Column(String(10), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    clientes = relationship('CrmClienteTag', back_populates='tag', cascade='all, delete-orphan')
+
+
+class CrmClienteTag(Base):
+    """Relacionamento many-to-many entre Cliente e Tag."""
+    __tablename__ = 'crm_cliente_tag'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id', ondelete='CASCADE'), nullable=False)
+    cliente_id = Column(Integer, ForeignKey('whatsapp_bot_cliente.id', ondelete='CASCADE'), nullable=False, index=True)
+    tag_id = Column(Integer, ForeignKey('crm_tag.id', ondelete='CASCADE'), nullable=False)
+    adicionado_em = Column(DateTime, server_default=func.now())
+
+    cliente = relationship('Cliente', back_populates='crm_tags')
+    tag = relationship('CrmTag', back_populates='clientes')
