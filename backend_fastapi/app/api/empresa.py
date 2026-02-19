@@ -12,7 +12,8 @@ from pydantic import BaseModel
 
 from app.database.database import get_db
 from app.models.models import (
-    Atendimento, Atendente, Cliente, MensagemLog
+    Atendimento, Atendente, Cliente, MensagemLog,
+    CrmTag, CrmClienteTag, MessageTemplate, ListaContatos
 )
 from app.core.dependencies import CurrentEmpresa, EmpresaIdFromToken
 
@@ -322,3 +323,120 @@ async def obter_dados_grafico(
         labels=labels,
         valores=valores
     )
+
+
+@router.get("/empresa/metricas-crm")
+async def obter_metricas_crm(
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna métricas específicas do CRM para o dashboard.
+    """
+    # Total de leads (clientes) da empresa
+    total_leads = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id
+    ).count()
+
+    # Leads por etapa do funil
+    etapas_query = db.query(
+        Cliente.funil_etapa, func.count(Cliente.id)
+    ).filter(
+        Cliente.empresa_id == empresa_id
+    ).group_by(Cliente.funil_etapa).all()
+
+    leads_por_etapa = {etapa: count for etapa, count in etapas_query}
+
+    # Valor do pipeline (excluindo fechado e perdido)
+    valor_pipeline = db.query(
+        func.coalesce(func.sum(Cliente.valor_estimado), 0)
+    ).filter(
+        Cliente.empresa_id == empresa_id,
+        ~Cliente.funil_etapa.in_(['fechado', 'perdido'])
+    ).scalar()
+
+    # Valor fechado
+    valor_fechado = db.query(
+        func.coalesce(func.sum(Cliente.valor_estimado), 0)
+    ).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.funil_etapa == 'fechado'
+    ).scalar()
+
+    # Leads novos no mês atual
+    now = datetime.now()
+    primeiro_dia_mes = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    leads_novos_mes = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.criado_em_crm >= primeiro_dia_mes
+    ).count()
+
+    # Taxa de conversão (fechado / total)
+    total_fechado = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.funil_etapa == 'fechado'
+    ).count()
+    taxa_conversao = round((total_fechado / total_leads * 100), 2) if total_leads > 0 else 0.0
+
+    # Ticket médio (média do valor_estimado para fechados)
+    ticket_medio = db.query(
+        func.coalesce(func.avg(Cliente.valor_estimado), 0)
+    ).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.funil_etapa == 'fechado'
+    ).scalar()
+
+    # Top 5 tags com mais clientes
+    top_tags_query = db.query(
+        CrmTag.nome, func.count(CrmClienteTag.id).label('total')
+    ).join(
+        CrmClienteTag, CrmTag.id == CrmClienteTag.tag_id
+    ).filter(
+        CrmTag.empresa_id == empresa_id
+    ).group_by(CrmTag.nome).order_by(
+        func.count(CrmClienteTag.id).desc()
+    ).limit(5).all()
+
+    top_tags = [{"nome": nome, "total": total} for nome, total in top_tags_query]
+
+    return {
+        "total_leads": total_leads,
+        "leads_por_etapa": leads_por_etapa,
+        "valor_pipeline": float(valor_pipeline),
+        "valor_fechado": float(valor_fechado),
+        "leads_novos_mes": leads_novos_mes,
+        "taxa_conversao": taxa_conversao,
+        "ticket_medio": float(ticket_medio),
+        "top_tags": top_tags
+    }
+
+
+@router.get("/empresa/metricas-envio")
+async def obter_metricas_envio(
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna estatísticas de envio em massa para o dashboard.
+    """
+    # Templates aprovados
+    templates_aprovados = db.query(MessageTemplate).filter(
+        MessageTemplate.empresa_id == empresa_id,
+        MessageTemplate.status == 'APPROVED'
+    ).count()
+
+    # Total de contatos (clientes) da empresa
+    total_contatos = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id
+    ).count()
+
+    # Total de listas de contatos
+    total_listas = db.query(ListaContatos).filter(
+        ListaContatos.empresa_id == empresa_id
+    ).count()
+
+    return {
+        "templates_aprovados": templates_aprovados,
+        "total_contatos": total_contatos,
+        "total_listas": total_listas
+    }
