@@ -103,7 +103,7 @@ class Cliente(Base):
     # CRM - Funil de Vendas
     funil_etapa = Column(String(30), default='novo_lead')  # novo_lead/pediu_orcamento/orcamento_enviado/negociacao/fechado/perdido
     valor_estimado = Column(Numeric(12, 2), nullable=True)
-    responsavel_id = Column(Integer, ForeignKey('atendente.id', ondelete='SET NULL'), nullable=True)
+    responsavel_id = Column(Integer, ForeignKey('painel_atendente.id', ondelete='SET NULL'), nullable=True)
     resumo_conversa = Column(Text, nullable=True)
     preferencias = Column(Text, nullable=True)
     observacoes_crm = Column(Text, nullable=True)

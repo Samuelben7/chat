@@ -36,7 +36,7 @@ def upgrade():
     crm_columns = [
         ('funil_etapa', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN funil_etapa VARCHAR(30) DEFAULT 'novo_lead'"),
         ('valor_estimado', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN valor_estimado NUMERIC(12,2)"),
-        ('responsavel_id', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN responsavel_id INTEGER REFERENCES atendente(id) ON DELETE SET NULL"),
+        ('responsavel_id', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN responsavel_id INTEGER REFERENCES painel_atendente(id) ON DELETE SET NULL"),
         ('resumo_conversa', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN resumo_conversa TEXT"),
         ('preferencias', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN preferencias TEXT"),
         ('observacoes_crm', "ALTER TABLE whatsapp_bot_cliente ADD COLUMN observacoes_crm TEXT"),
