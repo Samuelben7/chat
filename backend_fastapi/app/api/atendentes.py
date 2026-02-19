@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.database.database import get_db
-from app.models.models import Atendente
+from app.models.models import Atendente, AtendenteAuth, Atendimento
 from app.schemas.schemas import (
     AtendenteCreate, AtendenteUpdate, AtendenteResponse
 )
@@ -115,15 +115,34 @@ async def atualizar_atendente(
 @router.delete("/atendentes/{atendente_id}")
 async def deletar_atendente(
     atendente_id: int,
+    empresa_id: int = Depends(get_empresa_id_from_token),
     db: Session = Depends(get_db)
 ):
     """
-    Remove um atendente do sistema.
+    Remove um atendente do sistema (apenas empresa pode deletar).
+    Atendimentos ativos são transferidos para fila (aguardando).
     """
-    atendente = db.query(Atendente).filter(Atendente.id == atendente_id).first()
+    atendente = db.query(Atendente).filter(
+        Atendente.id == atendente_id,
+        Atendente.empresa_id == empresa_id
+    ).first()
 
     if not atendente:
         raise HTTPException(status_code=404, detail="Atendente não encontrado")
+
+    # Liberar atendimentos ativos deste atendente (volta para fila)
+    db.query(Atendimento).filter(
+        Atendimento.atendente_id == atendente_id,
+        Atendimento.status == 'em_atendimento'
+    ).update({
+        "atendente_id": None,
+        "status": "aguardando"
+    })
+
+    # Remover credenciais de login
+    db.query(AtendenteAuth).filter(
+        AtendenteAuth.atendente_id == atendente_id
+    ).delete()
 
     db.delete(atendente)
     db.commit()

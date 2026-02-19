@@ -13,7 +13,7 @@ import re
 import logging
 
 from app.database.database import get_db
-from app.models.models import Cliente, MensagemLog, ListaContatos, ListaContatosMembro
+from app.models.models import Cliente, MensagemLog, ListaContatos, ListaContatosMembro, Atendimento
 from app.core.dependencies import CurrentEmpresa
 from app.schemas.contatos import (
     ContatoUnificado, ContatoListResponse,
@@ -460,3 +460,43 @@ async def deletar_lista(
     db.commit()
 
     return {"detail": "Lista deletada com sucesso"}
+
+
+# ========== DELETAR CONTATO ==========
+
+@router.delete("/contatos/{whatsapp_number}")
+async def deletar_contato(
+    whatsapp_number: str,
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db),
+):
+    """
+    Apaga um contato (cliente) e seu histórico de mensagens.
+    Apenas empresa pode executar esta operação.
+    """
+    # Remove da lista de contatos membros
+    db.query(ListaContatosMembro).filter(
+        ListaContatosMembro.whatsapp_number == whatsapp_number
+    ).delete()
+
+    # Remove cliente registrado (se existir)
+    db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.whatsapp_number == whatsapp_number
+    ).delete()
+
+    # Remove histórico de mensagens
+    db.query(MensagemLog).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.whatsapp_number == whatsapp_number
+    ).delete()
+
+    # Remove atendimentos
+    db.query(Atendimento).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.whatsapp_number == whatsapp_number
+    ).delete()
+
+    db.commit()
+
+    return {"detail": f"Contato {whatsapp_number} e histórico removidos com sucesso"}

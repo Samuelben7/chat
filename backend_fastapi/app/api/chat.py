@@ -649,3 +649,40 @@ async def listar_motivos_encerramento(db: Session = Depends(get_db)):
     result = db.execute(text("SELECT codigo, nome, emoji FROM motivos_encerramento WHERE ativo = true ORDER BY ordem"))
     motivos = [{"codigo": row[0], "nome": row[1], "emoji": row[2]} for row in result]
     return motivos
+
+
+@router.delete("/chat/conversa/{whatsapp_number}")
+async def deletar_conversa(
+    whatsapp_number: str,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """
+    Apaga o histórico de mensagens de uma conversa (apenas empresa).
+    Mantém o cadastro do cliente, apenas remove mensagens e atendimento.
+    """
+    if user.get("role") != "empresa":
+        raise HTTPException(status_code=403, detail="Apenas a empresa pode deletar conversas")
+
+    # Remove mensagens
+    deletadas = db.query(MensagemLog).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.whatsapp_number == whatsapp_number
+    ).delete()
+
+    # Finaliza/remove atendimento ativo
+    db.query(Atendimento).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.whatsapp_number == whatsapp_number
+    ).delete()
+
+    db.commit()
+
+    # Notifica via WS para remover da sidebar
+    await manager.broadcast(
+        {"event": "conversa_deletada", "data": {"whatsapp_number": whatsapp_number}},
+        empresa_id=empresa_id
+    )
+
+    return {"detail": f"Conversa deletada ({deletadas} mensagens removidas)"}
