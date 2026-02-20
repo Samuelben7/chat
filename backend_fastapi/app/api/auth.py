@@ -20,7 +20,12 @@ from app.schemas.auth import (
     RegistroEmpresaRequest,
     RegistroEmpresaResponse,
     ConfirmarEmailRequest,
+    ConnectWhatsAppRequest,
+    ConnectWhatsAppResponse,
+    WhatsAppStatusResponse,
+    EmpresaAdminResponse,
 )
+from app.core.config import settings
 from app.core.auth import (
     verificar_senha,
     hash_senha,
@@ -514,3 +519,171 @@ async def confirmar_email(
         "empresa_id": empresa.id,
         "empresa_nome": empresa.nome
     }
+
+
+# ========== CONNECT WHATSAPP (EMBEDDED SIGNUP) ==========
+
+@router.post("/empresa/connect-whatsapp", response_model=ConnectWhatsAppResponse)
+async def connect_whatsapp(
+    dados: ConnectWhatsAppRequest,
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Conecta WhatsApp via Meta Embedded Signup.
+
+    1. Troca code por access_token (server-side)
+    2. Inscreve app na WABA
+    3. Registra número no Cloud API
+    4. Salva credenciais na empresa
+    5. Notifica admin
+    """
+    empresa_id = validar_permissao_empresa(token)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Empresa não encontrada"
+        )
+
+    # 1. Trocar code por access_token
+    from app.services.meta_signup import (
+        exchange_code_for_token,
+        subscribe_app_to_waba,
+        register_phone_number,
+    )
+
+    try:
+        access_token = await exchange_code_for_token(dados.code)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao obter token da Meta: {str(e)}"
+        )
+
+    # 2. Inscrever app na WABA (falha não é fatal)
+    try:
+        await subscribe_app_to_waba(dados.waba_id, access_token)
+    except Exception as e:
+        print(f"[WARN] Erro ao inscrever app na WABA: {e}")
+
+    # 3. Registrar número (falha não é fatal)
+    try:
+        await register_phone_number(dados.phone_number_id, access_token)
+    except Exception as e:
+        print(f"[WARN] Erro ao registrar número: {e}")
+
+    # 4. Salvar credenciais
+    empresa.whatsapp_token = access_token
+    empresa.phone_number_id = dados.phone_number_id
+    empresa.waba_id = dados.waba_id
+    db.commit()
+
+    print(f"[INFO] WhatsApp conectado - Empresa: {empresa.nome} | WABA: {dados.waba_id} | Phone: {dados.phone_number_id}")
+
+    # 5. Notificar admin via Celery
+    try:
+        from app.tasks.tasks import notificar_admin_nova_empresa_task
+        notificar_admin_nova_empresa_task.delay(
+            empresa_id=empresa.id,
+            nome=empresa.nome,
+            email=empresa.email,
+            waba_id=dados.waba_id,
+            phone_number_id=dados.phone_number_id
+        )
+    except Exception as e:
+        print(f"[WARN] Erro ao disparar notificação admin: {e}")
+
+    return ConnectWhatsAppResponse(
+        mensagem="WhatsApp conectado com sucesso!",
+        phone_number_id=dados.phone_number_id,
+        waba_id=dados.waba_id,
+        conectado=True
+    )
+
+
+# ========== WHATSAPP STATUS ==========
+
+@router.get("/empresa/whatsapp-status", response_model=WhatsAppStatusResponse)
+async def whatsapp_status(
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna status da conexão WhatsApp da empresa.
+    """
+    empresa_id = validar_permissao_empresa(token)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Empresa não encontrada"
+        )
+
+    conectado = (
+        empresa.whatsapp_token is not None
+        and empresa.whatsapp_token != "TOKEN_PENDENTE"
+        and not empresa.phone_number_id.startswith("PENDENTE_")
+    )
+
+    return WhatsAppStatusResponse(
+        conectado=conectado,
+        phone_number_id=empresa.phone_number_id if conectado else None,
+        waba_id=empresa.waba_id if conectado else None,
+    )
+
+
+# ========== ADMIN PANEL ==========
+
+@router.get("/admin/empresas", response_model=list[EmpresaAdminResponse])
+async def listar_empresas_admin(
+    admin_key: str = None,
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista todas as empresas cadastradas (painel admin).
+    Requer ADMIN_SECRET_KEY ou ser o admin configurado.
+    """
+    payload = decodificar_token(token)
+    email = payload.get("sub")
+
+    # Verificar se é admin: por email configurado ou por admin_key
+    is_admin = False
+    if settings.ADMIN_NOTIFICATION_EMAIL and email == settings.ADMIN_NOTIFICATION_EMAIL:
+        is_admin = True
+    if settings.ADMIN_SECRET_KEY and admin_key == settings.ADMIN_SECRET_KEY:
+        is_admin = True
+
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito ao administrador"
+        )
+
+    empresas = db.query(Empresa).order_by(Empresa.id.desc()).all()
+
+    result = []
+    for emp in empresas:
+        conectado = (
+            emp.whatsapp_token is not None
+            and emp.whatsapp_token != "TOKEN_PENDENTE"
+            and emp.phone_number_id is not None
+            and not emp.phone_number_id.startswith("PENDENTE_")
+        )
+        result.append(EmpresaAdminResponse(
+            id=emp.id,
+            nome=emp.nome,
+            cnpj=emp.cnpj,
+            email=emp.email,
+            telefone=emp.telefone,
+            ativa=emp.ativa,
+            whatsapp_conectado=conectado,
+            phone_number_id=emp.phone_number_id if conectado else None,
+            waba_id=emp.waba_id if conectado else None,
+            criado_em=emp.criada_em if hasattr(emp, 'criada_em') else None,
+        ))
+
+    return result

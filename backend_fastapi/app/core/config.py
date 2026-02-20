@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     INTERNAL_API_KEY: str = "celery-internal-key-2026"
     INTERNAL_API_URL: str = "http://api:8000"
 
+    # Meta Embedded Signup (Tech Provider)
+    META_APP_ID: str = ""
+    META_APP_SECRET: str = ""
+    META_ES_CONFIG_ID: str = ""
+    ADMIN_NOTIFICATION_EMAIL: str = ""
+    ADMIN_SECRET_KEY: str = ""
+
     # App
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"

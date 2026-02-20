@@ -337,3 +337,122 @@ def enviar_email_confirmacao(
     except Exception as e:
         print(f"❌ Erro ao enviar email: {e}")
         return False
+
+
+def enviar_email_admin_notificacao(
+    empresa_id: int,
+    nome_empresa: str,
+    email_empresa: str,
+    waba_id: str,
+    phone_number_id: str
+) -> bool:
+    """
+    Envia email para o admin (Samuel) notificando sobre nova empresa com WhatsApp conectado.
+    """
+    try:
+        from app.core.config import settings
+
+        admin_email = settings.ADMIN_NOTIFICATION_EMAIL
+        if not admin_email:
+            print("[WARN] ADMIN_NOTIFICATION_EMAIL não configurado")
+            return False
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e27; padding: 40px 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }}
+                .header {{ background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%); padding: 40px 30px; text-align: center; }}
+                .header h1 {{ color: white; font-size: 24px; margin: 0; }}
+                .header p {{ color: rgba(255,255,255,0.8); font-size: 14px; margin-top: 8px; }}
+                .content {{ padding: 40px; }}
+                .info-box {{ background: #f8f9ff; border-radius: 12px; padding: 24px; margin: 20px 0; }}
+                .info-row {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }}
+                .info-row:last-child {{ border-bottom: none; }}
+                .info-label {{ font-weight: 600; color: #1a1f3a; font-size: 14px; }}
+                .info-value {{ color: #555; font-size: 14px; }}
+                .badge {{ display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 700; }}
+                .badge-success {{ background: #dcfce7; color: #166534; }}
+                .footer {{ background: linear-gradient(135deg, #1a1f3a 0%, #0a0e27 100%); padding: 30px; text-align: center; }}
+                .footer p {{ color: #b8c1ec; font-size: 13px; margin: 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Nova Empresa Conectou WhatsApp</h1>
+                    <p>Embedded Signup concluido com sucesso</p>
+                </div>
+                <div class="content">
+                    <p style="color: #555; font-size: 16px; line-height: 1.6;">
+                        Uma nova empresa completou o fluxo de Embedded Signup e conectou o WhatsApp Business.
+                    </p>
+                    <div class="info-box">
+                        <div class="info-row">
+                            <span class="info-label">Empresa ID</span>
+                            <span class="info-value">#{empresa_id}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Nome</span>
+                            <span class="info-value">{nome_empresa}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Email</span>
+                            <span class="info-value">{email_empresa}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">WABA ID</span>
+                            <span class="info-value">{waba_id}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Phone Number ID</span>
+                            <span class="info-value">{phone_number_id}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Status</span>
+                            <span class="badge badge-success">WhatsApp Conectado</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>&copy; 2026 WhatsApp Sistema - Painel Admin</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
+
+        if not sender_password or not sender_email:
+            print("[DEBUG] Email admin notificacao:")
+            print(f"  Empresa: {nome_empresa} (ID: {empresa_id})")
+            print(f"  Email: {email_empresa}")
+            print(f"  WABA: {waba_id} | Phone: {phone_number_id}")
+            return True
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"Nova Empresa WhatsApp: {nome_empresa}"
+        msg['From'] = f"WhatsApp Sistema <{sender_email}>"
+        msg['To'] = admin_email
+
+        html_part = MIMEText(html_content, 'html')
+        msg.attach(html_part)
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, admin_email, msg.as_string())
+
+        print(f"[OK] Email admin enviado para {admin_email}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao enviar email admin: {e}")
+        return False

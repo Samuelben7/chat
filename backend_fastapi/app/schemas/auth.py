@@ -90,3 +90,42 @@ class RegistroEmpresaResponse(BaseModel):
 class ConfirmarEmailRequest(BaseModel):
     """Request para confirmar email com token"""
     token: str
+
+
+class ConnectWhatsAppRequest(BaseModel):
+    """Request para conectar WhatsApp via Embedded Signup"""
+    code: str
+    phone_number_id: str
+    waba_id: str
+
+
+class ConnectWhatsAppResponse(BaseModel):
+    """Response após conectar WhatsApp"""
+    mensagem: str
+    phone_number_id: str
+    waba_id: str
+    conectado: bool = True
+
+
+class WhatsAppStatusResponse(BaseModel):
+    """Response com status da conexão WhatsApp"""
+    conectado: bool
+    phone_number_id: Optional[str] = None
+    waba_id: Optional[str] = None
+
+
+class EmpresaAdminResponse(BaseModel):
+    """Response com dados da empresa para painel admin"""
+    id: int
+    nome: str
+    cnpj: Optional[str] = None
+    email: str
+    telefone: Optional[str] = None
+    ativa: bool
+    whatsapp_conectado: bool
+    phone_number_id: Optional[str] = None
+    waba_id: Optional[str] = None
+    criado_em: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

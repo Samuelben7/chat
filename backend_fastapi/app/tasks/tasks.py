@@ -667,6 +667,40 @@ def notificar_atendente(atendente_id: int, mensagem: str):
 
 # ========== TASK: ENVIAR EMAIL DE CONFIRMAÇÃO ==========
 
+@celery_app.task(name="app.tasks.tasks.notificar_admin_nova_empresa_task")
+def notificar_admin_nova_empresa_task(
+    empresa_id: int,
+    nome: str,
+    email: str,
+    waba_id: str,
+    phone_number_id: str
+):
+    """
+    Task para notificar o admin (Samuel) quando uma empresa conecta o WhatsApp.
+    """
+    try:
+        from app.services.email_service import enviar_email_admin_notificacao
+
+        sucesso = enviar_email_admin_notificacao(
+            empresa_id=empresa_id,
+            nome_empresa=nome,
+            email_empresa=email,
+            waba_id=waba_id,
+            phone_number_id=phone_number_id
+        )
+
+        if sucesso:
+            print(f"[OK] Admin notificado sobre empresa {nome} (ID: {empresa_id})")
+            return {"success": True, "empresa_id": empresa_id}
+        else:
+            print(f"[WARN] Falha ao notificar admin sobre empresa {nome}")
+            return {"success": False, "empresa_id": empresa_id}
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao notificar admin: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @celery_app.task(name="app.tasks.tasks.enviar_email_confirmacao_task")
 def enviar_email_confirmacao_task(destinatario: str, nome_empresa: str, token: str):
     """
