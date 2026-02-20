@@ -23,6 +23,7 @@ from app.schemas.auth import (
     ConnectWhatsAppRequest,
     ConnectWhatsAppResponse,
     WhatsAppStatusResponse,
+    WhatsAppProfileResponse,
     EmpresaAdminResponse,
 )
 from app.core.config import settings
@@ -31,8 +32,10 @@ from app.core.auth import (
     hash_senha,
     criar_token_empresa,
     criar_token_atendente,
+    criar_token_admin,
     decodificar_token,
     validar_permissao_empresa,
+    validar_permissao_admin,
 )
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
@@ -94,13 +97,22 @@ async def login_empresa(
     empresa_auth.ultimo_login = datetime.utcnow()
     db.commit()
 
-    # Gerar token
-    token = criar_token_empresa(empresa_auth.empresa_id, empresa_auth.email)
+    # Gerar token — admin recebe role='admin' para acesso ao painel
+    is_admin = (
+        settings.ADMIN_NOTIFICATION_EMAIL
+        and empresa_auth.email == settings.ADMIN_NOTIFICATION_EMAIL
+    )
+    if is_admin:
+        token = criar_token_admin(empresa_auth.empresa_id, empresa_auth.email)
+        role = "admin"
+    else:
+        token = criar_token_empresa(empresa_auth.empresa_id, empresa_auth.email)
+        role = "empresa"
 
     return TokenResponse(
         access_token=token,
         token_type="bearer",
-        role="empresa",
+        role=role,
         empresa_id=empresa_auth.empresa_id,
         primeiro_login=False
     )
@@ -687,3 +699,122 @@ async def listar_empresas_admin(
         ))
 
     return result
+
+
+# ========== WHATSAPP PROFILE (EMPRESA) ==========
+
+@router.get("/empresa/whatsapp-profile", response_model=WhatsAppProfileResponse)
+async def whatsapp_profile_empresa(
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna status + perfil do WhatsApp da empresa logada via Meta API.
+    """
+    payload = decodificar_token(token)
+    role = payload.get("role")
+    if role not in ("empresa", "admin"):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    empresa_id = payload.get("empresa_id")
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    conectado = (
+        empresa.whatsapp_token is not None
+        and empresa.whatsapp_token != "TOKEN_PENDENTE"
+        and empresa.phone_number_id is not None
+        and not empresa.phone_number_id.startswith("PENDENTE_")
+    )
+
+    if not conectado:
+        return WhatsAppProfileResponse(conectado=False)
+
+    from app.services.meta_signup import get_phone_number_info, get_business_profile
+
+    phone_info = {}
+    biz_profile = {}
+
+    try:
+        phone_info = await get_phone_number_info(empresa.phone_number_id, empresa.whatsapp_token)
+    except Exception as e:
+        print(f"[WARN] Erro ao buscar phone info: {e}")
+
+    try:
+        biz_profile = await get_business_profile(empresa.phone_number_id, empresa.whatsapp_token)
+    except Exception as e:
+        print(f"[WARN] Erro ao buscar biz profile: {e}")
+
+    return WhatsAppProfileResponse(
+        conectado=True,
+        phone_number_id=empresa.phone_number_id,
+        waba_id=empresa.waba_id,
+        display_phone_number=phone_info.get("display_phone_number"),
+        verified_name=phone_info.get("verified_name"),
+        status=phone_info.get("status"),
+        quality_rating=phone_info.get("quality_rating"),
+        name_status=phone_info.get("name_status"),
+        about=biz_profile.get("about"),
+        profile_picture_url=biz_profile.get("profile_picture_url"),
+    )
+
+
+# ========== WHATSAPP PROFILE (ADMIN) ==========
+
+@router.get("/admin/empresa/{empresa_id}/whatsapp-profile", response_model=WhatsAppProfileResponse)
+async def whatsapp_profile_admin(
+    empresa_id: int,
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin: retorna status + perfil + token (preview) de qualquer empresa.
+    """
+    validar_permissao_admin(token)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    conectado = (
+        empresa.whatsapp_token is not None
+        and empresa.whatsapp_token != "TOKEN_PENDENTE"
+        and empresa.phone_number_id is not None
+        and not empresa.phone_number_id.startswith("PENDENTE_")
+    )
+
+    if not conectado:
+        return WhatsAppProfileResponse(conectado=False)
+
+    from app.services.meta_signup import get_phone_number_info, get_business_profile
+
+    phone_info = {}
+    biz_profile = {}
+
+    try:
+        phone_info = await get_phone_number_info(empresa.phone_number_id, empresa.whatsapp_token)
+    except Exception as e:
+        print(f"[WARN] Admin - Erro ao buscar phone info empresa {empresa_id}: {e}")
+
+    try:
+        biz_profile = await get_business_profile(empresa.phone_number_id, empresa.whatsapp_token)
+    except Exception as e:
+        print(f"[WARN] Admin - Erro ao buscar biz profile empresa {empresa_id}: {e}")
+
+    # Token preview: primeiros 30 caracteres para suporte
+    token_preview = empresa.whatsapp_token[:40] + "..." if empresa.whatsapp_token else None
+
+    return WhatsAppProfileResponse(
+        conectado=True,
+        phone_number_id=empresa.phone_number_id,
+        waba_id=empresa.waba_id,
+        display_phone_number=phone_info.get("display_phone_number"),
+        verified_name=phone_info.get("verified_name"),
+        status=phone_info.get("status"),
+        quality_rating=phone_info.get("quality_rating"),
+        name_status=phone_info.get("name_status"),
+        about=biz_profile.get("about"),
+        profile_picture_url=biz_profile.get("profile_picture_url"),
+        token_preview=token_preview,
+    )

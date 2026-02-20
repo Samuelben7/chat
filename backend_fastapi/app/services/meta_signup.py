@@ -77,6 +77,41 @@ async def subscribe_app_to_waba(waba_id: str, access_token: str) -> bool:
         return True
 
 
+async def get_phone_number_info(phone_number_id: str, access_token: str) -> dict:
+    """
+    Busca status e informações do número de telefone via Meta API.
+    Retorna: display_phone_number, verified_name, status, quality_rating, name_status
+    """
+    url = f"{GRAPH_API_BASE}/{phone_number_id}"
+    params = {
+        "fields": "display_phone_number,verified_name,status,quality_rating,name_status",
+        "access_token": access_token,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url, params=params)
+        if response.status_code != 200:
+            logger.warning(f"Erro ao buscar info do número {phone_number_id}: {response.text}")
+            raise Exception(f"Meta API error: {response.text}")
+        return response.json()
+
+
+async def get_business_profile(phone_number_id: str, access_token: str) -> dict:
+    """
+    Busca perfil do WhatsApp Business (about, foto, etc).
+    """
+    url = f"{GRAPH_API_BASE}/{phone_number_id}/whatsapp_business_profile"
+    params = {
+        "fields": "about,address,description,email,profile_picture_url,websites,vertical",
+        "access_token": access_token,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url, params=params)
+        if response.status_code != 200:
+            logger.warning(f"Erro ao buscar perfil do número {phone_number_id}: {response.text}")
+            return {}
+        return response.json()
+
+
 async def register_phone_number(phone_number_id: str, access_token: str) -> bool:
     """
     Registra o número de telefone no Cloud API.

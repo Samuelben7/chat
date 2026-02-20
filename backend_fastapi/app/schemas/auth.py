@@ -114,6 +114,22 @@ class WhatsAppStatusResponse(BaseModel):
     waba_id: Optional[str] = None
 
 
+class WhatsAppProfileResponse(BaseModel):
+    """Status e perfil do WhatsApp Business via Meta API"""
+    conectado: bool
+    phone_number_id: Optional[str] = None
+    waba_id: Optional[str] = None
+    display_phone_number: Optional[str] = None
+    verified_name: Optional[str] = None
+    status: Optional[str] = None
+    quality_rating: Optional[str] = None
+    name_status: Optional[str] = None
+    about: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+    # Apenas para admin
+    token_preview: Optional[str] = None
+
+
 class EmpresaAdminResponse(BaseModel):
     """Response com dados da empresa para painel admin"""
     id: int

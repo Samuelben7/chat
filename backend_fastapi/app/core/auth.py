@@ -251,6 +251,28 @@ def validar_permissao_empresa(token: str) -> int:
     return extrair_empresa_id(token)
 
 
+def criar_token_admin(empresa_id: int, email: str) -> str:
+    """Cria token JWT para o administrador do sistema"""
+    data = {
+        "sub": email,
+        "empresa_id": empresa_id,
+        "role": "admin",
+        "type": "access"
+    }
+    return criar_token_acesso(data)
+
+
+def validar_permissao_admin(token: str) -> None:
+    """Valida que o token é do administrador do sistema"""
+    payload = decodificar_token(token)
+    role = payload.get("role")
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito ao administrador do sistema"
+        )
+
+
 def validar_permissao_atendente(token: str) -> tuple[int, int]:
     """
     Valida que o token é de um atendente e retorna atendente_id e empresa_id
