@@ -594,20 +594,16 @@ async def upload_template_media(
     db: Session = Depends(get_db),
 ):
     """Upload de mídia para header de template.
-    Salva localmente para preview E faz upload via Meta Resumable Upload API
-    para obter o header_handle necessário na criação de templates.
+    Imagens são automaticamente convertidas para JPEG (compatível com WhatsApp).
+    Salva localmente para preview E faz upload via Meta Resumable Upload API.
     """
-    # WhatsApp template image headers only support JPEG and PNG (not WEBP)
-    allowed_types = [
-        "image/jpeg", "image/jpg", "image/png",
-        "video/mp4", "video/3gpp",
-        "application/pdf",
-    ]
+    image_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp"}
+    allowed_types = image_types | {"video/mp4", "video/3gpp", "application/pdf"}
 
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Tipo de arquivo não suportado: {file.content_type}. Tipos aceitos: {', '.join(allowed_types)}"
+            detail=f"Tipo de arquivo não suportado: {file.content_type}. Use imagens (JPEG, PNG, WebP), vídeo (MP4) ou PDF."
         )
 
     # Max 16MB
@@ -615,11 +611,33 @@ async def upload_template_media(
     if len(contents) > 16 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Arquivo muito grande (máximo 16MB)")
 
-    # Criar diretório e salvar localmente (para preview)
     upload_dir = Path("uploads/templates")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    ext = Path(file.filename or "file").suffix
+    final_mime = file.content_type or "application/octet-stream"
+
+    # Converter imagens para JPEG (WhatsApp template headers só aceitam JPEG/PNG)
+    if file.content_type in image_types and file.content_type not in ("image/jpeg", "image/jpg", "image/png"):
+        try:
+            import io
+            from PIL import Image as PILImage
+            img = PILImage.open(io.BytesIO(contents)).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=92)
+            contents = buf.getvalue()
+            final_mime = "image/jpeg"
+            logger.info(f"Imagem convertida de {file.content_type} para JPEG")
+        except Exception as e:
+            logger.warning(f"Conversão de imagem falhou, usando original: {e}")
+
+    # Determinar extensão baseada no tipo final
+    if final_mime in ("image/jpeg", "image/jpg"):
+        ext = ".jpg"
+    elif final_mime == "image/png":
+        ext = ".png"
+    else:
+        ext = Path(file.filename or "file").suffix
+
     filename = f"template_{empresa_id}_{uuid.uuid4().hex[:8]}{ext}"
     file_path = upload_dir / filename
 
@@ -635,19 +653,13 @@ async def upload_template_media(
         service = _get_template_service(empresa)
         header_handle = await service.upload_media_to_meta(
             file_data=contents,
-            file_name=file.filename or filename,
-            file_type=file.content_type or "application/octet-stream",
+            file_name=filename,
+            file_type=final_mime,
         )
     except Exception as e:
-        # Se falhar o upload na Meta, retorna URL local sem handle
-        # O frontend mostrará aviso
-        import logging
         logging.getLogger("template_upload").warning(
             f"Meta upload failed (local file saved): {e}"
         )
-
-    # Associar imagem a template existente (se template_id informado via query)
-    # Isso será feito pelo frontend ao criar o template
 
     return MediaUploadResponse(
         url=local_url,
