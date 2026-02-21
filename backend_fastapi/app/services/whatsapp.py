@@ -15,7 +15,7 @@ class WhatsAppService:
             empresa: Objeto Empresa contendo as credenciais WhatsApp
         """
         self.empresa = empresa
-        self.base_url = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}"
+        self.base_url = f"https://graph.facebook.com/v25.0/{empresa.phone_number_id}"
         self.headers = {
             "Authorization": f"Bearer {empresa.whatsapp_token}",
             "Content-Type": "application/json"
@@ -397,6 +397,8 @@ class WhatsAppService:
                 json=payload,
                 timeout=30.0
             )
+            if not response.is_success:
+                print(f"❌ Erro ao enviar template '{template_name}' para {to}: {response.status_code} - {response.text}")
             response.raise_for_status()
             data = response.json()
 
