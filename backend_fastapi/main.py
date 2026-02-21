@@ -5,8 +5,20 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.database.database import engine, Base
 import os
+import mimetypes
 from pathlib import Path
 import asyncio
+
+# Registrar MIME types que o Python pode não ter por padrão
+# Necessário para servir arquivos com Content-Type correto (ex: para Meta API)
+mimetypes.add_type("image/jpeg", ".jpg")
+mimetypes.add_type("image/jpeg", ".jpeg")
+mimetypes.add_type("image/png", ".png")
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/gif", ".gif")
+mimetypes.add_type("video/mp4", ".mp4")
+mimetypes.add_type("audio/ogg", ".ogg")
+mimetypes.add_type("audio/mpeg", ".mp3")
 
 # Import routers
 from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm

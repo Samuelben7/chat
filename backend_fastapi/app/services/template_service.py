@@ -13,7 +13,7 @@ logger = logging.getLogger("template_service")
 class TemplateService:
     """Serviço para gerenciar templates do WhatsApp Business API."""
 
-    GRAPH_API_VERSION = "v21.0"
+    GRAPH_API_VERSION = "v25.0"
     BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
     def __init__(self, empresa: Empresa):

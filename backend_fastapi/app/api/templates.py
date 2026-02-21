@@ -597,8 +597,9 @@ async def upload_template_media(
     Salva localmente para preview E faz upload via Meta Resumable Upload API
     para obter o header_handle necessário na criação de templates.
     """
+    # WhatsApp template image headers only support JPEG and PNG (not WEBP)
     allowed_types = [
-        "image/jpeg", "image/jpg", "image/png", "image/webp",
+        "image/jpeg", "image/jpg", "image/png",
         "video/mp4", "video/3gpp",
         "application/pdf",
     ]
