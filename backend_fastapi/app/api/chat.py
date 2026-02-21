@@ -680,9 +680,9 @@ async def deletar_conversa(
     db.commit()
 
     # Notifica via WS para remover da sidebar
-    await manager.broadcast(
-        {"event": "conversa_deletada", "data": {"whatsapp_number": whatsapp_number}},
-        empresa_id=empresa_id
+    await manager.broadcast_to_empresa(
+        empresa_id,
+        {"event": "conversa_deletada", "data": {"whatsapp_number": whatsapp_number}}
     )
 
     return {"detail": f"Conversa deletada ({deletadas} mensagens removidas)"}
