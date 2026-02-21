@@ -328,6 +328,10 @@ class TemplateService:
                                      language_code: str = "pt_BR",
                                      components: Optional[List[Dict]] = None) -> str:
         """Envia mensagem de template para um contato."""
+        # Normalizar número: garantir que começa com +
+        if to and not to.startswith("+"):
+            to = f"+{to}"
+
         template = {
             "name": template_name,
             "language": {"code": language_code}
