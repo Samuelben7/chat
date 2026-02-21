@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, or_
+from sqlalchemy import desc, func, or_, and_
 from typing import List, Optional
 from datetime import datetime
 import random
@@ -172,12 +172,16 @@ async def listar_conversas(
     # Filtrar por empresa
     query = query.filter(MensagemLog.empresa_id == empresa_id)
 
-    # PERMISSÃO: Atendente vê apenas SUAS conversas OU conversas SEM atendente
+    # PERMISSÃO: Atendente vê apenas SUAS conversas OU fila real (aguardando/bot sem atendente)
+    # NÃO vê chats sendo atendidos pela empresa (atendente_id=None + status=em_atendimento)
     if user.role == "atendente":
         query = query.filter(
             or_(
                 Atendimento.atendente_id == user.atendente_id,  # Suas conversas
-                Atendimento.atendente_id == None  # Conversas na fila (sem atendente)
+                and_(
+                    Atendimento.atendente_id == None,
+                    Atendimento.status.in_(["aguardando", "bot"])  # Fila real, não empresa atendendo
+                )
             )
         )
 

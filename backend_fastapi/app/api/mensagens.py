@@ -24,14 +24,39 @@ WHATSAPP_API_MOCK = False  # API liberada! Enviando mensagens reais
 @router.post("/mensagens", response_model=MensagemResponse)
 async def enviar_mensagem(
     mensagem: MensagemCreate,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db)
 ):
     """
     Envia uma mensagem via WhatsApp API.
-
-    Modo MOCK ativo: salva apenas no banco, não envia pela API real.
-    Quando API for liberada, mude WHATSAPP_API_MOCK = False.
+    Regras:
+    - Atendente: só envia em chats que são seus (atendente_id = seu id)
+    - Empresa: só envia se não há atendente responsável (ou ela mesma assumiu)
     """
+    # Verificar atendimento ativo
+    atendimento = db.query(Atendimento).filter(
+        Atendimento.whatsapp_number == mensagem.whatsapp_number,
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.status == "em_atendimento"
+    ).order_by(Atendimento.iniciado_em.desc()).first()
+
+    if atendimento:
+        if user.role == "atendente":
+            # Atendente só pode enviar no próprio chat
+            if atendimento.atendente_id != user.atendente_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Esta conversa está sendo atendida por outro atendente."
+                )
+        elif user.role == "empresa":
+            # Empresa só pode enviar se NÃO há atendente responsável
+            if atendimento.atendente_id is not None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Esta conversa está sendo atendida por um atendente. Clique em 'Assumir' para enviar mensagens."
+                )
+
     try:
         message_id = None
 
