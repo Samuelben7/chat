@@ -662,7 +662,7 @@ async def deletar_conversa(
     Apaga o histórico de mensagens de uma conversa (apenas empresa).
     Mantém o cadastro do cliente, apenas remove mensagens e atendimento.
     """
-    if user.get("role") != "empresa":
+    if user.role != "empresa":
         raise HTTPException(status_code=403, detail="Apenas a empresa pode deletar conversas")
 
     # Remove mensagens
