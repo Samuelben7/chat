@@ -147,9 +147,10 @@ async def exportar_contatos_csv(
     registered_numbers = set()
     for c in clientes:
         writer.writerow([c.whatsapp_number, c.nome_completo, c.cidade or '', c.cpf or '', 'Sim'])
-        registered_numbers.add(c.whatsapp_number)
+        # Normalizar para deduplicação: strip '+' para comparar com MensagemLog
+        registered_numbers.add(c.whatsapp_number.lstrip('+'))
 
-    # Números não registrados
+    # Números não registrados (só em MensagemLog, excluindo duplicatas com formato diferente)
     log_numbers = db.query(
         distinct(MensagemLog.whatsapp_number)
     ).filter(
@@ -157,7 +158,9 @@ async def exportar_contatos_csv(
     ).all()
 
     for (number,) in log_numbers:
-        if number not in registered_numbers:
+        normalized = number.lstrip('+')
+        if normalized not in registered_numbers:
+            registered_numbers.add(normalized)  # evitar duplicata entre logs
             writer.writerow([number, '', '', '', 'Não'])
 
     output.seek(0)

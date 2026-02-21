@@ -165,7 +165,7 @@ async def process_webhook_sync(body: dict, db: Session):
 async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db: Session, contacts_info: dict = None):
     """Processa mensagem recebida do WhatsApp."""
     try:
-        from_number = message.get("from")
+        from_number = (message.get("from") or "").lstrip('+')  # sempre sem '+' para consistência
         message_id = message.get("id")
 
         # ========== AUTO-SALVAR CONTATO ==========

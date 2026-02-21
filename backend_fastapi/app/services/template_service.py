@@ -528,7 +528,7 @@ class TemplateService:
         """Registra envio de template no MensagemLog."""
         log = MensagemLog(
             empresa_id=self.empresa.id,
-            whatsapp_number=to,
+            whatsapp_number=to.lstrip('+'),  # sempre sem '+' para consistência
             message_id=message_id,
             direcao='enviada',
             tipo_mensagem='template',
