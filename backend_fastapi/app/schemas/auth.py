@@ -135,7 +135,7 @@ class EmpresaAdminResponse(BaseModel):
     id: int
     nome: str
     cnpj: Optional[str] = None
-    email: str
+    email: Optional[str] = None
     telefone: Optional[str] = None
     ativa: bool
     whatsapp_conectado: bool
