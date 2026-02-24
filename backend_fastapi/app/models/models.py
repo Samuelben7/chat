@@ -30,6 +30,10 @@ class Empresa(Base):
     admin_email = Column(String(255), unique=True)
     admin_senha_hash = Column(String(255))
 
+    # Mensagem de encerramento + Pesquisa de satisfação
+    mensagem_encerramento = Column(Text, default="Seu atendimento foi encerrado. Muito obrigado por entrar em contato!")
+    pesquisa_satisfacao_ativa = Column(Boolean, default=False)
+
     # Status
     ativa = Column(Boolean, default=True)
     criada_em = Column(DateTime(timezone=True), server_default=func.now())
@@ -292,6 +296,7 @@ class Atendimento(Base):
     protocolo = Column(String(10), nullable=True)
     motivo_encerramento = Column(String(100), nullable=True)
     observacao_encerramento = Column(Text, nullable=True)
+    nota_satisfacao = Column(Integer, nullable=True)  # 1 a 5
 
     # Relationships
     atendente = relationship("Atendente", back_populates="atendimentos")

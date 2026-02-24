@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, HTTPException, Query, Depends, Backgroun
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database.database import get_db
 from app.models.models import MensagemLog, ChatSessao, Atendimento, Empresa, Cliente
@@ -283,6 +283,55 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
         # INVALIDAR CACHE DE CONVERSAS (nova mensagem = atualizar lista)
         redis_cache.invalidate_pattern(f"conversas:emp:{empresa.id}*")
         print(f"🗑️  Cache de conversas invalidado para empresa {empresa.id}")
+
+        # ========== PESQUISA DE SATISFAÇÃO ==========
+        sessao = db.query(ChatSessao).filter(
+            ChatSessao.empresa_id == empresa.id,
+            ChatSessao.whatsapp_number == from_number
+        ).first()
+
+        if sessao and sessao.estado_atual == "pesquisa_satisfacao":
+            nota_str = content.strip()
+            if nota_str in ("1", "2", "3", "4", "5"):
+                nota = int(nota_str)
+                atendimento_id = (sessao.dados_temporarios or {}).get("atendimento_id")
+                if atendimento_id:
+                    atend = db.query(Atendimento).filter(Atendimento.id == atendimento_id).first()
+                    if atend:
+                        atend.nota_satisfacao = nota
+                        db.commit()
+
+                sessao.estado_atual = "inicio"
+                sessao.dados_temporarios = {}
+                db.commit()
+
+                # Salvar mensagem + enviar agradecimento
+                from app.services.whatsapp import WhatsAppService
+                msg_log = MensagemLog(
+                    empresa_id=empresa.id,
+                    whatsapp_number=from_number,
+                    message_id=message_id,
+                    direcao="recebida",
+                    tipo_mensagem="text",
+                    conteudo=content,
+                    estado_sessao="pesquisa_satisfacao"
+                )
+                db.add(msg_log)
+                db.commit()
+
+                respostas = {
+                    1: "Lamentamos que sua experiência não tenha sido boa. Vamos melhorar!",
+                    2: "Agradecemos seu feedback. Vamos trabalhar para melhorar!",
+                    3: "Obrigado pela avaliação! Vamos buscar ser ainda melhores.",
+                    4: "Que bom que gostou! Obrigado pelo feedback!",
+                    5: "Excelente! Ficamos muito felizes com sua avaliação!"
+                }
+                msg_agradecimento = f"Obrigado pela sua avaliação! {respostas.get(nota, '')}"
+                whatsapp_svc = WhatsAppService(empresa)
+                numero = from_number if from_number.startswith('+') else f'+{from_number}'
+                await whatsapp_svc.send_text_message(numero, msg_agradecimento)
+
+                return  # Não processar com bot
 
         # Atualizar ou criar atendimento
         atendimento = db.query(Atendimento).filter(

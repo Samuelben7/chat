@@ -354,6 +354,75 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         # INVALIDAR CACHE
         redis_cache.invalidate_pattern(f"conversas:emp:{empresa.id}*")
 
+        # ========== PESQUISA DE SATISFAÇÃO ==========
+        # Verificar se o cliente está respondendo uma pesquisa de satisfação
+        from app.models.models import ChatSessao
+        sessao = db.query(ChatSessao).filter(
+            ChatSessao.empresa_id == empresa.id,
+            ChatSessao.whatsapp_number == from_number
+        ).first()
+
+        if sessao and sessao.estado_atual == "pesquisa_satisfacao":
+            nota_str = content.strip()
+            if nota_str in ("1", "2", "3", "4", "5"):
+                nota = int(nota_str)
+                atendimento_id = (sessao.dados_temporarios or {}).get("atendimento_id")
+                if atendimento_id:
+                    atend = db.query(Atendimento).filter(Atendimento.id == atendimento_id).first()
+                    if atend:
+                        atend.nota_satisfacao = nota
+                        db.commit()
+                        print(f"⭐ Pesquisa de satisfação: nota {nota} para atendimento {atendimento_id}")
+
+                # Resetar sessão
+                sessao.estado_atual = "inicio"
+                sessao.dados_temporarios = {}
+                db.commit()
+
+                # Salvar mensagem recebida
+                msg_nota = MensagemLog(
+                    empresa_id=empresa.id,
+                    whatsapp_number=from_number,
+                    message_id=message_id,
+                    direcao="recebida",
+                    tipo_mensagem="text",
+                    conteudo=content,
+                    estado_sessao="pesquisa_satisfacao"
+                )
+                db.add(msg_nota)
+                db.commit()
+
+                # Enviar agradecimento
+                respostas = {
+                    1: "Lamentamos que sua experiência não tenha sido boa. Vamos melhorar!",
+                    2: "Agradecemos seu feedback. Vamos trabalhar para melhorar!",
+                    3: "Obrigado pela avaliação! Vamos buscar ser ainda melhores.",
+                    4: "Que bom que gostou! Obrigado pelo feedback!",
+                    5: "Excelente! Ficamos muito felizes com sua avaliação!"
+                }
+                msg_agradecimento = f"Obrigado pela sua avaliação! {respostas.get(nota, '')}"
+                enviar_mensagem_whatsapp.delay(
+                    to=from_number,
+                    message=msg_agradecimento,
+                    message_type="text",
+                    empresa_id=empresa.id
+                )
+
+                # Salvar msg de agradecimento no log
+                msg_agradecimento_log = MensagemLog(
+                    empresa_id=empresa.id,
+                    whatsapp_number=from_number,
+                    direcao="enviada",
+                    tipo_mensagem="text",
+                    conteudo=msg_agradecimento,
+                    estado_sessao="pesquisa_satisfacao"
+                )
+                db.add(msg_agradecimento_log)
+                db.commit()
+
+                return  # Não processar com bot
+            # Se não é 1-5, cai no fluxo normal do bot
+
         # Atualizar ou criar atendimento
         atendimento = db.query(Atendimento).filter(
             Atendimento.whatsapp_number == from_number

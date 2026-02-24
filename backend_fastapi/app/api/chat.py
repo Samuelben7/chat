@@ -524,7 +524,8 @@ async def finalizar_atendimento(
     db: Session = Depends(get_db)
 ):
     """
-    Finaliza um atendimento e reseta o estado do bot.
+    Finaliza um atendimento, reseta o estado do bot,
+    envia mensagem de encerramento e pesquisa de satisfação (se configurado).
     """
     atendimento = db.query(Atendimento).filter(
         Atendimento.whatsapp_number == whatsapp_number,
@@ -558,6 +559,41 @@ async def finalizar_atendimento(
     # Invalidar cache
     if empresa_id:
         redis_cache.invalidate_pattern(f"conversas:emp:{empresa_id}*")
+
+    # Enviar mensagem de encerramento + pesquisa de satisfação via WhatsApp
+    try:
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        if empresa and empresa.whatsapp_token and empresa.phone_number_id:
+            from app.services.whatsapp import WhatsAppService
+            whatsapp = WhatsAppService(empresa)
+            numero = whatsapp_number if whatsapp_number.startswith('+') else f'+{whatsapp_number}'
+
+            # 1. Mensagem de encerramento personalizada
+            msg_encerramento = getattr(empresa, 'mensagem_encerramento', None) or "Seu atendimento foi encerrado. Muito obrigado por entrar em contato!"
+            await whatsapp.send_text_message(numero, msg_encerramento)
+
+            # 2. Pesquisa de satisfação (se ativa)
+            pesquisa_ativa = getattr(empresa, 'pesquisa_satisfacao_ativa', False)
+            if pesquisa_ativa:
+                msg_pesquisa = (
+                    "Como você avalia nosso atendimento?\n\n"
+                    "Responda com um número de 1 a 5:\n"
+                    "1 - Muito ruim\n"
+                    "2 - Ruim\n"
+                    "3 - Regular\n"
+                    "4 - Bom\n"
+                    "5 - Excelente"
+                )
+                await whatsapp.send_text_message(numero, msg_pesquisa)
+
+                # Marcar na sessão que está aguardando resposta de satisfação
+                if sessao:
+                    sessao.estado_atual = "pesquisa_satisfacao"
+                    sessao.dados_temporarios = {"atendimento_id": atendimento.id}
+                    db.commit()
+
+    except Exception as e:
+        print(f"Erro ao enviar mensagem de encerramento: {e}")
 
     return {"status": "success", "message": "Atendimento finalizado e bot resetado"}
 
@@ -653,6 +689,55 @@ async def listar_motivos_encerramento(db: Session = Depends(get_db)):
     result = db.execute(text("SELECT codigo, nome, emoji FROM motivos_encerramento WHERE ativo = true ORDER BY ordem"))
     motivos = [{"codigo": row[0], "nome": row[1], "emoji": row[2]} for row in result]
     return motivos
+
+
+@router.get("/chat/config-encerramento")
+async def get_config_encerramento(
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """Retorna configurações de encerramento da empresa."""
+    if user.role not in ("empresa", "admin"):
+        raise HTTPException(status_code=403, detail="Apenas empresa pode acessar")
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    return {
+        "mensagem_encerramento": getattr(empresa, 'mensagem_encerramento', None) or "Seu atendimento foi encerrado. Muito obrigado por entrar em contato!",
+        "pesquisa_satisfacao_ativa": getattr(empresa, 'pesquisa_satisfacao_ativa', False) or False,
+    }
+
+
+@router.patch("/chat/config-encerramento")
+async def update_config_encerramento(
+    body: dict,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """Atualiza configurações de encerramento da empresa."""
+    if user.role not in ("empresa", "admin"):
+        raise HTTPException(status_code=403, detail="Apenas empresa pode configurar")
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    if "mensagem_encerramento" in body:
+        empresa.mensagem_encerramento = body["mensagem_encerramento"]
+    if "pesquisa_satisfacao_ativa" in body:
+        empresa.pesquisa_satisfacao_ativa = body["pesquisa_satisfacao_ativa"]
+
+    db.commit()
+
+    return {
+        "mensagem_encerramento": empresa.mensagem_encerramento,
+        "pesquisa_satisfacao_ativa": empresa.pesquisa_satisfacao_ativa,
+        "status": "success"
+    }
 
 
 @router.delete("/chat/conversa/{whatsapp_number}")
