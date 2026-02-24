@@ -291,9 +291,16 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
         ).first()
 
         if sessao and sessao.estado_atual == "pesquisa_satisfacao":
-            nota_str = content.strip()
-            if nota_str in ("1", "2", "3", "4", "5"):
-                nota = int(nota_str)
+            # Detectar nota: lista interativa (nota_X) OU texto simples (1-5)
+            nota = None
+            nota_map = {"nota_1": 1, "nota_2": 2, "nota_3": 3, "nota_4": 4, "nota_5": 5}
+            list_id = dados_extras.get("list_id", "")
+            if list_id in nota_map:
+                nota = nota_map[list_id]
+            elif content.strip() in ("1", "2", "3", "4", "5"):
+                nota = int(content.strip())
+
+            if nota:
                 atendimento_id = (sessao.dados_temporarios or {}).get("atendimento_id")
                 if atendimento_id:
                     atend = db.query(Atendimento).filter(Atendimento.id == atendimento_id).first()
@@ -312,8 +319,9 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
                     whatsapp_number=from_number,
                     message_id=message_id,
                     direcao="recebida",
-                    tipo_mensagem="text",
+                    tipo_mensagem=message_type,
                     conteudo=content,
+                    dados_extras=dados_extras,
                     estado_sessao="pesquisa_satisfacao"
                 )
                 db.add(msg_log)

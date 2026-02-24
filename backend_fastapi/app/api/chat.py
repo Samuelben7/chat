@@ -572,19 +572,26 @@ async def finalizar_atendimento(
             msg_encerramento = getattr(empresa, 'mensagem_encerramento', None) or "Seu atendimento foi encerrado. Muito obrigado por entrar em contato!"
             await whatsapp.send_text_message(numero, msg_encerramento)
 
-            # 2. Pesquisa de satisfação (se ativa)
+            # 2. Pesquisa de satisfação (se ativa) — Lista interativa Meta
             pesquisa_ativa = getattr(empresa, 'pesquisa_satisfacao_ativa', False)
             if pesquisa_ativa:
-                msg_pesquisa = (
-                    "Como você avalia nosso atendimento?\n\n"
-                    "Responda com um número de 1 a 5:\n"
-                    "1 - Muito ruim\n"
-                    "2 - Ruim\n"
-                    "3 - Regular\n"
-                    "4 - Bom\n"
-                    "5 - Excelente"
+                await whatsapp.send_list_message(
+                    to=numero,
+                    body_text="Gostaríamos de saber sua opinião sobre o atendimento que você recebeu.",
+                    button_text="Avaliar Atendimento",
+                    header="Pesquisa de Satisfação",
+                    footer="Sua opinião é muito importante para nós!",
+                    sections=[{
+                        "title": "Selecione sua avaliação",
+                        "rows": [
+                            {"id": "nota_5", "title": "⭐ Excelente", "description": "Atendimento excepcional"},
+                            {"id": "nota_4", "title": "😊 Bom", "description": "Atendimento satisfatório"},
+                            {"id": "nota_3", "title": "😐 Regular", "description": "Poderia ser melhor"},
+                            {"id": "nota_2", "title": "😕 Ruim", "description": "Atendimento insatisfatório"},
+                            {"id": "nota_1", "title": "😞 Muito Ruim", "description": "Experiência muito negativa"},
+                        ]
+                    }]
                 )
-                await whatsapp.send_text_message(numero, msg_pesquisa)
 
                 # Marcar na sessão que está aguardando resposta de satisfação
                 if sessao:

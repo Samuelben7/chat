@@ -440,3 +440,105 @@ async def obter_metricas_envio(
         "total_contatos": total_contatos,
         "total_listas": total_listas
     }
+
+
+@router.get("/empresa/metricas-satisfacao")
+async def obter_metricas_satisfacao(
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna métricas de satisfação dos clientes.
+    - Média geral, distribuição por nota
+    - Satisfação por atendente
+    - Satisfação da empresa (quando atende sem atendente)
+    """
+    # Base query: atendimentos finalizados COM nota de satisfação
+    base = db.query(Atendimento).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.nota_satisfacao.isnot(None),
+        Atendimento.status == 'finalizado'
+    )
+
+    total_avaliacoes = base.count()
+
+    if total_avaliacoes == 0:
+        return {
+            "total_avaliacoes": 0,
+            "media_geral": 0,
+            "distribuicao": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+            "por_atendente": [],
+            "empresa": {"total": 0, "media": 0},
+        }
+
+    # Média geral
+    media_geral = db.query(func.avg(Atendimento.nota_satisfacao)).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.nota_satisfacao.isnot(None),
+        Atendimento.status == 'finalizado'
+    ).scalar() or 0
+
+    # Distribuição por nota
+    distribuicao = {}
+    for nota in range(1, 6):
+        count = base.filter(Atendimento.nota_satisfacao == nota).count()
+        distribuicao[nota] = count
+
+    # Satisfação por atendente
+    por_atendente_raw = db.query(
+        Atendente.id,
+        Atendente.nome_exibicao,
+        Atendente.foto_url,
+        func.avg(Atendimento.nota_satisfacao).label('media'),
+        func.count(Atendimento.id).label('total'),
+    ).join(
+        Atendimento, Atendimento.atendente_id == Atendente.id
+    ).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.nota_satisfacao.isnot(None),
+        Atendimento.status == 'finalizado'
+    ).group_by(Atendente.id, Atendente.nome_exibicao, Atendente.foto_url).all()
+
+    por_atendente = []
+    for row in por_atendente_raw:
+        # Distribuição individual
+        dist_atd = {}
+        for n in range(1, 6):
+            cnt = db.query(Atendimento).filter(
+                Atendimento.empresa_id == empresa_id,
+                Atendimento.atendente_id == row.id,
+                Atendimento.nota_satisfacao == n,
+                Atendimento.status == 'finalizado'
+            ).count()
+            dist_atd[n] = cnt
+
+        por_atendente.append({
+            "id": row.id,
+            "nome": row.nome_exibicao,
+            "foto_url": row.foto_url,
+            "media": round(float(row.media), 1),
+            "total": row.total,
+            "distribuicao": dist_atd,
+        })
+
+    # Satisfação da empresa (atendimento sem atendente_id)
+    empresa_total = base.filter(Atendimento.atendente_id.is_(None)).count()
+    empresa_media = 0
+    if empresa_total > 0:
+        empresa_media = db.query(func.avg(Atendimento.nota_satisfacao)).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.atendente_id.is_(None),
+            Atendimento.nota_satisfacao.isnot(None),
+            Atendimento.status == 'finalizado'
+        ).scalar() or 0
+
+    return {
+        "total_avaliacoes": total_avaliacoes,
+        "media_geral": round(float(media_geral), 1),
+        "distribuicao": distribuicao,
+        "por_atendente": sorted(por_atendente, key=lambda x: x["media"], reverse=True),
+        "empresa": {
+            "total": empresa_total,
+            "media": round(float(empresa_media), 1),
+        },
+    }
