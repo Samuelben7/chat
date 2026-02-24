@@ -1212,3 +1212,138 @@ def forward_webhook_dev_task(dev_id: int, payload: dict):
         logger.error(f"Erro ao encaminhar webhook para dev {dev_id}: {e}")
         db.close()
         return {"success": False, "error": str(e)}
+
+
+# ========== TASK: SINCRONIZAR LIMITES WABA DA META ==========
+
+@celery_app.task(name="app.tasks.tasks.sincronizar_limites_waba_task")
+def sincronizar_limites_waba_task():
+    """
+    Task semanal: consulta a API da Meta para cada dev/empresa com WABA conectado
+    e atualiza o limite real de mensagens no Redis.
+
+    A Meta retorna o messaging_limit do WABA (TIER_1K, TIER_10K, TIER_100K, UNLIMITED).
+    Guardamos no Redis para o gateway usar como limite dinamico.
+    """
+    db = SessionLocal()
+    atualizados = 0
+    erros = 0
+
+    tier_map = {
+        "TIER_250": 250,
+        "TIER_1K": 1000,
+        "TIER_10K": 10000,
+        "TIER_100K": 100000,
+        "TIER_UNLIMITED": 999999999,
+    }
+
+    try:
+        # Devs com WABA conectado
+        devs = db.query(DevUsuario).filter(
+            DevUsuario.waba_id.isnot(None),
+            DevUsuario.whatsapp_token.isnot(None),
+            DevUsuario.ativo == True,
+        ).all()
+
+        for dev in devs:
+            try:
+                limit_info = _fetch_waba_messaging_limit(
+                    waba_id=dev.waba_id,
+                    token=dev.whatsapp_token,
+                )
+                if limit_info:
+                    tier = limit_info.get("messaging_limit", "")
+                    quality = limit_info.get("quality_rating", "UNKNOWN")
+                    limit_num = tier_map.get(tier, 1000)
+
+                    # Salvar no Redis (chave dinamica, TTL 8 dias)
+                    cache_key = f"waba:limit:dev:{dev.id}"
+                    redis_cache.client.setex(
+                        cache_key,
+                        86400 * 8,  # 8 dias (re-sync semanal)
+                        json.dumps({
+                            "tier": tier,
+                            "limit": limit_num,
+                            "quality": quality,
+                            "updated_at": datetime.utcnow().isoformat(),
+                        }),
+                    )
+                    atualizados += 1
+                    logger.info(f"WABA limit dev {dev.nome}: {tier} ({limit_num} msgs) quality={quality}")
+
+            except Exception as e:
+                erros += 1
+                logger.warning(f"Erro ao consultar WABA de dev {dev.id}: {e}")
+
+        # Empresas com WABA conectado
+        empresas = db.query(Empresa).filter(
+            Empresa.waba_id.isnot(None),
+            Empresa.whatsapp_token.isnot(None),
+            Empresa.ativa == True,
+        ).all()
+
+        for emp in empresas:
+            try:
+                limit_info = _fetch_waba_messaging_limit(
+                    waba_id=emp.waba_id,
+                    token=emp.whatsapp_token,
+                )
+                if limit_info:
+                    tier = limit_info.get("messaging_limit", "")
+                    quality = limit_info.get("quality_rating", "UNKNOWN")
+                    limit_num = tier_map.get(tier, 1000)
+
+                    cache_key = f"waba:limit:emp:{emp.id}"
+                    redis_cache.client.setex(
+                        cache_key,
+                        86400 * 8,
+                        json.dumps({
+                            "tier": tier,
+                            "limit": limit_num,
+                            "quality": quality,
+                            "updated_at": datetime.utcnow().isoformat(),
+                        }),
+                    )
+                    atualizados += 1
+                    logger.info(f"WABA limit empresa {emp.nome}: {tier} ({limit_num} msgs) quality={quality}")
+
+            except Exception as e:
+                erros += 1
+                logger.warning(f"Erro ao consultar WABA de empresa {emp.id}: {e}")
+
+        db.close()
+        logger.info(f"Sincronizacao WABA concluida: {atualizados} atualizados, {erros} erros")
+        return {"success": True, "atualizados": atualizados, "erros": erros}
+
+    except Exception as e:
+        logger.error(f"Erro na sincronizacao WABA: {e}")
+        db.close()
+        return {"success": False, "error": str(e)}
+
+
+def _fetch_waba_messaging_limit(waba_id: str, token: str) -> Optional[dict]:
+    """
+    Consulta API da Meta para obter messaging_limit e quality_rating do WABA.
+    GET https://graph.facebook.com/v25.0/{waba_id}?fields=messaging_limit_tier,quality_score
+    """
+    url = f"https://graph.facebook.com/v25.0/{waba_id}/phone_numbers?fields=messaging_limit_tier,quality_rating"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        response = httpx.get(url, headers=headers, timeout=15.0)
+        response.raise_for_status()
+        data = response.json()
+
+        # Pegar dados do primeiro phone number
+        phone_numbers = data.get("data", [])
+        if phone_numbers:
+            pn = phone_numbers[0]
+            return {
+                "messaging_limit": pn.get("messaging_limit_tier", "TIER_1K"),
+                "quality_rating": pn.get("quality_rating", "UNKNOWN"),
+            }
+        return None
+
+    except Exception as e:
+        logger.warning(f"Erro ao consultar WABA {waba_id}: {e}")
+        return None

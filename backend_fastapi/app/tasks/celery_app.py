@@ -44,6 +44,10 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.tasks.verificar_trials_dev_task',
         'schedule': 86400.0,  # Diario
     },
+    'sincronizar-limites-waba': {
+        'task': 'app.tasks.tasks.sincronizar_limites_waba_task',
+        'schedule': 604800.0,  # Semanal (7 dias)
+    },
 }
 
 print("✅ Celery configurado com sucesso!")

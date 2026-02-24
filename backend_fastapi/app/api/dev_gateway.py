@@ -136,9 +136,22 @@ async def validar_token(
     # 7. Verificar limite mensal de mensagens
     month_key = f"gateway:msgs:{dev_id}:{datetime.utcnow().strftime('%Y-%m')}"
     monthly_count = int(redis_cache.client.get(month_key) or 0)
+
+    # Limite dinamico: WABA real (Meta) > plano > padrao
     msg_limit = settings.GATEWAY_MESSAGES_PER_MONTH
     if assinatura and assinatura.plano and assinatura.plano.limites:
         msg_limit = assinatura.plano.limites.get("mensagens_mes", msg_limit)
+
+    # Verificar se tem limite WABA real (atualizado semanalmente pela task)
+    waba_limit_raw = redis_cache.client.get(f"waba:limit:dev:{dev_id}")
+    if waba_limit_raw:
+        try:
+            waba_data = json.loads(waba_limit_raw)
+            waba_limit = waba_data.get("limit", 0)
+            if waba_limit > 0:
+                msg_limit = waba_limit  # usar limite real da Meta
+        except (json.JSONDecodeError, KeyError):
+            pass
 
     if monthly_count >= msg_limit:
         raise HTTPException(status_code=429, detail="Monthly message limit exceeded")
