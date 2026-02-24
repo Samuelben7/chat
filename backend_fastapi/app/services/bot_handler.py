@@ -170,26 +170,32 @@ class BotMessageHandler:
 
         fluxo_ativo = get_active_flow(self.db, self.empresa.id)
 
-        if fluxo_ativo:
-            # Verificar se o estado atual é do fluxo dinâmico ou inicio
-            estado = self.session.estado_atual or ""
-            is_dynamic = estado.startswith("fluxo:") or estado == "inicio"
+        if not fluxo_ativo:
+            # Nenhum fluxo ativo = bot desativado, não responder nada
+            logger.info(f"Bot desativado para empresa {self.empresa.id} — nenhum fluxo ativo")
+            # Apenas salvar a mensagem recebida no log (sem responder)
+            self.log_message_received()
+            return
 
-            if is_dynamic:
-                logger.info(f"Usando fluxo dinâmico: {fluxo_ativo.nome} (empresa {self.empresa.id})")
-                dynamic_handler = DynamicFlowHandler(
-                    empresa=self.empresa,
-                    fluxo=fluxo_ativo,
-                    from_number=self.from_number,
-                    message_content=self.message_content,
-                    message_id=self.message_id,
-                    session=self.session,
-                    db=self.db,
-                )
-                await dynamic_handler.process_message()
-                return
+        # Verificar se o estado atual é do fluxo dinâmico ou inicio
+        estado = self.session.estado_atual or ""
+        is_dynamic = estado.startswith("fluxo:") or estado == "inicio"
 
-        # Fallback: handler hardcoded padrão
+        if is_dynamic:
+            logger.info(f"Usando fluxo dinâmico: {fluxo_ativo.nome} (empresa {self.empresa.id})")
+            dynamic_handler = DynamicFlowHandler(
+                empresa=self.empresa,
+                fluxo=fluxo_ativo,
+                from_number=self.from_number,
+                message_content=self.message_content,
+                message_id=self.message_id,
+                session=self.session,
+                db=self.db,
+            )
+            await dynamic_handler.process_message()
+            return
+
+        # Fallback: handler hardcoded padrão (estado não é do fluxo dinâmico)
         # Log da mensagem recebida
         self.log_message_received()
 
