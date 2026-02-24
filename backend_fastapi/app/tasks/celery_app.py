@@ -36,6 +36,14 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.tasks.limpar_imagens_orfas_templates',
         'schedule': 86400.0,  # A cada 24 horas
     },
+    'verificar-vencimentos': {
+        'task': 'app.tasks.tasks.verificar_vencimentos_task',
+        'schedule': 86400.0,  # Diario
+    },
+    'verificar-trials-dev': {
+        'task': 'app.tasks.tasks.verificar_trials_dev_task',
+        'schedule': 86400.0,  # Diario
+    },
 }
 
 print("✅ Celery configurado com sucesso!")

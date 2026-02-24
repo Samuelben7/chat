@@ -456,3 +456,158 @@ def enviar_email_admin_notificacao(
     except Exception as e:
         print(f"[ERROR] Erro ao enviar email admin: {e}")
         return False
+
+
+def enviar_email_lembrete_pagamento(
+    destinatario: str,
+    nome: str,
+    tipo: str,
+    dias_restantes: int,
+    plano_nome: str,
+) -> bool:
+    """
+    Envia email de lembrete de vencimento de assinatura.
+
+    Args:
+        destinatario: Email
+        nome: Nome do dev ou empresa
+        tipo: 'lembrete' / 'vencimento' / 'ultimo_aviso'
+        dias_restantes: Dias ate o bloqueio
+        plano_nome: Nome do plano
+    """
+    try:
+        from app.core.config import settings
+
+        titulos = {
+            "lembrete": f"Sua assinatura vence em {dias_restantes} dias",
+            "vencimento": "Sua assinatura venceu hoje",
+            "ultimo_aviso": f"Ultimo aviso: bloqueio em {dias_restantes} dias",
+        }
+        titulo = titulos.get(tipo, "Aviso sobre sua assinatura")
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family: -apple-system, sans-serif; background: #f5f5f5; padding: 40px 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                <div style="background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%); padding: 40px 30px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 22px;">{titulo}</h1>
+                </div>
+                <div style="padding: 40px;">
+                    <p style="color: #333; font-size: 16px;">Ola, <strong>{nome}</strong>!</p>
+                    <p style="color: #555; font-size: 15px; line-height: 1.6;">
+                        {'Sua assinatura do plano <strong>' + plano_nome + '</strong> esta proxima do vencimento.' if tipo == 'lembrete' else ''}
+                        {'Sua assinatura do plano <strong>' + plano_nome + '</strong> venceu hoje. Renove para continuar usando.' if tipo == 'vencimento' else ''}
+                        {'Este e o ultimo aviso antes do bloqueio da sua conta. Renove agora para evitar interrupcao.' if tipo == 'ultimo_aviso' else ''}
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{settings.FRONTEND_URL}/planos"
+                           style="display: inline-block; padding: 14px 40px; background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+                                  color: white; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px;">
+                            Renovar Assinatura
+                        </a>
+                    </div>
+                </div>
+                <div style="background: #1a1f3a; padding: 20px; text-align: center;">
+                    <p style="color: #b8c1ec; font-size: 13px; margin: 0;">&copy; 2026 WhatsApp Sistema</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
+
+        if not sender_password or not sender_email:
+            print(f"[DEBUG] Email lembrete: {destinatario} - {titulo}")
+            return True
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"WhatsApp Sistema - {titulo}"
+        msg['From'] = f"WhatsApp Sistema <{sender_email}>"
+        msg['To'] = destinatario
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, destinatario, msg.as_string())
+
+        print(f"[OK] Email lembrete enviado para {destinatario}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao enviar email lembrete: {e}")
+        return False
+
+
+def enviar_email_bloqueio(
+    destinatario: str,
+    nome: str,
+    plano_nome: str,
+) -> bool:
+    """Envia email notificando bloqueio de conta por falta de pagamento."""
+    try:
+        from app.core.config import settings
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family: -apple-system, sans-serif; background: #f5f5f5; padding: 40px 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                <div style="background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%); padding: 40px 30px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 22px;">Sua conta foi bloqueada</h1>
+                </div>
+                <div style="padding: 40px;">
+                    <p style="color: #333; font-size: 16px;">Ola, <strong>{nome}</strong>!</p>
+                    <p style="color: #555; font-size: 15px; line-height: 1.6;">
+                        Sua assinatura do plano <strong>{plano_nome}</strong> nao foi renovada e sua conta foi bloqueada.
+                        Para reativar o acesso, realize o pagamento.
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{settings.FRONTEND_URL}/planos"
+                           style="display: inline-block; padding: 14px 40px; background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+                                  color: white; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px;">
+                            Reativar Conta
+                        </a>
+                    </div>
+                </div>
+                <div style="background: #1a1f3a; padding: 20px; text-align: center;">
+                    <p style="color: #b8c1ec; font-size: 13px; margin: 0;">&copy; 2026 WhatsApp Sistema</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
+
+        if not sender_password or not sender_email:
+            print(f"[DEBUG] Email bloqueio: {destinatario} - {nome}")
+            return True
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"WhatsApp Sistema - Conta bloqueada"
+        msg['From'] = f"WhatsApp Sistema <{sender_email}>"
+        msg['To'] = destinatario
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, destinatario, msg.as_string())
+
+        print(f"[OK] Email bloqueio enviado para {destinatario}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao enviar email bloqueio: {e}")
+        return False

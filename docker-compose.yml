@@ -87,6 +87,21 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+      # Mercado Pago (Plataforma)
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+      MP_PUBLIC_KEY: ${MP_PUBLIC_KEY:-}
+
+      # Dev API Gateway
+      GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-60}
+      GATEWAY_MESSAGES_PER_MONTH: ${GATEWAY_MESSAGES_PER_MONTH:-1000}
+      DEV_TRIAL_DAYS: ${DEV_TRIAL_DAYS:-15}
+
+      # Meta
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_ES_CONFIG_ID: ${META_ES_CONFIG_ID:-}
+      ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,6 +162,21 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+      # Mercado Pago (Plataforma)
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+      MP_PUBLIC_KEY: ${MP_PUBLIC_KEY:-}
+
+      # Dev API Gateway
+      GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-60}
+      GATEWAY_MESSAGES_PER_MONTH: ${GATEWAY_MESSAGES_PER_MONTH:-1000}
+      DEV_TRIAL_DAYS: ${DEV_TRIAL_DAYS:-15}
+
+      # Meta
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_ES_CONFIG_ID: ${META_ES_CONFIG_ID:-}
+      ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,6 +232,21 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+      # Mercado Pago (Plataforma)
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+      MP_PUBLIC_KEY: ${MP_PUBLIC_KEY:-}
+
+      # Dev API Gateway
+      GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-60}
+      GATEWAY_MESSAGES_PER_MONTH: ${GATEWAY_MESSAGES_PER_MONTH:-1000}
+      DEV_TRIAL_DAYS: ${DEV_TRIAL_DAYS:-15}
+
+      # Meta
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_ES_CONFIG_ID: ${META_ES_CONFIG_ID:-}
+      ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -15,6 +15,7 @@ from app.core.auth import (
     extrair_role,
     validar_permissao_empresa,
     validar_permissao_atendente,
+    validar_permissao_dev,
 )
 
 
@@ -49,13 +50,14 @@ async def get_token_from_header(authorization: Optional[str] = Header(None)) -> 
 # ========== DEPENDENCY: Usuário Atual (qualquer role) ==========
 class UsuarioAtualDep:
     """
-    Dependency que retorna informações do usuário autenticado (empresa ou atendente)
+    Dependency que retorna informações do usuário autenticado (empresa, atendente ou dev)
     """
     def __init__(self):
         self.email: str = ""
         self.empresa_id: int = 0
         self.role: str = ""
         self.atendente_id: Optional[int] = None
+        self.dev_id: Optional[int] = None
         self.primeiro_login: bool = False
 
 
@@ -63,7 +65,7 @@ async def get_current_user(
     token: str = Depends(get_token_from_header)
 ) -> UsuarioAtualDep:
     """
-    Retorna dados do usuário autenticado (empresa ou atendente)
+    Retorna dados do usuário autenticado (empresa, atendente ou dev)
 
     Args:
         token: Token JWT extraído do header
@@ -78,6 +80,7 @@ async def get_current_user(
     user.empresa_id = payload.get("empresa_id", 0)
     user.role = payload.get("role", "")
     user.atendente_id = payload.get("atendente_id")
+    user.dev_id = payload.get("dev_id")
     user.primeiro_login = payload.get("primeiro_login", False)
 
     return user
@@ -164,6 +167,20 @@ CurrentAtendente = Annotated[AtendenteAtualDep, Depends(get_current_atendente)]
 
 # Empresa ID do token (empresa ou atendente)
 EmpresaIdFromToken = Annotated[int, Depends(get_empresa_id_from_token)]
+
+
+# ========== DEPENDENCY: Apenas Dev ==========
+async def get_current_dev(
+    token: str = Depends(get_token_from_header)
+) -> int:
+    """
+    Valida que o usuario e um dev e retorna o dev_id.
+    """
+    return validar_permissao_dev(token)
+
+
+# Apenas dev (retorna dev_id)
+CurrentDev = Annotated[int, Depends(get_current_dev)]
 
 
 # ========== EXEMPLO DE USO ==========

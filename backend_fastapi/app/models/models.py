@@ -582,3 +582,165 @@ class CrmClienteTag(Base):
 
     cliente = relationship('Cliente', back_populates='crm_tags')
     tag = relationship('CrmTag', back_populates='clientes')
+
+
+# ==================== DEV API GATEWAY ====================
+
+class DevUsuario(Base):
+    """Desenvolvedor que usa a API Gateway para enviar mensagens WhatsApp."""
+    __tablename__ = "dev_usuario"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    telefone = Column(String(20))
+    empresa_nome = Column(String(255))
+
+    # Credenciais WhatsApp (via Embedded Signup)
+    whatsapp_token = Column(Text)
+    phone_number_id = Column(String(50), unique=True, index=True)
+    waba_id = Column(String(50), index=True)
+    verify_token = Column(String(255))
+
+    # Webhook do dev
+    webhook_url = Column(Text)
+    webhook_secret = Column(String(255))
+
+    # Status e trial
+    status = Column(String(20), default='trial')  # trial/active/overdue/blocked
+    trial_inicio = Column(DateTime(timezone=True), server_default=func.now())
+    trial_fim = Column(DateTime(timezone=True))
+
+    ativo = Column(Boolean, default=True)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    auth = relationship("DevAuth", back_populates="dev", uselist=False)
+    api_keys = relationship("ApiKey", back_populates="dev", cascade="all, delete-orphan")
+    assinaturas = relationship("Assinatura", back_populates="dev")
+    gateway_logs = relationship("GatewayLog", back_populates="dev")
+
+
+class DevAuth(Base):
+    """Autenticacao do desenvolvedor (email/senha)."""
+    __tablename__ = "dev_auth"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    senha_hash = Column(String(255), nullable=False)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    ultimo_login = Column(DateTime(timezone=True))
+
+    # Relationships
+    dev = relationship("DevUsuario", back_populates="auth")
+
+
+class ApiKey(Base):
+    """Chave de API para autenticacao no gateway."""
+    __tablename__ = "api_key"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    key_prefix = Column(String(8), nullable=False, index=True)
+    key_hash = Column(String(255), nullable=False)
+    nome = Column(String(100))
+    ativa = Column(Boolean, default=True)
+    ultima_utilizacao = Column(DateTime(timezone=True))
+    criada_em = Column(DateTime(timezone=True), server_default=func.now())
+    revogada_em = Column(DateTime(timezone=True))
+
+    # Relationships
+    dev = relationship("DevUsuario", back_populates="api_keys")
+    gateway_logs = relationship("GatewayLog", back_populates="api_key")
+
+
+# ==================== PLANOS & ASSINATURAS ====================
+
+class Plano(Base):
+    """Planos de assinatura (empresa ou dev)."""
+    __tablename__ = "plano"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(String(20), nullable=False)  # empresa / dev
+    nome = Column(String(100), nullable=False)
+    preco_mensal = Column(Numeric(10, 2), nullable=False)
+    descricao = Column(Text)
+    features = Column(JSON, default=list)
+    limites = Column(JSON, default=dict)  # {mensagens_mes, requests_min, atendentes}
+    ativo = Column(Boolean, default=True)
+    ordem = Column(Integer, default=0)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    assinaturas = relationship("Assinatura", back_populates="plano")
+
+
+class Assinatura(Base):
+    """Assinatura ativa de empresa ou dev."""
+    __tablename__ = "assinatura"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo_usuario = Column(String(20), nullable=False)  # empresa / dev
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="SET NULL"), nullable=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    plano_id = Column(Integer, ForeignKey("plano.id"), nullable=False, index=True)
+
+    status = Column(String(20), default='active')  # active/overdue/blocked/cancelled
+    data_inicio = Column(DateTime(timezone=True), server_default=func.now())
+    data_proximo_vencimento = Column(DateTime(timezone=True))
+    data_bloqueio = Column(DateTime(timezone=True))
+
+    # Relationships
+    empresa = relationship("Empresa")
+    dev = relationship("DevUsuario", back_populates="assinaturas")
+    plano = relationship("Plano", back_populates="assinaturas")
+    pagamentos = relationship("Pagamento", back_populates="assinatura")
+
+
+class Pagamento(Base):
+    """Pagamento de assinatura via Mercado Pago."""
+    __tablename__ = "pagamento"
+
+    id = Column(Integer, primary_key=True, index=True)
+    assinatura_id = Column(Integer, ForeignKey("assinatura.id"), nullable=False, index=True)
+    tipo_usuario = Column(String(20), nullable=False)  # empresa / dev
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="SET NULL"), nullable=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="SET NULL"), nullable=True)
+
+    valor = Column(Numeric(10, 2), nullable=False)
+    metodo = Column(String(20), nullable=False)  # pix / credit_card
+    status = Column(String(20), default='pending')  # pending/approved/rejected/refunded
+
+    # Mercado Pago
+    mp_payment_id = Column(String(100), index=True)
+    mp_pix_qr_code = Column(Text)
+    mp_pix_qr_code_base64 = Column(Text)
+    dados_extras = Column(JSON, default=dict)
+
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    assinatura = relationship("Assinatura", back_populates="pagamentos")
+
+    __table_args__ = (
+        Index('idx_pagamento_mp_id', 'mp_payment_id'),
+        Index('idx_pagamento_status', 'status'),
+    )
+
+
+class GatewayLog(Base):
+    """Log de requisicoes no API Gateway."""
+    __tablename__ = "gateway_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    api_key_id = Column(Integer, ForeignKey("api_key.id", ondelete="SET NULL"), nullable=True)
+    endpoint = Column(String(255))
+    status_code = Column(Integer)
+    latency_ms = Column(Integer)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    dev = relationship("DevUsuario", back_populates="gateway_logs")
+    api_key = relationship("ApiKey", back_populates="gateway_logs")

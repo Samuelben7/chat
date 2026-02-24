@@ -22,6 +22,8 @@ mimetypes.add_type("audio/mpeg", ".mp3")
 
 # Import routers
 from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm
+from app.api import dev_auth, dev_api_keys, dev_gateway, dev_usage, dev_webhook
+from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 
 # Import Redis Pub/Sub e WebSocket Manager
 from app.core.redis_pubsub import pubsub_manager
@@ -163,3 +165,17 @@ app.include_router(pagamentos.router, prefix=settings.API_V1_STR, tags=["pagamen
 app.include_router(media.router, prefix=settings.API_V1_STR, tags=["media"])
 app.include_router(agenda.router, prefix=settings.API_V1_STR, tags=["agenda"])
 app.include_router(crm.router, prefix=settings.API_V1_STR, tags=["crm"])
+
+# Dev API Gateway
+app.include_router(dev_auth.router, prefix=settings.API_V1_STR, tags=["dev-auth"])
+app.include_router(dev_api_keys.router, prefix=settings.API_V1_STR, tags=["dev-api-keys"])
+app.include_router(dev_gateway.router, prefix=settings.API_V1_STR, tags=["dev-gateway"])
+app.include_router(dev_usage.router, prefix=settings.API_V1_STR, tags=["dev-usage"])
+app.include_router(dev_webhook.router, prefix=settings.API_V1_STR, tags=["dev-webhook"])
+
+# Planos, Assinaturas e Pagamentos da Plataforma
+app.include_router(planos.router, prefix=settings.API_V1_STR, tags=["planos"])
+app.include_router(admin_planos.router, prefix=settings.API_V1_STR, tags=["admin-planos"])
+app.include_router(assinaturas.router, prefix=settings.API_V1_STR, tags=["assinaturas"])
+app.include_router(pagamentos_plataforma.router, prefix=settings.API_V1_STR, tags=["pagamentos-plataforma"])
+app.include_router(admin_panel.router, prefix=settings.API_V1_STR, tags=["admin-panel"])

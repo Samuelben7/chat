@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.tasks.celery_app import celery_app
 from app.database.database import SessionLocal
-from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente
+from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente, DevUsuario, Assinatura
 from app.core.config import settings
 from app.core.redis_client import redis_cache
 from app.core.circuit_breaker import whatsapp_circuit_breaker
@@ -191,6 +191,22 @@ def processar_webhook_completo(webhook_data: dict):
                 # Identificar empresa
                 phone_number_id = value.get("metadata", {}).get("phone_number_id")
                 if not phone_number_id:
+                    continue
+
+                # Verificar se pertence a um DEV primeiro
+                dev_usuario = db.query(DevUsuario).filter(
+                    DevUsuario.phone_number_id == phone_number_id,
+                    DevUsuario.ativo == True,
+                ).first()
+
+                if dev_usuario:
+                    # Forward para webhook do dev (nao processar como empresa)
+                    print(f"🔧 Webhook para dev: {dev_usuario.nome}")
+                    if dev_usuario.webhook_url:
+                        forward_webhook_dev_task.delay(
+                            dev_id=dev_usuario.id,
+                            payload=change.get("value", {}),
+                        )
                     continue
 
                 empresa = db.query(Empresa).filter(
@@ -1031,4 +1047,168 @@ def limpar_imagens_orfas_templates():
 
     except Exception as e:
         logger.error(f"Erro na limpeza de imagens órfãs: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ========== TASK: VERIFICAR VENCIMENTOS DE ASSINATURAS ==========
+
+@celery_app.task(name="app.tasks.tasks.verificar_vencimentos_task")
+def verificar_vencimentos_task():
+    """
+    Task diaria (09:00): verifica vencimentos de assinaturas.
+    - 7 dias antes: email lembrete
+    - Vencimento: email
+    - 7 dias depois: email ultimo aviso
+    - 15 dias depois: bloqueia
+    """
+    from app.services.email_service import enviar_email_lembrete_pagamento, enviar_email_bloqueio
+
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        assinaturas = db.query(Assinatura).filter(
+            Assinatura.status.in_(["active", "overdue"])
+        ).all()
+
+        lembretes = 0
+        bloqueios = 0
+
+        for ass in assinaturas:
+            if not ass.data_proximo_vencimento:
+                continue
+
+            dias = (ass.data_proximo_vencimento - now).days
+
+            # Identificar usuario
+            email = None
+            nome = None
+            plano_nome = ass.plano.nome if ass.plano else "Plano"
+
+            if ass.dev_id:
+                dev = db.query(DevUsuario).filter(DevUsuario.id == ass.dev_id).first()
+                if dev:
+                    email = dev.email
+                    nome = dev.nome
+            elif ass.empresa_id:
+                emp = db.query(Empresa).filter(Empresa.id == ass.empresa_id).first()
+                if emp:
+                    email = emp.admin_email or emp.email
+                    nome = emp.nome
+
+            if not email:
+                continue
+
+            if dias == 7:
+                # 7 dias antes: lembrete
+                enviar_email_lembrete_pagamento(email, nome, "lembrete", 7, plano_nome)
+                lembretes += 1
+
+            elif dias == 0:
+                # Dia do vencimento
+                ass.status = "overdue"
+                db.commit()
+                enviar_email_lembrete_pagamento(email, nome, "vencimento", 0, plano_nome)
+                lembretes += 1
+
+            elif dias == -7:
+                # 7 dias depois
+                enviar_email_lembrete_pagamento(email, nome, "ultimo_aviso", 8, plano_nome)
+                lembretes += 1
+
+            elif dias <= -15:
+                # 15 dias depois: bloqueia
+                ass.status = "blocked"
+                ass.data_bloqueio = now
+
+                if ass.dev_id:
+                    dev = db.query(DevUsuario).filter(DevUsuario.id == ass.dev_id).first()
+                    if dev:
+                        dev.status = "blocked"
+                elif ass.empresa_id:
+                    emp = db.query(Empresa).filter(Empresa.id == ass.empresa_id).first()
+                    if emp:
+                        emp.ativa = False
+
+                db.commit()
+                enviar_email_bloqueio(email, nome, plano_nome)
+                bloqueios += 1
+
+        db.close()
+        logger.info(f"Vencimentos verificados: {lembretes} lembretes, {bloqueios} bloqueios")
+        return {"success": True, "lembretes": lembretes, "bloqueios": bloqueios}
+
+    except Exception as e:
+        logger.error(f"Erro ao verificar vencimentos: {e}")
+        db.close()
+        return {"success": False, "error": str(e)}
+
+
+# ========== TASK: VERIFICAR TRIALS DE DEVS ==========
+
+@celery_app.task(name="app.tasks.tasks.verificar_trials_dev_task")
+def verificar_trials_dev_task():
+    """
+    Task diaria: verifica trials expirados.
+    trial_fim < now() sem assinatura ativa -> status=blocked
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        devs = db.query(DevUsuario).filter(
+            DevUsuario.status == "trial",
+            DevUsuario.trial_fim < now,
+        ).all()
+
+        bloqueados = 0
+        for dev in devs:
+            # Verificar se tem assinatura ativa
+            assinatura = db.query(Assinatura).filter(
+                Assinatura.dev_id == dev.id,
+                Assinatura.status == "active",
+            ).first()
+
+            if not assinatura:
+                dev.status = "blocked"
+                bloqueados += 1
+                logger.info(f"Dev {dev.nome} ({dev.email}) bloqueado por trial expirado")
+
+        db.commit()
+        db.close()
+        logger.info(f"Trials verificados: {bloqueados} devs bloqueados")
+        return {"success": True, "bloqueados": bloqueados}
+
+    except Exception as e:
+        logger.error(f"Erro ao verificar trials: {e}")
+        db.close()
+        return {"success": False, "error": str(e)}
+
+
+# ========== TASK: FORWARD WEBHOOK PARA DEV ==========
+
+@celery_app.task(name="app.tasks.tasks.forward_webhook_dev_task")
+def forward_webhook_dev_task(dev_id: int, payload: dict):
+    """
+    Task para encaminhar webhook para o endpoint do dev.
+    """
+    import asyncio
+    from app.services.webhook_forwarder import forward_webhook_to_dev
+
+    db = SessionLocal()
+    try:
+        dev = db.query(DevUsuario).filter(DevUsuario.id == dev_id).first()
+        if not dev or not dev.webhook_url:
+            return {"success": False, "error": "Dev sem webhook_url"}
+
+        success = asyncio.run(forward_webhook_to_dev(
+            webhook_url=dev.webhook_url,
+            webhook_secret=dev.webhook_secret or "",
+            payload=payload,
+        ))
+
+        db.close()
+        return {"success": success, "dev_id": dev_id}
+
+    except Exception as e:
+        logger.error(f"Erro ao encaminhar webhook para dev {dev_id}: {e}")
+        db.close()
         return {"success": False, "error": str(e)}

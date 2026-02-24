@@ -297,3 +297,39 @@ def validar_permissao_atendente(token: str) -> tuple[int, int]:
     empresa_id = extrair_empresa_id(token)
 
     return atendente_id, empresa_id
+
+
+# ==================== DEV (API Gateway) ====================
+
+def criar_token_dev(dev_id: int, email: str) -> str:
+    """Cria token JWT para desenvolvedor da API Gateway."""
+    data = {
+        "sub": email,
+        "dev_id": dev_id,
+        "role": "dev",
+        "type": "access"
+    }
+    return criar_token_acesso(data)
+
+
+def extrair_dev_id(token: str) -> int:
+    """Extrai o dev_id de um token JWT."""
+    payload = decodificar_token(token)
+    dev_id = payload.get("dev_id")
+    if not dev_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token nao contem dev_id"
+        )
+    return dev_id
+
+
+def validar_permissao_dev(token: str) -> int:
+    """Valida que o token e de um dev e retorna o dev_id."""
+    role = extrair_role(token)
+    if role != "dev":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso permitido apenas para desenvolvedores"
+        )
+    return extrair_dev_id(token)

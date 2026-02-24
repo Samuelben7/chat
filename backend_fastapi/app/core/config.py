@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     ADMIN_NOTIFICATION_EMAIL: str = ""
     ADMIN_SECRET_KEY: str = ""
 
+    # Mercado Pago (Plataforma)
+    MP_ACCESS_TOKEN: Optional[str] = None
+    MP_PUBLIC_KEY: Optional[str] = None
+
+    # Dev API Gateway
+    GATEWAY_RATE_LIMIT_PER_MIN: int = 60
+    GATEWAY_MESSAGES_PER_MONTH: int = 1000
+    DEV_TRIAL_DAYS: int = 15
+
     # App
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
