@@ -111,9 +111,10 @@ async def listar_contatos(
     else:
         contatos_list = list(contatos_map.values())
 
-    # Sort by ultimo_contato descending (fallback para datetime.min quando None)
-    from datetime import datetime as dt_sort
-    contatos_list.sort(key=lambda c: c.ultimo_contato if c.ultimo_contato else dt_sort.min, reverse=True)
+    # Sort by ultimo_contato descending (fallback para epoch 0 quando None)
+    from datetime import datetime as dt_sort, timezone as tz_sort
+    epoch_zero = dt_sort(2000, 1, 1, tzinfo=tz_sort.utc)
+    contatos_list.sort(key=lambda c: c.ultimo_contato if c.ultimo_contato else epoch_zero, reverse=True)
 
     total = len(contatos_list)
     start = (page - 1) * per_page
