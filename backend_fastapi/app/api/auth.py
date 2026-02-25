@@ -575,14 +575,23 @@ async def connect_whatsapp(
         )
 
     # 2. Inscrever app na WABA (falha não é fatal)
+    subscribe_ok = False
     try:
-        await subscribe_app_to_waba(dados.waba_id, access_token)
+        subscribe_ok = await subscribe_app_to_waba(dados.waba_id, access_token)
+        if subscribe_ok:
+            print(f"[INFO] Subscribe WABA OK: {dados.waba_id}")
+        else:
+            print(f"[WARN] Subscribe WABA falhou (token sem whatsapp_business_management?) — será retentado automaticamente")
     except Exception as e:
         print(f"[WARN] Erro ao inscrever app na WABA: {e}")
 
-    # 3. Registrar número (falha não é fatal)
+    # 3. Registrar número (falha não é fatal — pode estar em PENDING review)
     try:
-        await register_phone_number(dados.phone_number_id, access_token)
+        register_ok = await register_phone_number(dados.phone_number_id, access_token)
+        if register_ok:
+            print(f"[INFO] Register phone OK: {dados.phone_number_id}")
+        else:
+            print(f"[WARN] Register phone falhou — provavelmente WABA em revisão (account_review_status=PENDING). Task de retry irá tentar novamente a cada 4h.")
     except Exception as e:
         print(f"[WARN] Erro ao registrar número: {e}")
 

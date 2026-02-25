@@ -165,6 +165,7 @@ def processar_webhook_completo(webhook_data: dict):
     - Webhook HTTP retorna em < 100ms
     - Invalidação de cache automática
     - Bot handler executado aqui
+    - Processa account_update (PARTNER_APP_INSTALLED, aprovação de WABA)
 
     Args:
         webhook_data: Dados completos do webhook
@@ -181,6 +182,16 @@ def processar_webhook_completo(webhook_data: dict):
             return {"success": True, "message": "Não é mensagem WhatsApp"}
 
         entries = webhook_data.get("entry", [])
+
+        # Verificar se é account_update (evento de gestão de WABA)
+        for entry in entries:
+            for change in entry.get("changes", []):
+                if change.get("field") == "account_update":
+                    _handle_account_update(change.get("value", {}), db)
+            # Se todos os changes são account_update, retornar sem processar mensagens
+            if all(c.get("field") == "account_update" for c in entry.get("changes", [])):
+                db.close()
+                return {"success": True, "message": "account_update processado"}
 
         for entry in entries:
             changes = entry.get("changes", [])
@@ -1210,6 +1221,119 @@ def forward_webhook_dev_task(dev_id: int, payload: dict):
 
     except Exception as e:
         logger.error(f"Erro ao encaminhar webhook para dev {dev_id}: {e}")
+        db.close()
+        return {"success": False, "error": str(e)}
+
+
+# ========== HELPER: PROCESSAR account_update WEBHOOK ==========
+
+def _handle_account_update(value: dict, db: Session):
+    """
+    Processa eventos account_update da Meta:
+    - PARTNER_APP_INSTALLED: cliente conectou via Embedded Signup → subscribe + register
+    - PARTNER_CLIENT_CERTIFICATION_STATUS_UPDATE: verificação de negócio aprovada
+    """
+    import asyncio
+    from app.services.meta_signup import subscribe_app_to_waba, register_phone_number
+
+    event = value.get("event", "")
+    waba_info = value.get("waba_info", {})
+    waba_id = waba_info.get("waba_id", "")
+
+    logger.info(f"account_update evento: {event} | WABA: {waba_id}")
+
+    if event == "PARTNER_APP_INSTALLED" and waba_id:
+        # Novo cliente conectou via Embedded Signup
+        # Buscar empresa pela WABA
+        empresa = db.query(Empresa).filter(Empresa.waba_id == waba_id).first()
+        if empresa and empresa.whatsapp_token:
+            logger.info(f"PARTNER_APP_INSTALLED: tentando subscribe+register para {empresa.nome}")
+            try:
+                asyncio.run(subscribe_app_to_waba(waba_id, empresa.whatsapp_token))
+                logger.info(f"Subscribe OK para WABA {waba_id}")
+            except Exception as e:
+                logger.warning(f"Subscribe falhou para WABA {waba_id}: {e}")
+            try:
+                asyncio.run(register_phone_number(empresa.phone_number_id, empresa.whatsapp_token))
+                logger.info(f"Register OK para phone {empresa.phone_number_id}")
+            except Exception as e:
+                logger.warning(f"Register falhou para phone {empresa.phone_number_id}: {e}")
+
+    elif event == "PARTNER_CLIENT_CERTIFICATION_STATUS_UPDATE":
+        # Verificação de negócio atualizada
+        cert_info = value.get("partner_client_certification_info", {})
+        status = cert_info.get("status", "")
+        logger.info(f"Certificação WABA {waba_id}: {status}")
+
+
+# ========== TASK: REGISTRAR NÚMEROS PENDENTES ==========
+
+@celery_app.task(name="app.tasks.tasks.registrar_numeros_pendentes_task")
+def registrar_numeros_pendentes_task():
+    """
+    Task periódica (a cada 4h): verifica empresas com número ainda PENDING
+    na Meta e tenta registrar quando account_review_status == APPROVED.
+    """
+    import asyncio
+    from app.services.meta_signup import register_phone_number, subscribe_app_to_waba
+
+    db = SessionLocal()
+    registrados = 0
+    pendentes = 0
+
+    try:
+        # Buscar empresas com phone_number_id real (não placeholder)
+        empresas = db.query(Empresa).filter(
+            Empresa.phone_number_id.isnot(None),
+            Empresa.ativa == True,
+            ~Empresa.phone_number_id.like("PENDENTE%"),
+            ~Empresa.phone_number_id.like("PHONE_ID%"),
+            Empresa.whatsapp_token.isnot(None),
+            ~Empresa.whatsapp_token.like("TOKEN%"),
+        ).all()
+
+        for empresa in empresas:
+            try:
+                # Checar status do número na Meta
+                status_data = httpx.get(
+                    f"https://graph.facebook.com/v25.0/{empresa.phone_number_id}",
+                    params={
+                        "fields": "status,account_review_status",
+                        "access_token": empresa.whatsapp_token,
+                    },
+                    timeout=10.0,
+                ).json()
+
+                phone_status = status_data.get("status", "")
+                account_review = status_data.get("account_review_status", "")
+
+                if phone_status == "PENDING" and account_review == "APPROVED":
+                    # WABA aprovada mas número ainda não registrado → tentar agora
+                    logger.info(f"Tentando registrar número pendente: {empresa.nome} ({empresa.phone_number_id})")
+                    try:
+                        asyncio.run(subscribe_app_to_waba(empresa.waba_id, empresa.whatsapp_token))
+                    except Exception:
+                        pass
+                    ok = asyncio.run(register_phone_number(empresa.phone_number_id, empresa.whatsapp_token))
+                    if ok:
+                        registrados += 1
+                        logger.info(f"Número registrado com sucesso: {empresa.nome}")
+                    else:
+                        pendentes += 1
+
+                elif phone_status == "PENDING":
+                    pendentes += 1
+                    logger.info(f"Número ainda pendente (WABA em revisão): {empresa.nome} | review={account_review}")
+
+            except Exception as e:
+                logger.warning(f"Erro ao checar empresa {empresa.nome}: {e}")
+
+        db.close()
+        logger.info(f"Números pendentes: {pendentes} aguardando, {registrados} registrados agora")
+        return {"success": True, "registrados": registrados, "pendentes": pendentes}
+
+    except Exception as e:
+        logger.error(f"Erro na task de registrar números: {e}")
         db.close()
         return {"success": False, "error": str(e)}
 

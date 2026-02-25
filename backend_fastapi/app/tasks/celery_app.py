@@ -48,6 +48,10 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.tasks.sincronizar_limites_waba_task',
         'schedule': 604800.0,  # Semanal (7 dias)
     },
+    'registrar-numeros-pendentes': {
+        'task': 'app.tasks.tasks.registrar_numeros_pendentes_task',
+        'schedule': 14400.0,  # A cada 4 horas
+    },
 }
 
 print("✅ Celery configurado com sucesso!")
