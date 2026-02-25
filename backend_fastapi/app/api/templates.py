@@ -95,10 +95,28 @@ async def criar_template(
             detail="waba_id não configurado. Atualize as configurações da empresa."
         )
 
-    service = _get_template_service(empresa)
-
     # Converter components para dict
     components_dict = [c.model_dump(exclude_none=True) for c in dados.components]
+
+    # ---- Carrossel interativo: salvar localmente sem enviar à Meta ----
+    if dados.category.upper() == "INTERACTIVE_CAROUSEL":
+        template = MessageTemplate(
+            empresa_id=empresa_id,
+            meta_template_id=None,
+            waba_id=empresa.waba_id if empresa.waba_id else None,
+            name=dados.name,
+            category=dados.category.upper(),
+            language=dados.language,
+            status="SAVED",
+            components=components_dict,
+            parameter_format=dados.parameter_format,
+        )
+        db.add(template)
+        db.commit()
+        db.refresh(template)
+        return template
+
+    service = _get_template_service(empresa)
 
     try:
         result = await service.create_template(
