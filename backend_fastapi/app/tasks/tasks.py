@@ -1294,18 +1294,27 @@ def registrar_numeros_pendentes_task():
 
         for empresa in empresas:
             try:
-                # Checar status do número na Meta
-                status_data = httpx.get(
+                # Checar status do número (campo "status" fica no phone number)
+                phone_data = httpx.get(
                     f"https://graph.facebook.com/v25.0/{empresa.phone_number_id}",
-                    params={
-                        "fields": "status,account_review_status",
-                        "access_token": empresa.whatsapp_token,
-                    },
+                    params={"fields": "status", "access_token": empresa.whatsapp_token},
                     timeout=10.0,
                 ).json()
 
-                phone_status = status_data.get("status", "")
-                account_review = status_data.get("account_review_status", "")
+                phone_status = phone_data.get("status", "")
+
+                if phone_status != "PENDING":
+                    continue  # Já registrado ou outro status
+
+                # Número pendente — checar se WABA foi aprovada
+                account_review = "UNKNOWN"
+                if empresa.waba_id:
+                    waba_data = httpx.get(
+                        f"https://graph.facebook.com/v25.0/{empresa.waba_id}",
+                        params={"fields": "account_review_status", "access_token": empresa.whatsapp_token},
+                        timeout=10.0,
+                    ).json()
+                    account_review = waba_data.get("account_review_status", "UNKNOWN")
 
                 if phone_status == "PENDING" and account_review == "APPROVED":
                     # WABA aprovada mas número ainda não registrado → tentar agora
@@ -1327,6 +1336,58 @@ def registrar_numeros_pendentes_task():
 
             except Exception as e:
                 logger.warning(f"Erro ao checar empresa {empresa.nome}: {e}")
+
+        # ---- Devs com número pendente ----
+        devs = db.query(DevUsuario).filter(
+            DevUsuario.phone_number_id.isnot(None),
+            DevUsuario.ativo == True,
+            ~DevUsuario.phone_number_id.like("PENDENTE%"),
+            ~DevUsuario.phone_number_id.like("PHONE_ID%"),
+            DevUsuario.whatsapp_token.isnot(None),
+            ~DevUsuario.whatsapp_token.like("TOKEN%"),
+        ).all()
+
+        for dev in devs:
+            try:
+                phone_data = httpx.get(
+                    f"https://graph.facebook.com/v25.0/{dev.phone_number_id}",
+                    params={"fields": "status", "access_token": dev.whatsapp_token},
+                    timeout=10.0,
+                ).json()
+
+                phone_status = phone_data.get("status", "")
+
+                if phone_status != "PENDING":
+                    continue
+
+                account_review = "UNKNOWN"
+                if dev.waba_id:
+                    waba_data = httpx.get(
+                        f"https://graph.facebook.com/v25.0/{dev.waba_id}",
+                        params={"fields": "account_review_status", "access_token": dev.whatsapp_token},
+                        timeout=10.0,
+                    ).json()
+                    account_review = waba_data.get("account_review_status", "UNKNOWN")
+
+                if phone_status == "PENDING" and account_review == "APPROVED":
+                    logger.info(f"Tentando registrar número pendente (dev): {dev.nome} ({dev.phone_number_id})")
+                    try:
+                        asyncio.run(subscribe_app_to_waba(dev.waba_id, dev.whatsapp_token))
+                    except Exception:
+                        pass
+                    ok = asyncio.run(register_phone_number(dev.phone_number_id, dev.whatsapp_token))
+                    if ok:
+                        registrados += 1
+                        logger.info(f"Número dev registrado com sucesso: {dev.nome}")
+                    else:
+                        pendentes += 1
+
+                elif phone_status == "PENDING":
+                    pendentes += 1
+                    logger.info(f"Número dev ainda pendente (WABA em revisão): {dev.nome} | review={account_review}")
+
+            except Exception as e:
+                logger.warning(f"Erro ao checar dev {dev.nome}: {e}")
 
         db.close()
         logger.info(f"Números pendentes: {pendentes} aguardando, {registrados} registrados agora")
