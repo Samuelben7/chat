@@ -18,6 +18,17 @@ def _require_admin(user: CurrentUser):
         raise HTTPException(status_code=403, detail="Acesso restrito ao administrador")
 
 
+@router.get("", response_model=List[PlanoResponse])
+async def listar_planos_admin(
+    user: CurrentUser = None,
+    db: Session = Depends(get_db)
+):
+    """Lista todos os planos incluindo inativos (admin)."""
+    _require_admin(user)
+    planos = db.query(Plano).order_by(Plano.tipo, Plano.ordem).all()
+    return planos
+
+
 @router.post("", response_model=PlanoResponse, status_code=201)
 async def criar_plano(
     dados: PlanoCreate,
