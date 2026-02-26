@@ -373,6 +373,28 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             dados_extras["media_id"] = video.get("id")
             dados_extras["mime_type"] = video.get("mime_type", "video/mp4")
 
+        elif message_type == "sticker":
+            sticker = message.get("sticker", {})
+            content = "🏷️ Sticker"
+            dados_extras["media_id"] = sticker.get("id")
+            dados_extras["mime_type"] = sticker.get("mime_type", "image/webp")
+
+        elif message_type == "reaction":
+            reaction = message.get("reaction", {})
+            emoji = reaction.get("emoji", "👍")
+            content = f"Reagiu com {emoji}"
+
+        elif message_type == "location":
+            location = message.get("location", {})
+            name = location.get("name", "")
+            content = f"📍 Localização compartilhada{': ' + name if name else ''}"
+
+        elif message_type == "contacts":
+            content = "👤 Contato compartilhado"
+
+        elif message_type == "unsupported":
+            content = "📎 Mensagem não suportada neste dispositivo"
+
         else:
             content = f"[{message_type}]"
 
