@@ -280,6 +280,22 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
 
         print(f"📥 Mensagem de {from_number}: {content}")
 
+        # TYPING INDICATOR + READ RECEIPT para Meta (se houver atendente humano ativo)
+        # Mostra para o usuário que a empresa viu a mensagem e está respondendo
+        # Fire-and-forget: não bloqueia o processamento em caso de falha
+        try:
+            atend_ativo = db.query(Atendimento).filter(
+                Atendimento.whatsapp_number == from_number,
+                Atendimento.empresa_id == empresa.id,
+                Atendimento.status == "em_atendimento",
+            ).first()
+            if atend_ativo:
+                from app.services.whatsapp import WhatsAppService
+                _ws = WhatsAppService(empresa)
+                await _ws.send_typing_indicator(message_id)
+        except Exception as _e:
+            print(f"⚠️  Typing indicator falhou (não crítico): {_e}")
+
         # INVALIDAR CACHE DE CONVERSAS (nova mensagem = atualizar lista)
         redis_cache.invalidate_pattern(f"conversas:emp:{empresa.id}*")
         print(f"🗑️  Cache de conversas invalidado para empresa {empresa.id}")

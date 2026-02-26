@@ -184,13 +184,23 @@ async def editar_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template não encontrado")
 
+    components_dict = [c.model_dump(exclude_none=True) for c in dados.components]
+
+    # ---- CARROSSEL: editar apenas localmente, sem Meta API ----
+    if template.category.upper() == "INTERACTIVE_CAROUSEL":
+        template.components = components_dict
+        if dados.category:
+            template.category = dados.category
+        db.commit()
+        db.refresh(template)
+        return template
+
+    # ---- TEMPLATE PADRÃO: editar via Meta API ----
     if not template.meta_template_id:
         raise HTTPException(status_code=400, detail="Template sem ID da Meta para edição")
 
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
-
-    components_dict = [c.model_dump(exclude_none=True) for c in dados.components]
 
     try:
         await service.edit_template(
@@ -229,13 +239,16 @@ async def deletar_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template não encontrado")
 
-    empresa = _get_empresa(empresa_id, db)
-    service = _get_template_service(empresa)
+    # ---- CARROSSEL: deletar apenas localmente, sem Meta API ----
+    is_carousel = template.category.upper() == "INTERACTIVE_CAROUSEL"
 
-    try:
-        await service.delete_template(name=template.name)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
+    if not is_carousel:
+        empresa = _get_empresa(empresa_id, db)
+        service = _get_template_service(empresa)
+        try:
+            await service.delete_template(name=template.name)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
 
     # Limpar imagem de header associada
     if template.header_image_path:
@@ -271,11 +284,54 @@ async def enviar_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template não encontrado")
 
-    if template.status != "APPROVED":
-        raise HTTPException(status_code=400, detail=f"Template não aprovado (status: {template.status})")
-
     empresa = _get_empresa(empresa_id, db)
     service = _get_template_service(empresa)
+
+    # ---- CARROSSEL INTERATIVO (salvo localmente, não precisa APPROVED) ----
+    if template.category.upper() == "INTERACTIVE_CAROUSEL":
+        # Extrair estrutura dos cards do campo example do componente CAROUSEL
+        carousel_comp = None
+        for comp in (template.components or []):
+            if comp.get("type", "").upper() == "CAROUSEL":
+                carousel_comp = comp
+                break
+
+        if not carousel_comp:
+            return TemplateSendResponse(
+                success=False,
+                whatsapp_number=dados.whatsapp_number,
+                error="Componente CAROUSEL não encontrado no template"
+            )
+
+        example = carousel_comp.get("example", {})
+        cards = example.get("cards", [])
+        # Body text: usa o texto do componente CAROUSEL, com fallback no parameter_values["body"]
+        body_text = carousel_comp.get("text", "")
+        if not body_text and dados.parameter_values:
+            body_text = dados.parameter_values.get("body", "")
+
+        try:
+            message_id = await service.send_carousel_message(
+                to=dados.whatsapp_number,
+                body_text=body_text or "Confira nossas opções:",
+                cards=cards,
+            )
+            service.log_template_send(db, dados.whatsapp_number, template.name, message_id)
+            return TemplateSendResponse(
+                success=True,
+                message_id=message_id,
+                whatsapp_number=dados.whatsapp_number
+            )
+        except Exception as e:
+            return TemplateSendResponse(
+                success=False,
+                whatsapp_number=dados.whatsapp_number,
+                error=str(e)
+            )
+
+    # ---- TEMPLATE PADRÃO (precisa APPROVED) ----
+    if template.status != "APPROVED":
+        raise HTTPException(status_code=400, detail=f"Template não aprovado (status: {template.status})")
 
     # Build components from parameter_values or media_url (auto-build)
     send_components = dados.components
@@ -706,3 +762,67 @@ async def set_template_image(
     template.header_image_path = image_path
     db.commit()
     return {"detail": "Imagem associada com sucesso"}
+
+
+# ========== CATALOG (Meta Commerce) ==========
+
+@router.get("/catalog")
+async def listar_produtos_catalogo(
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db),
+    catalog_id: Optional[str] = Query(None, description="ID do catálogo (se não informado, busca automaticamente do WABA)"),
+    limit: int = Query(30, ge=1, le=100),
+):
+    """
+    Lista produtos do catálogo Meta vinculado ao WABA.
+    Se catalog_id não for informado, busca automaticamente via commerce_settings do WABA.
+    Requer permissão catalog_management no app Meta.
+    """
+    empresa = _get_empresa(empresa_id, db)
+    service = _get_template_service(empresa)
+
+    # Buscar catalog_id automaticamente se não foi passado
+    resolved_catalog_id = catalog_id
+    if not resolved_catalog_id:
+        try:
+            resolved_catalog_id = await service.get_waba_catalog_id()
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não foi possível detectar o catálogo vinculado ao WABA: {str(e)}"
+            )
+
+    if not resolved_catalog_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhum catálogo vinculado ao WABA. Vincule um catálogo no WhatsApp Manager ou informe o catalog_id manualmente."
+        )
+
+    try:
+        result = await service.list_catalog_products(resolved_catalog_id, limit=limit)
+        return {
+            "catalog_id": resolved_catalog_id,
+            "products": result.get("data", []),
+            "paging": result.get("paging", {}),
+            "total": len(result.get("data", [])),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao buscar produtos: {str(e)}")
+
+
+@router.get("/catalog/detect")
+async def detectar_catalogo(
+    empresa_id: CurrentEmpresa,
+    db: Session = Depends(get_db),
+):
+    """Detecta o catalog_id vinculado ao WABA da empresa."""
+    empresa = _get_empresa(empresa_id, db)
+    service = _get_template_service(empresa)
+
+    try:
+        catalog_id = await service.get_waba_catalog_id()
+        if catalog_id:
+            return {"catalog_id": catalog_id, "vinculado": True}
+        return {"catalog_id": None, "vinculado": False}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao detectar catálogo: {str(e)}")

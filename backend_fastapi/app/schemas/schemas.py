@@ -13,6 +13,7 @@ class MensagemBase(BaseModel):
 
 class MensagemCreate(MensagemBase):
     dados_extras: Optional[Dict[str, Any]] = {}
+    context_message_id: Optional[str] = None  # WAMID da mensagem que está sendo respondida (resposta contextual)
 
 
 class MensagemResponse(MensagemBase):

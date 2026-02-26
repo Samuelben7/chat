@@ -43,24 +43,28 @@ class WhatsAppService:
 
         return cls(empresa)
 
-    async def send_text_message(self, to: str, text: str) -> str:
+    async def send_text_message(self, to: str, text: str, context_message_id: Optional[str] = None) -> str:
         """
         Envia mensagem de texto simples.
+        Se context_message_id for informado, envia como resposta contextual (quote).
 
         Args:
             to: Número de WhatsApp do destinatário
             text: Texto da mensagem
+            context_message_id: WAMID da mensagem que está sendo respondida (opcional)
 
         Returns:
             message_id: ID da mensagem enviada
         """
-        payload = {
+        payload: Dict = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to,
             "type": "text",
             "text": {"body": text}
         }
+        if context_message_id:
+            payload["context"] = {"message_id": context_message_id}
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -283,54 +287,39 @@ class WhatsAppService:
             response.raise_for_status()
             return response.json()["id"]
 
-    async def send_media_message(
-        self,
-        to: str,
-        media_type: str,
-        media_id: str,
-        caption: Optional[str] = None,
-        filename: Optional[str] = None
-    ) -> str:
+    async def send_typing_indicator(self, message_id: str) -> bool:
         """
-        Envia mensagem de mídia (image, audio, document, video) usando media_id.
+        Envia indicador de digitação para o usuário no WhatsApp.
+        Simultaneamente marca a mensagem como lida (conforme doc oficial).
+        O indicador é automaticamente removido após 25 segundos ou quando responder.
 
         Args:
-            to: Número de WhatsApp do destinatário
-            media_type: Tipo da mídia (image, audio, document, video)
-            media_id: ID da mídia obtido via upload_media
-            caption: Legenda opcional (para image, video, document)
-            filename: Nome do arquivo (apenas para document)
+            message_id: WAMID da mensagem recebida do usuário
 
         Returns:
-            message_id: ID da mensagem enviada
+            success: True se enviado com sucesso
         """
-        media_data: Dict = {"id": media_id}
-        if caption and media_type in ("image", "video", "document"):
-            media_data["caption"] = caption
-        if filename and media_type == "document":
-            media_data["filename"] = filename
-
         payload = {
             "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": media_type,
-            media_type: media_data
+            "status": "read",
+            "message_id": message_id,
+            "typing_indicator": {"type": "text"},
         }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/messages",
-                headers=self.headers,
-                json=payload,
-                timeout=30.0
-            )
-            response.raise_for_status()
-            return response.json()["messages"][0]["id"]
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/messages",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=10.0
+                )
+                return response.json().get("success", False)
+        except Exception:
+            return False
 
     async def mark_as_read(self, message_id: str) -> bool:
         """
-        Marca mensagem como lida.
+        Marca mensagem como lida (sem typing indicator).
 
         Args:
             message_id: ID da mensagem a marcar como lida
@@ -354,6 +343,55 @@ class WhatsAppService:
             response.raise_for_status()
 
             return response.json().get("success", False)
+
+    async def send_media_message(
+        self,
+        to: str,
+        media_type: str,
+        media_id: str,
+        caption: Optional[str] = None,
+        filename: Optional[str] = None,
+        context_message_id: Optional[str] = None,
+    ) -> str:
+        """
+        Envia mensagem de mídia (image, audio, document, video) usando media_id.
+        Se context_message_id for informado, envia como resposta contextual.
+
+        Args:
+            to: Número de WhatsApp do destinatário
+            media_type: Tipo da mídia (image, audio, document, video)
+            media_id: ID da mídia obtido via upload_media
+            caption: Legenda opcional (para image, video, document)
+            filename: Nome do arquivo (apenas para document)
+
+        Returns:
+            message_id: ID da mensagem enviada
+        """
+        media_data: Dict = {"id": media_id}
+        if caption and media_type in ("image", "video", "document"):
+            media_data["caption"] = caption
+        if filename and media_type == "document":
+            media_data["filename"] = filename
+
+        payload: Dict = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": media_type,
+            media_type: media_data
+        }
+        if context_message_id:
+            payload["context"] = {"message_id": context_message_id}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/messages",
+                headers=self.headers,
+                json=payload,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()["messages"][0]["id"]
 
     async def send_template_message(
         self,

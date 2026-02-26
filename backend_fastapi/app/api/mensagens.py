@@ -77,10 +77,11 @@ async def enviar_mensagem(
             # Inicializar serviço com credenciais da empresa
             whatsapp_service = WhatsAppService(empresa)
 
-            # Enviar mensagem via WhatsApp API
+            # Enviar mensagem via WhatsApp API (com resposta contextual se solicitado)
             message_id = await whatsapp_service.send_text_message(
                 to=mensagem.whatsapp_number,
-                text=mensagem.conteudo
+                text=mensagem.conteudo,
+                context_message_id=mensagem.context_message_id,
             )
 
         # Salvar no log (tanto para mock quanto real)
@@ -179,16 +180,35 @@ async def marcar_todas_lidas(
     db: Session = Depends(get_db)
 ):
     """
-    Marca todas as mensagens recebidas de um número como lidas.
+    Marca todas as mensagens recebidas de um número como lidas no DB
+    e envia read receipts para a Meta API para a mensagem mais recente.
+    Marcar a mais recente já faz a Meta marcar as anteriores também.
     """
-    # Atualizar todas as mensagens recebidas não lidas
+    # Buscar a mensagem recebida mais recente com message_id válido (para notificar Meta)
+    ultima_msg = db.query(MensagemLog).filter(
+        MensagemLog.whatsapp_number == whatsapp_number,
+        MensagemLog.direcao == "recebida",
+        MensagemLog.lida == False,
+        MensagemLog.message_id.isnot(None),
+    ).order_by(MensagemLog.timestamp.desc()).first()
+
+    # Atualizar todas no DB
     updated = db.query(MensagemLog).filter(
         MensagemLog.whatsapp_number == whatsapp_number,
         MensagemLog.direcao == "recebida",
         MensagemLog.lida == False
     ).update({"lida": True})
-
     db.commit()
+
+    # Notificar Meta API (fire-and-forget, não bloqueia se falhar)
+    if ultima_msg and ultima_msg.message_id:
+        try:
+            empresa = db.query(Empresa).filter(Empresa.ativa == True).first()
+            if empresa:
+                ws = WhatsAppService(empresa)
+                await ws.mark_as_read(ultima_msg.message_id)
+        except Exception as e:
+            logger.warning(f"Falha ao enviar read receipt para Meta ({ultima_msg.message_id}): {e}")
 
     return {
         "status": "success",

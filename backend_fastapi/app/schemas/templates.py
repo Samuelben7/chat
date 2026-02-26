@@ -26,7 +26,7 @@ class TemplateComponent(BaseModel):
 
 class TemplateCreate(BaseModel):
     name: str = Field(..., pattern=r'^[a-z][a-z0-9_]*$', max_length=512)
-    category: str = Field(..., pattern=r'^(MARKETING|UTILITY|AUTHENTICATION)$')
+    category: str = Field(..., pattern=r'^(MARKETING|UTILITY|AUTHENTICATION|INTERACTIVE_CAROUSEL)$')
     language: str = Field(default='pt_BR', max_length=10)
     components: List[TemplateComponent]
     parameter_format: Optional[str] = None

@@ -16,24 +16,43 @@ router = APIRouter()
 
 # Mapeamento de mime_type para tipo WhatsApp (somente tipos aceitos pela Meta)
 MIME_TO_WA_TYPE = {
+    # Imagens
     "image/jpeg": "image",
     "image/png": "image",
     "image/gif": "image",
     "image/webp": "image",
+    # Áudio
     "audio/ogg": "audio",
     "audio/mpeg": "audio",
     "audio/mp4": "audio",
     "audio/aac": "audio",
     "audio/amr": "audio",
     "audio/opus": "audio",
+    # Vídeo
     "video/mp4": "video",
     "video/3gpp": "video",
+    # Documentos (tipos oficialmente suportados pela Meta)
     "application/pdf": "document",
     "text/plain": "document",
     "application/vnd.ms-excel": "document",
     "application/msword": "document",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+    "application/vnd.ms-powerpoint": "document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+}
+
+# MIME types de vídeo que precisam conversão para H.264/MP4 antes de enviar
+VIDEO_CONVERSION_MIMES = {
+    "video/mp4",
+    "video/3gpp",
+    "video/quicktime",   # iPhone .MOV
+    "video/x-msvideo",   # .AVI
+    "video/x-m4v",       # Apple M4V
+    "video/mov",         # alias .MOV
+    "video/x-matroska",  # .MKV
+    "video/webm",        # WebM com vídeo
+    "video/x-ms-wmv",    # .WMV
 }
 
 # Tipos não suportados pela Meta com mensagem de erro amigável
@@ -152,6 +171,7 @@ async def proxy_media(
 async def send_media(
     whatsapp_number: str = Form(...),
     caption: str = Form(None),
+    context_message_id: str = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -198,9 +218,13 @@ async def send_media(
         ext = file_name.rsplit('.', 1)[-1] if '.' in file_name else 'webm'
         file_name = file_name.replace(f'.{ext}', '.ogg') if f'.{ext}' in file_name else file_name + '.ogg'
 
-    # Converter vídeo para H.264/MP4 (Meta rejeita H.265/HEVC e outros codecs)
-    if upload_mime in ("video/mp4", "video/3gpp", "video/quicktime", "video/x-msvideo"):
-        print(f"🔄 Convertendo vídeo para H.264/MP4 via ffmpeg")
+    # Converter vídeo para H.264/MP4 — inclui iPhone MOV, AVI, MKV, WebM vídeo, etc.
+    # Também captura qualquer "video/*" desconhecido para garantir compatibilidade com Meta
+    needs_video_conversion = upload_mime in VIDEO_CONVERSION_MIMES or (
+        upload_mime.startswith("video/") and upload_mime not in MIME_TO_WA_TYPE
+    )
+    if needs_video_conversion:
+        print(f"🔄 Convertendo vídeo {upload_mime!r} → H.264/MP4 via ffmpeg")
         file_bytes = convert_video_to_h264(file_bytes)
         upload_mime = "video/mp4"
         name_base = file_name.rsplit('.', 1)[0] if '.' in file_name else file_name
@@ -214,13 +238,14 @@ async def send_media(
         # Upload para Meta → media_id
         media_id = await whatsapp_service.upload_media(file_bytes, upload_mime, file_name)
 
-        # Enviar mensagem WhatsApp com o media_id
+        # Enviar mensagem WhatsApp com o media_id (com contexto/reply se solicitado)
         message_id = await whatsapp_service.send_media_message(
             to=whatsapp_number,
             media_type=wa_type,
             media_id=media_id,
             caption=caption or None,
             filename=file_name if wa_type == "document" else None,
+            context_message_id=context_message_id or None,
         )
 
         # Texto exibido no chat

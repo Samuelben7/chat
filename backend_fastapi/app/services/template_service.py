@@ -347,8 +347,7 @@ class TemplateService:
             "template": template
         }
 
-        import logging
-        logging.getLogger("template_send").warning(f"📤 Template payload: {payload}")
+        logger.warning(f"📤 Template payload: {payload}")
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -357,8 +356,109 @@ class TemplateService:
                 json=payload,
                 timeout=30.0
             )
-            logging.getLogger("template_send").warning(f"📤 Meta response: {response.status_code} {response.text}")
+            logger.warning(f"📤 Meta response: {response.status_code} {response.text}")
             response.raise_for_status()
+            data = response.json()
+            return data["messages"][0]["id"]
+
+    async def send_carousel_message(self, to: str, body_text: str,
+                                    cards: List[Dict]) -> str:
+        """
+        Envia mensagem interativa de carrossel (tipo 'interactive/carousel').
+        Usado para templates INTERACTIVE_CAROUSEL salvos localmente.
+
+        Cada card deve ter a estrutura:
+        {
+            "card_index": int,
+            "header_type": "image" | "video",
+            "header_url": str,          # URL pública da mídia
+            "body_text": str,           # opcional
+            "button_type": "url" | "quick_reply",
+            "button_display_text": str, # para URL
+            "button_url": str,          # para URL
+            "quick_replies": [{"id": str, "title": str}]  # para quick_reply
+        }
+        """
+        if to and not to.startswith("+"):
+            to = f"+{to}"
+
+        # Montar cards no formato da Meta API
+        api_cards = []
+        for card in cards:
+            card_index = card.get("card_index", 0)
+            header_type = card.get("header_type", "image")
+            header_url = card.get("header_url", "")
+            body_text_card = card.get("body_text", "")
+            button_type = card.get("button_type", "url")
+
+            api_card: Dict = {
+                "card_index": card_index,
+                "type": "cta_url",  # Sempre "cta_url" per Meta API docs, independente do tipo de botão
+                "header": {
+                    "type": header_type,
+                    header_type: {"link": header_url},
+                },
+            }
+
+            if body_text_card:
+                api_card["body"] = {"text": body_text_card}
+
+            if button_type == "url":
+                api_card["action"] = {
+                    "name": "cta_url",
+                    "parameters": {
+                        "display_text": card.get("button_display_text", "Saiba mais"),
+                        "url": card.get("button_url", ""),
+                    },
+                }
+            else:
+                # Quick reply — aceita múltiplos botões
+                qrs = card.get("quick_replies", [])
+                api_card["action"] = {
+                    "buttons": [
+                        {
+                            "type": "quick_reply",
+                            "quick_reply": {
+                                "id": qr.get("id", f"btn_{i}"),
+                                "title": qr.get("title", "Responder"),
+                            },
+                        }
+                        for i, qr in enumerate(qrs)
+                    ]
+                }
+
+            api_cards.append(api_card)
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "carousel",
+                "body": {"text": body_text},
+                "action": {"cards": api_cards},
+            },
+        }
+
+        logger.warning(f"📤 Carousel payload: {payload}")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.BASE_URL}/{self.phone_number_id}/messages",
+                headers=self.headers,
+                json=payload,
+                timeout=30.0
+            )
+            logger.warning(f"📤 Meta carousel response: {response.status_code} {response.text}")
+            if response.status_code >= 400:
+                try:
+                    err = response.json().get("error", {})
+                    raise ValueError(f"[{err.get('code')}] {err.get('message', response.text)}")
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"HTTP {response.status_code}: {response.text}")
             data = response.json()
             return data["messages"][0]["id"]
 
@@ -383,11 +483,16 @@ class TemplateService:
             if not after or "next" not in paging:
                 break
 
-        # Map de templates existentes no banco
+        # Map de templates existentes no banco (excluindo carrosseis locais — eles não existem na Meta)
         existing = db.query(MessageTemplate).filter(
             MessageTemplate.empresa_id == self.empresa.id
         ).all()
-        existing_map = {(t.name, t.language): t for t in existing}
+        # Carrosseis são gerenciados localmente: nunca tocar neles no sync
+        existing_map = {
+            (t.name, t.language): t
+            for t in existing
+            if t.category.upper() != "INTERACTIVE_CAROUSEL"
+        }
         meta_keys = set()
 
         for mt in meta_templates:
@@ -425,7 +530,7 @@ class TemplateService:
                 db.add(new_tmpl)
                 criados += 1
 
-        # Remove templates que não existem mais na Meta
+        # Remove templates que não existem mais na Meta (carrosseis são ignorados — são locais)
         for key, tmpl in existing_map.items():
             if key not in meta_keys and tmpl.status != 'DELETED':
                 tmpl.status = 'DELETED'
@@ -538,3 +643,74 @@ class TemplateService:
         )
         db.add(log)
         db.commit()
+
+    async def get_waba_catalog_id(self) -> Optional[str]:
+        """
+        Busca o catalog_id vinculado ao número de telefone/WABA.
+        Tenta primeiro via phone_number_id (whatsapp_commerce_settings),
+        depois via WABA (commerce_settings) como fallback.
+        Retorna None se não houver catálogo vinculado.
+        """
+        async with httpx.AsyncClient() as client:
+            # Tentativa 1: via phone_number_id → whatsapp_commerce_settings
+            if self.phone_number_id:
+                try:
+                    resp = await client.get(
+                        f"{self.BASE_URL}/{self.phone_number_id}/whatsapp_commerce_settings",
+                        headers=self.headers,
+                        timeout=30.0
+                    )
+                    if resp.status_code < 400:
+                        data = resp.json()
+                        items = data.get("data", [])
+                        if items and isinstance(items, list):
+                            catalog_id = items[0].get("catalog_id")
+                            if catalog_id:
+                                logger.info(f"catalog_id encontrado via phone_number: {catalog_id}")
+                                return catalog_id
+                except Exception as e:
+                    logger.warning(f"Falha ao buscar catalog via phone_number_id: {e}")
+
+            # Tentativa 2: via WABA → commerce_settings
+            if not self.waba_id:
+                raise ValueError("waba_id não configurado para esta empresa")
+
+            resp2 = await client.get(
+                f"{self.BASE_URL}/{self.waba_id}",
+                headers=self.headers,
+                params={"fields": "commerce_settings"},
+                timeout=30.0
+            )
+            if resp2.status_code >= 400:
+                return None
+            data2 = resp2.json()
+            commerce = data2.get("commerce_settings", {})
+            catalog_id = commerce.get("catalog_id")
+            if catalog_id:
+                logger.info(f"catalog_id encontrado via WABA commerce_settings: {catalog_id}")
+            return catalog_id
+
+    async def list_catalog_products(self, catalog_id: str, limit: int = 30) -> Dict:
+        """
+        Lista produtos de um catálogo Meta via Graph API.
+        Retorna dict com 'data' (lista de produtos) e 'paging'.
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/{catalog_id}/products",
+                headers=self.headers,
+                params={
+                    "fields": "id,name,description,price,currency,image_url,retailer_id,availability,condition",
+                    "limit": limit,
+                },
+                timeout=30.0
+            )
+            if response.status_code >= 400:
+                try:
+                    err = response.json().get("error", {})
+                    raise ValueError(f"[{err.get('code')}] {err.get('message', response.text)}")
+                except ValueError:
+                    raise
+                except Exception:
+                    raise ValueError(f"HTTP {response.status_code}: {response.text}")
+            return response.json()
