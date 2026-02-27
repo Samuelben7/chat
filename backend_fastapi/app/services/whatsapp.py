@@ -442,6 +442,66 @@ class WhatsAppService:
 
             return data["messages"][0]["id"]
 
+    async def get_business_profile(self) -> dict:
+        """Busca o perfil do WhatsApp Business (nome, foto, categoria, etc.)."""
+        fields = "about,address,description,email,profile_picture_url,vertical,websites"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/whatsapp_business_profile",
+                params={"fields": fields},
+                headers=self.headers,
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            # A API retorna {"data": [...]}
+            profiles = data.get("data", [])
+            return profiles[0] if profiles else {}
+
+    async def update_business_profile(self, campos: dict) -> bool:
+        """
+        Atualiza campos do perfil WhatsApp Business.
+        Campos aceitos: about, address, description, email, vertical, websites, profile_picture_handle
+        """
+        payload = {"messaging_product": "whatsapp", **campos}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/whatsapp_business_profile",
+                json=payload,
+                headers=self.headers,
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            return response.json().get("success", False)
+
+    async def upload_profile_photo(self, image_bytes: bytes, mime_type: str) -> str:
+        """
+        Faz upload da foto de perfil para a Meta e retorna o handle.
+        O handle é usado em update_business_profile(profile_picture_handle=handle).
+        """
+        import io
+        # Upload via multipart form para o endpoint de mídia
+        form_data = {
+            "messaging_product": (None, "whatsapp"),
+            "type": (None, mime_type),
+            "file": ("profile.jpg", io.BytesIO(image_bytes), mime_type),
+        }
+        headers_upload = {"Authorization": f"Bearer {self.empresa.whatsapp_token}"}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/media",
+                files=form_data,
+                headers=headers_upload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            # Meta retorna "h" como handle da foto de perfil
+            handle = data.get("h") or data.get("id")
+            if not handle:
+                raise RuntimeError(f"Meta não retornou handle da foto: {data}")
+            return handle
+
 
 def extract_message_data(webhook_data: Dict) -> Optional[Dict]:
     """
