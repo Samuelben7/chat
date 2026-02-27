@@ -6,6 +6,7 @@ from typing import Optional, List
 from app.database.database import get_db
 from app.models.models import Empresa
 from app.services.whatsapp import WhatsAppService
+from app.core.dependencies import CurrentEmpresa
 
 router = APIRouter()
 
@@ -41,8 +42,8 @@ class PerfilUpdate(BaseModel):
     websites: Optional[List[str]] = None # Lista de sites (máx 2)
 
 
-def _get_empresa(db: Session) -> Empresa:
-    empresa = db.query(Empresa).filter(Empresa.id == 1, Empresa.ativa == True).first()
+def _get_empresa(empresa_id: int, db: Session) -> Empresa:
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id, Empresa.ativa == True).first()
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     if not empresa.phone_number_id or not empresa.whatsapp_token:
@@ -51,9 +52,9 @@ def _get_empresa(db: Session) -> Empresa:
 
 
 @router.get("/perfil-whatsapp")
-async def obter_perfil(db: Session = Depends(get_db)):
+async def obter_perfil(empresa_id: CurrentEmpresa, db: Session = Depends(get_db)):
     """Retorna o perfil atual do WhatsApp Business."""
-    empresa = _get_empresa(db)
+    empresa = _get_empresa(empresa_id, db)
     svc = WhatsAppService(empresa)
     try:
         perfil = await svc.get_business_profile()
@@ -67,9 +68,9 @@ async def obter_perfil(db: Session = Depends(get_db)):
 
 
 @router.patch("/perfil-whatsapp")
-async def atualizar_perfil(dados: PerfilUpdate, db: Session = Depends(get_db)):
+async def atualizar_perfil(dados: PerfilUpdate, empresa_id: CurrentEmpresa, db: Session = Depends(get_db)):
     """Atualiza campos do perfil WhatsApp Business."""
-    empresa = _get_empresa(db)
+    empresa = _get_empresa(empresa_id, db)
     svc = WhatsAppService(empresa)
 
     # Montar apenas campos preenchidos
@@ -100,13 +101,14 @@ async def atualizar_perfil(dados: PerfilUpdate, db: Session = Depends(get_db)):
 @router.post("/perfil-whatsapp/foto")
 async def atualizar_foto(
     file: UploadFile = File(...),
+    empresa_id: CurrentEmpresa = None,
     db: Session = Depends(get_db),
 ):
     """
     Faz upload da foto de perfil do WhatsApp Business.
     Aceita JPEG ou PNG (recomendado: quadrado 640x640px, máx 5MB).
     """
-    empresa = _get_empresa(db)
+    empresa = _get_empresa(empresa_id, db)
 
     # Validar tipo
     mime = file.content_type or "image/jpeg"
