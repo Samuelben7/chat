@@ -39,7 +39,9 @@ class BotMessageHandler:
         from_number: str,
         message_content: str,
         message_id: Optional[str],
-        db: Session
+        db: Session,
+        message_type: str = 'text',
+        dados_extras: dict = None,
     ):
         """
         Inicializa o handler do bot.
@@ -50,12 +52,16 @@ class BotMessageHandler:
             message_content: Conteúdo da mensagem
             message_id: ID da mensagem WhatsApp
             db: Sessão do banco de dados
+            message_type: Tipo da mensagem (text, image, audio, sticker, etc.)
+            dados_extras: Dados extras da mensagem (media_id, mime_type, etc.)
         """
         self.empresa = empresa
         self.from_number = from_number
         self.message_content = message_content
         self.message_id = message_id
         self.db = db
+        self.message_type = message_type
+        self.dados_extras = dados_extras or {}
 
         # Busca ou cria sessão
         self.session = self.db.query(ChatSessao).filter(
@@ -174,7 +180,7 @@ class BotMessageHandler:
             # Nenhum fluxo ativo = bot desativado, não responder nada
             logger.info(f"Bot desativado para empresa {self.empresa.id} — nenhum fluxo ativo")
             # Apenas salvar a mensagem recebida no log (sem responder)
-            self.log_message_received()
+            self.log_message_received(tipo_mensagem=self.message_type, dados_extras=self.dados_extras)
             return
 
         # Verificar se o estado atual é do fluxo dinâmico ou inicio
@@ -197,7 +203,7 @@ class BotMessageHandler:
 
         # Fallback: handler hardcoded padrão (estado não é do fluxo dinâmico)
         # Log da mensagem recebida
-        self.log_message_received()
+        self.log_message_received(tipo_mensagem=self.message_type, dados_extras=self.dados_extras)
 
         # Marca mensagem como lida
         if self.message_id:

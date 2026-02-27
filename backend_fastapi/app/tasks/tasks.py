@@ -555,7 +555,9 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     from_number=from_number,
                     message_content=content,
                     message_id=message_id,
-                    db=db
+                    db=db,
+                    message_type=message_type,
+                    dados_extras=dados_extras,
                 )
 
                 # Importar asyncio para rodar função async
