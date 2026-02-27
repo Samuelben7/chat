@@ -375,9 +375,11 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
         elif message_type == "sticker":
             sticker = message.get("sticker", {})
-            content = "🏷️ Sticker"
+            animated = sticker.get("animated", False)
+            content = "🏷️ Sticker animado" if animated else "🏷️ Sticker"
             dados_extras["media_id"] = sticker.get("id")
             dados_extras["mime_type"] = sticker.get("mime_type", "image/webp")
+            dados_extras["animated"] = animated
 
         elif message_type == "reaction":
             reaction = message.get("reaction", {})

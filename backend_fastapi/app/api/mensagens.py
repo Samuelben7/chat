@@ -84,6 +84,13 @@ async def enviar_mensagem(
                 context_message_id=mensagem.context_message_id,
             )
 
+        # Montar dados_extras: base + reply_to se houver
+        dados_extras_final = dict(mensagem.dados_extras or {})
+        if mensagem.reply_to_content:
+            dados_extras_final["reply_to_content"] = mensagem.reply_to_content
+        if mensagem.reply_to_direcao:
+            dados_extras_final["reply_to_direcao"] = mensagem.reply_to_direcao
+
         # Salvar no log (tanto para mock quanto real)
         mensagem_log = MensagemLog(
             empresa_id=1,  # TODO: pegar do JWT quando tiver multi-tenant
@@ -92,7 +99,7 @@ async def enviar_mensagem(
             direcao="enviada",
             tipo_mensagem=mensagem.tipo_mensagem,
             conteudo=mensagem.conteudo,
-            dados_extras=mensagem.dados_extras or {},
+            dados_extras=dados_extras_final,
             timestamp=datetime.now(timezone.utc),
             lida=False
         )

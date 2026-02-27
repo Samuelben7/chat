@@ -14,6 +14,8 @@ class MensagemBase(BaseModel):
 class MensagemCreate(MensagemBase):
     dados_extras: Optional[Dict[str, Any]] = {}
     context_message_id: Optional[str] = None  # WAMID da mensagem que está sendo respondida (resposta contextual)
+    reply_to_content: Optional[str] = None    # Conteúdo da mensagem original (para exibir no balão)
+    reply_to_direcao: Optional[str] = None    # Direção da mensagem original ("enviada" | "recebida")
 
 
 class MensagemResponse(MensagemBase):
