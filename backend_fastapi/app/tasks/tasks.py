@@ -515,7 +515,16 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     Atendimento.whatsapp_number == from_number
                 ).order_by(Atendimento.iniciado_em.desc()).first()
 
-            if not atendimento:
+            # Se o atendimento encontrado está finalizado, reabrir com nova entrada na fila
+            if atendimento and atendimento.status == 'finalizado':
+                print(f"♻️  Conversa finalizada reaberta — {from_number} voltou para fila")
+                atendimento = Atendimento(
+                    whatsapp_number=from_number,
+                    status='bot',
+                    empresa_id=empresa.id,
+                )
+                db.add(atendimento)
+            elif not atendimento:
                 atendimento = Atendimento(
                     whatsapp_number=from_number,
                     status='bot'
