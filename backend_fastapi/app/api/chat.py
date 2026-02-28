@@ -361,6 +361,8 @@ async def assumir_atendimento(
     atendimento.empresa_id = empresa_id
     atendimento.status = "em_atendimento"
     atendimento.atribuido_em = datetime.now()
+    # Humano assumiu: desativar flag de IA
+    atendimento.atendido_por_ia = False
     if codigo_protocolo:
         atendimento.protocolo = codigo_protocolo
 

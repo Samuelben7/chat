@@ -34,6 +34,13 @@ class Empresa(Base):
     mensagem_encerramento = Column(Text, default="Seu atendimento foi encerrado. Muito obrigado por entrar em contato!")
     pesquisa_satisfacao_ativa = Column(Boolean, default=False)
 
+    # IA Conversacional
+    ia_ativa = Column(Boolean, default=False)
+    ia_contexto = Column(Text)  # contexto/instruções do negócio para a IA
+    ia_delay_min = Column(Integer, default=3)   # delay mínimo em segundos
+    ia_delay_max = Column(Integer, default=10)  # delay máximo em segundos
+    ia_nome_assistente = Column(String(100), default="Assistente")
+
     # Status
     ativa = Column(Boolean, default=True)
     criada_em = Column(DateTime(timezone=True), server_default=func.now())
@@ -297,6 +304,7 @@ class Atendimento(Base):
     motivo_encerramento = Column(String(100), nullable=True)
     observacao_encerramento = Column(Text, nullable=True)
     nota_satisfacao = Column(Integer, nullable=True)  # 1 a 5
+    atendido_por_ia = Column(Boolean, default=False)
 
     # Relationships
     atendente = relationship("Atendente", back_populates="atendimentos")

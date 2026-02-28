@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.tasks.celery_app import celery_app
 from app.database.database import SessionLocal
-from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente, DevUsuario, Assinatura
+from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente, DevUsuario, Assinatura, ChatSessao
 from app.core.config import settings
 from app.core.redis_client import redis_cache
 from app.core.circuit_breaker import whatsapp_circuit_breaker
@@ -496,8 +496,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         processar_bot = True
 
         if atendimento and atendimento.status == 'em_atendimento':
-            processar_bot = False
-            print(f"ℹ️  Em atendimento humano")
+            # Só bloqueia se for atendimento humano (não IA)
+            if not getattr(atendimento, 'atendido_por_ia', False):
+                processar_bot = False
+                print(f"ℹ️  Em atendimento humano — IA/bot pausado")
 
         # Bot não processa mídia — salva manualmente com dados_extras corretos
         if message_type in {'image', 'audio', 'document', 'video'}:
@@ -558,27 +560,199 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             db.commit()
             print(f"💾 Mensagem recebida salva (em atendimento humano)")
 
-        # Processar com bot
+        # Processar com IA ou bot (mutuamente exclusivos)
         if processar_bot:
-            try:
-                bot_handler = BotMessageHandler(
-                    empresa=empresa,
-                    from_number=from_number,
-                    message_content=content,
-                    message_id=message_id,
-                    db=db,
-                    message_type=message_type,
-                    dados_extras=dados_extras,
-                )
+            import asyncio
 
-                # Importar asyncio para rodar função async
-                import asyncio
-                asyncio.run(bot_handler.process_message())
+            # ── Agente de IA (prioridade sobre bot) ──
+            ia_ativa = getattr(empresa, 'ia_ativa', False)
+            if ia_ativa and content and message_type in ('text', 'button', 'interactive'):
+                try:
+                    from app.services.ai_chat_service import gerar_resposta_ia
+                    from app.services.whatsapp import WhatsAppService
 
-                print(f"✅ Mensagem processada pelo bot")
+                    # SALVAR mensagem do cliente ANTES de processar com IA
+                    # (BotMessageHandler faz isso internamente; no path IA precisamos fazer manual)
+                    msg_recebida = MensagemLog(
+                        empresa_id=empresa.id,
+                        whatsapp_number=from_number,
+                        message_id=message_id,
+                        direcao="recebida",
+                        tipo_mensagem=message_type,
+                        conteudo=content,
+                        dados_extras=dados_extras,
+                        estado_sessao="ia",
+                    )
+                    db.add(msg_recebida)
+                    db.commit()
 
-            except Exception as e:
-                print(f"❌ Erro no bot: {e}")
+                    # Histórico da conversa (sem a mensagem atual, últimas 25)
+                    historico = (
+                        db.query(MensagemLog)
+                        .filter(
+                            MensagemLog.empresa_id == empresa.id,
+                            MensagemLog.whatsapp_number == from_number,
+                        )
+                        .order_by(MensagemLog.timestamp.desc())
+                        .limit(25)
+                        .all()
+                    )
+                    historico = list(reversed(historico))
+
+                    # Montar contexto CRM para enriquecer o prompt da IA
+                    crm_context = None
+                    try:
+                        cliente_crm = db.query(Cliente).filter(
+                            Cliente.empresa_id == empresa.id,
+                            Cliente.whatsapp_number == from_number,
+                        ).first()
+                        if cliente_crm:
+                            partes = []
+                            if cliente_crm.nome_completo:
+                                partes.append(f"Nome: {cliente_crm.nome_completo}")
+                            if cliente_crm.funil_etapa:
+                                partes.append(f"Etapa no funil: {cliente_crm.funil_etapa}")
+                            if cliente_crm.resumo_conversa:
+                                partes.append(f"Resumo anterior: {cliente_crm.resumo_conversa}")
+                            if cliente_crm.preferencias:
+                                partes.append(f"Preferências conhecidas: {cliente_crm.preferencias}")
+                            if cliente_crm.valor_estimado:
+                                partes.append(f"Valor estimado: R$ {cliente_crm.valor_estimado}")
+                            if partes:
+                                crm_context = "\n".join(partes)
+                    except Exception as _crm_err:
+                        print(f"⚠️ Erro ao buscar CRM context: {_crm_err}")
+
+                    resposta_ia = asyncio.run(gerar_resposta_ia(
+                        mensagens=historico,
+                        nova_mensagem=content,
+                        nome_assistente=getattr(empresa, 'ia_nome_assistente', 'Assistente') or 'Assistente',
+                        contexto_negocio=getattr(empresa, 'ia_contexto', None),
+                        delay_min=getattr(empresa, 'ia_delay_min', 7) or 7,
+                        delay_max=getattr(empresa, 'ia_delay_max', 10) or 10,
+                        crm_context=crm_context,
+                    ))
+
+                    # Detectar marcador de encerramento
+                    encerrar_agora = '[CONVERSA_ENCERRADA]' in resposta_ia
+                    resposta_limpa = resposta_ia.replace('[CONVERSA_ENCERRADA]', '').strip()
+
+                    # IA "assume" a conversa se ainda não está em atendimento ou não foi marcada
+                    if atendimento.status != 'em_atendimento' or not getattr(atendimento, 'atendido_por_ia', False):
+                        atendimento.status = 'em_atendimento'
+                        atendimento.atendido_por_ia = True
+                        if not atendimento.atribuido_em:
+                            atendimento.atribuido_em = datetime.now()
+                        db.commit()
+
+                    # Enviar resposta limpa via WhatsApp
+                    wa_service = WhatsAppService(empresa)
+                    asyncio.run(wa_service.send_text_message(from_number, resposta_limpa))
+
+                    # Salvar resposta da IA no banco
+                    msg_ia = MensagemLog(
+                        empresa_id=empresa.id,
+                        whatsapp_number=from_number,
+                        message_id=f"ia_{message_id}",
+                        direcao="enviada",
+                        tipo_mensagem="text",
+                        conteudo=resposta_limpa,
+                        timestamp=datetime.now(),
+                    )
+                    db.add(msg_ia)
+                    db.commit()
+                    print(f"🤖 IA respondeu para {from_number}: {resposta_limpa[:60]}...")
+
+                    if encerrar_agora:
+                        print(f"🏁 IA encerrou conversa com {from_number}")
+                        # Finalizar atendimento
+                        atendimento.status = 'finalizado'
+                        atendimento.finalizado_em = datetime.now()
+                        atendimento.motivo_encerramento = 'ia_concluiu'
+
+                        # Resetar sessão do bot
+                        sessao_ia = db.query(ChatSessao).filter(
+                            ChatSessao.empresa_id == empresa.id,
+                            ChatSessao.whatsapp_number == from_number
+                        ).first()
+                        if sessao_ia:
+                            sessao_ia.estado_atual = 'inicio'
+                        db.commit()
+
+                        # Enviar mensagem de encerramento + pesquisa (se ativa)
+                        try:
+                            msg_enc = getattr(empresa, 'mensagem_encerramento', None) or "Seu atendimento foi encerrado. Muito obrigado por entrar em contato!"
+                            asyncio.run(wa_service.send_text_message(from_number, msg_enc))
+                            pesquisa_ativa = getattr(empresa, 'pesquisa_satisfacao_ativa', False)
+                            if pesquisa_ativa:
+                                numero_fmt = from_number if from_number.startswith('+') else f'+{from_number}'
+                                asyncio.run(wa_service.send_list_message(
+                                    to=numero_fmt,
+                                    body_text="Gostaríamos de saber sua opinião sobre o atendimento que você recebeu.",
+                                    button_text="Avaliar Atendimento",
+                                    header="Pesquisa de Satisfação",
+                                    footer="Sua opinião é muito importante para nós!",
+                                    sections=[{
+                                        "title": "Selecione sua avaliação",
+                                        "rows": [
+                                            {"id": "nota_5", "title": "⭐ Excelente", "description": "Atendimento excepcional"},
+                                            {"id": "nota_4", "title": "😊 Bom", "description": "Atendimento satisfatório"},
+                                            {"id": "nota_3", "title": "😐 Regular", "description": "Poderia ser melhor"},
+                                            {"id": "nota_2", "title": "😕 Ruim", "description": "Atendimento insatisfatório"},
+                                            {"id": "nota_1", "title": "😞 Muito Ruim", "description": "Experiência muito negativa"},
+                                        ]
+                                    }]
+                                ))
+                                if sessao_ia:
+                                    sessao_ia.estado_atual = 'pesquisa_satisfacao'
+                                    sessao_ia.dados_temporarios = {'atendimento_id': atendimento.id}
+                                    db.commit()
+                        except Exception as _enc_e:
+                            print(f"⚠️ Erro ao enviar pesquisa pós-IA: {_enc_e}")
+
+                        # CRM update imediato (conversa encerrada, force=True)
+                        try:
+                            celery_app.send_task(
+                                'app.tasks.tasks.atualizar_crm_ia',
+                                args=[empresa.id, from_number, True],
+                                countdown=0,
+                            )
+                        except Exception as _e:
+                            print(f"⚠️ Falha ao agendar CRM update: {_e}")
+                    else:
+                        # Conversa ainda ativa — CRM update em 10 min
+                        try:
+                            celery_app.send_task(
+                                'app.tasks.tasks.atualizar_crm_ia',
+                                args=[empresa.id, from_number],
+                                countdown=600,  # 10 minutos
+                            )
+                        except Exception as _e:
+                            print(f"⚠️ Falha ao agendar CRM update: {_e}")
+
+                except Exception as e:
+                    print(f"❌ Erro na IA: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            else:
+                # ── Bot tradicional ──
+                try:
+                    bot_handler = BotMessageHandler(
+                        empresa=empresa,
+                        from_number=from_number,
+                        message_content=content,
+                        message_id=message_id,
+                        db=db,
+                        message_type=message_type,
+                        dados_extras=dados_extras,
+                    )
+
+                    asyncio.run(bot_handler.process_message())
+                    print(f"✅ Mensagem processada pelo bot")
+
+                except Exception as e:
+                    print(f"❌ Erro no bot: {e}")
 
         # WebSocket broadcast - TODAS as mensagens novas (recebida + respostas bot)
         try:
@@ -609,7 +783,9 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             "dados_extras": mensagem_log.dados_extras or {}  # CRÍTICO para listas/botões
                         },
                         "atendimento": {
-                            "status": atendimento.status if atendimento else "bot"
+                            "status": atendimento.status if atendimento else "bot",
+                            "atendente_id": atendimento.atendente_id if atendimento else None,
+                            "atendido_por_ia": getattr(atendimento, 'atendido_por_ia', False) if atendimento else False,
                         }
                     }
                 }
@@ -1567,3 +1743,103 @@ def _fetch_waba_messaging_limit(waba_id: str, token: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"Erro ao consultar WABA {waba_id}: {e}")
         return None
+
+
+# ========== TASK: ATUALIZAR CRM COM IA (background, após resposta da IA) ==========
+
+@celery_app.task(name="app.tasks.tasks.atualizar_crm_ia")
+def atualizar_crm_ia(empresa_id: int, whatsapp_number: str, force: bool = False):
+    """
+    Analisa a conversa com Claude Haiku e atualiza os campos CRM do lead automaticamente.
+    Executa em background após cada resposta da IA conversacional.
+    Só avança no funil — nunca regride (ex: negociacao → novo_lead é ignorado).
+    """
+    ORDEM_FUNIL = [
+        "novo_lead",
+        "pediu_orcamento",
+        "orcamento_enviado",
+        "negociacao",
+        "fechado",
+        "perdido",
+    ]
+
+    db = SessionLocal()
+    try:
+        import asyncio
+        from datetime import timezone, timedelta
+        from app.services.ai_service import analisar_conversa
+
+        # Verificar se conversa ainda está ativa (mensagem nos últimos 9 min)
+        # Se sim, pula — outra task agendada mais recente vai cuidar disso
+        # force=True ignora a verificação (usado quando IA encerrou a conversa)
+        if not force:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=9)
+            msg_recente = db.query(MensagemLog).filter(
+                MensagemLog.empresa_id == empresa_id,
+                MensagemLog.whatsapp_number == whatsapp_number,
+                MensagemLog.timestamp >= cutoff,
+            ).first()
+            if msg_recente:
+                print(f"⏸️  Conversa ainda ativa para {whatsapp_number} — CRM update adiado")
+                return
+
+        # Buscar mensagens recentes para análise (últimas 40)
+        mensagens = (
+            db.query(MensagemLog)
+            .filter(
+                MensagemLog.empresa_id == empresa_id,
+                MensagemLog.whatsapp_number == whatsapp_number,
+            )
+            .order_by(MensagemLog.timestamp.desc())
+            .limit(40)
+            .all()
+        )
+        mensagens = list(reversed(mensagens))
+
+        if len(mensagens) < 2:
+            return  # Muito pouco contexto para analisar
+
+        cliente = db.query(Cliente).filter(
+            Cliente.empresa_id == empresa_id,
+            Cliente.whatsapp_number == whatsapp_number,
+        ).first()
+
+        if not cliente:
+            return  # Lead não cadastrado ainda
+
+        nome_cliente = cliente.nome_completo or whatsapp_number
+        sugestao = asyncio.run(analisar_conversa(mensagens, nome_cliente))
+
+        # Atualizar campos textuais sempre (IA tem contexto mais recente)
+        if sugestao.get("resumo_conversa"):
+            cliente.resumo_conversa = sugestao["resumo_conversa"]
+        if sugestao.get("preferencias"):
+            cliente.preferencias = sugestao["preferencias"]
+        if sugestao.get("observacoes_crm"):
+            cliente.observacoes_crm = sugestao["observacoes_crm"]
+
+        # Atualizar valor estimado se detectado
+        if sugestao.get("valor_estimado") and float(sugestao["valor_estimado"]) > 0:
+            cliente.valor_estimado = sugestao["valor_estimado"]
+
+        # Avançar etapa do funil (só progressão, nunca regressão)
+        nova_etapa = sugestao.get("funil_etapa")
+        if nova_etapa and nova_etapa in ORDEM_FUNIL:
+            etapa_atual = cliente.funil_etapa or "novo_lead"
+            idx_atual = ORDEM_FUNIL.index(etapa_atual) if etapa_atual in ORDEM_FUNIL else 0
+            idx_nova = ORDEM_FUNIL.index(nova_etapa)
+            # Permite avançar E permite marcar como perdido independente da etapa
+            if idx_nova > idx_atual or nova_etapa == "perdido":
+                cliente.funil_etapa = nova_etapa
+                print(f"📊 Funil atualizado: {whatsapp_number} → {etapa_atual} → {nova_etapa}")
+
+        db.commit()
+        print(f"✅ CRM atualizado automaticamente para {whatsapp_number}")
+
+    except Exception as e:
+        print(f"❌ Erro no atualizar_crm_ia: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+    finally:
+        db.close()

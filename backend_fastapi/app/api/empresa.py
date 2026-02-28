@@ -496,7 +496,8 @@ async def obter_metricas_satisfacao(
     ).filter(
         Atendimento.empresa_id == empresa_id,
         Atendimento.nota_satisfacao.isnot(None),
-        Atendimento.status == 'finalizado'
+        Atendimento.status == 'finalizado',
+        Atendimento.atendido_por_ia == False
     ).group_by(Atendente.id, Atendente.nome_exibicao, Atendente.foto_url).all()
 
     por_atendente = []
@@ -508,7 +509,8 @@ async def obter_metricas_satisfacao(
                 Atendimento.empresa_id == empresa_id,
                 Atendimento.atendente_id == row.id,
                 Atendimento.nota_satisfacao == n,
-                Atendimento.status == 'finalizado'
+                Atendimento.status == 'finalizado',
+                Atendimento.atendido_por_ia == False
             ).count()
             dist_atd[n] = cnt
 
