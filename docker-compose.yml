@@ -102,6 +102,9 @@ services:
       META_ES_CONFIG_ID: ${META_ES_CONFIG_ID:-}
       ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
       ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-}
+
+      # Anthropic (Claude AI)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,6 +180,9 @@ services:
       META_ES_CONFIG_ID: ${META_ES_CONFIG_ID:-}
       ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
       ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-}
+
+      # Anthropic (Claude AI)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
