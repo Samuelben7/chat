@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     GATEWAY_MESSAGES_PER_MONTH: int = 1000
     DEV_TRIAL_DAYS: int = 15
 
+    # Anthropic (Claude AI)
+    ANTHROPIC_API_KEY: Optional[str] = None
+
     # App
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
