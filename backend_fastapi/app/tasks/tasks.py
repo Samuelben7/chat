@@ -480,7 +480,13 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                 db.commit()
 
                 return  # Não processar com bot
-            # Se não é nota válida, cai no fluxo normal do bot
+
+            # Mensagem não é nota válida — usuario ignorou a pesquisa e voltou a falar
+            # Liberar a sessão para que a IA possa processar normalmente
+            sessao.estado_atual = "inicio"
+            sessao.dados_temporarios = {}
+            db.commit()
+            print(f"🔓 Pesquisa ignorada — sessão liberada para nova conversa com {from_number}")
 
         # Atualizar ou criar atendimento
         atendimento = db.query(Atendimento).filter(
@@ -564,8 +570,16 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         if processar_bot:
             import asyncio
 
-            # ── Agente de IA (prioridade sobre bot) ──
-            ia_ativa = getattr(empresa, 'ia_ativa', False)
+            # ── Verificar se sessão está aguardando pesquisa de satisfação ──
+            # Nesse caso, NÃO deixar a IA processar — roteiar para o bot
+            sessao_atual = db.query(ChatSessao).filter(
+                ChatSessao.empresa_id == empresa.id,
+                ChatSessao.whatsapp_number == from_number,
+            ).first()
+            em_pesquisa = sessao_atual and sessao_atual.estado_atual == 'pesquisa_satisfacao'
+
+            # ── Agente de IA (prioridade sobre bot, EXCETO pesquisa) ──
+            ia_ativa = getattr(empresa, 'ia_ativa', False) and not em_pesquisa
             if ia_ativa and content and message_type in ('text', 'button', 'interactive'):
                 try:
                     from app.services.ai_chat_service import gerar_resposta_ia
@@ -623,6 +637,89 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     except Exception as _crm_err:
                         print(f"⚠️ Erro ao buscar CRM context: {_crm_err}")
 
+                    # Montar contexto da agenda (próximos 14 dias com slots disponíveis)
+                    agenda_context = None
+                    try:
+                        from app.models.models import AgendaSlot, AgendaHorarioFuncionamento
+                        from datetime import date, timezone
+
+                        hoje = date.today()
+                        limite = hoje + timedelta(days=14)
+                        DIAS_PT = ['Segunda-feira', 'Terça-feira', 'Quarta-feira',
+                                   'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
+                        MESES_PT = ['jan','fev','mar','abr','mai','jun',
+                                    'jul','ago','set','out','nov','dez']
+
+                        slots_disp = (
+                            db.query(AgendaSlot)
+                            .filter(
+                                AgendaSlot.empresa_id == empresa.id,
+                                AgendaSlot.data >= hoje,
+                                AgendaSlot.data <= limite,
+                                AgendaSlot.status == 'disponivel',
+                                AgendaSlot.vagas_ocupadas < AgendaSlot.vagas_total,
+                            )
+                            .order_by(AgendaSlot.data, AgendaSlot.hora_inicio)
+                            .all()
+                        )
+
+                        if slots_disp:
+                            # Agrupar por data
+                            dias_map: dict = {}
+                            for sl in slots_disp:
+                                key = str(sl.data)
+                                if key not in dias_map:
+                                    dias_map[key] = []
+                                vagas_livres = sl.vagas_total - sl.vagas_ocupadas
+                                dias_map[key].append(f"{sl.hora_inicio} ({vagas_livres} vaga{'s' if vagas_livres > 1 else ''})")
+
+                            linhas = []
+                            for data_str, horas in sorted(dias_map.items()):
+                                d = date.fromisoformat(data_str)
+                                nome_dia = DIAS_PT[d.weekday()]
+                                data_fmt = f"{d.day:02d}/{MESES_PT[d.month - 1]}"
+                                linhas.append(f"- {nome_dia} {data_fmt}: {', '.join(horas)}")
+
+                            agenda_context = (
+                                f"Horários disponíveis para agendamento (próximos 14 dias):\n"
+                                + "\n".join(linhas)
+                            )
+                            print(f"📅 Agenda context: {len(dias_map)} dias disponíveis para a IA")
+                        else:
+                            agenda_context = "Não há horários disponíveis nos próximos 14 dias. Informe o cliente e ofereça para verificar manualmente."
+
+                        # Incluir agendamentos futuros DO CLIENTE (para ele poder cancelar)
+                        try:
+                            from app.models.models import AgendaAgendamento
+                            ags_cliente = (
+                                db.query(AgendaAgendamento)
+                                .join(AgendaSlot)
+                                .filter(
+                                    AgendaAgendamento.empresa_id == empresa.id,
+                                    AgendaAgendamento.whatsapp_number == from_number,
+                                    AgendaAgendamento.status != 'cancelado',
+                                    AgendaSlot.data >= hoje,
+                                )
+                                .order_by(AgendaSlot.data, AgendaSlot.hora_inicio)
+                                .all()
+                            )
+                            if ags_cliente:
+                                linhas_ag = []
+                                for _a in ags_cliente:
+                                    _d = _a.slot.data
+                                    _nome_dia = DIAS_PT[_d.weekday()]
+                                    _data_fmt = f"{_d.day:02d}/{MESES_PT[_d.month - 1]}"
+                                    linhas_ag.append(f"- ID {_a.id}: {_nome_dia} {_data_fmt} às {_a.slot.hora_inicio} (status: {_a.status})")
+                                agenda_context = (agenda_context or "") + (
+                                    "\n\nAgendamentos futuros deste cliente (use os IDs para cancelar):\n"
+                                    + "\n".join(linhas_ag)
+                                )
+                        except Exception as _ags_err:
+                            print(f"⚠️ Erro ao buscar agendamentos do cliente: {_ags_err}")
+
+                    except Exception as _ag_err:
+                        print(f"⚠️ Erro ao buscar agenda context: {_ag_err}")
+
                     resposta_ia = asyncio.run(gerar_resposta_ia(
                         mensagens=historico,
                         nova_mensagem=content,
@@ -631,11 +728,50 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         delay_min=getattr(empresa, 'ia_delay_min', 7) or 7,
                         delay_max=getattr(empresa, 'ia_delay_max', 10) or 10,
                         crm_context=crm_context,
+                        agenda_context=agenda_context,
                     ))
 
-                    # Detectar marcador de encerramento
+                    # Detectar marcadores na resposta da IA
                     encerrar_agora = '[CONVERSA_ENCERRADA]' in resposta_ia
-                    resposta_limpa = resposta_ia.replace('[CONVERSA_ENCERRADA]', '').strip()
+
+                    import re as _re
+
+                    # Detectar agendamento confirmado: [AGENDAMENTO:2026-03-07|10:00]
+                    agendamento_data = None
+                    agendamento_hora = None
+                    _ag_match = _re.search(r'\[AGENDAMENTO:(\d{4}-\d{2}-\d{2})\|(\d{2}:\d{2})\]', resposta_ia)
+                    if _ag_match:
+                        agendamento_data = _ag_match.group(1)
+                        agendamento_hora = _ag_match.group(2)
+                        # Fallback: corrigir ano se IA usou ano passado (alucinação)
+                        try:
+                            from datetime import date as _date_check
+                            _parsed = _date_check.fromisoformat(agendamento_data)
+                            _today = _date_check.today()
+                            if _parsed < _today:
+                                # Tentar com o ano atual
+                                _corrigida = _parsed.replace(year=_today.year)
+                                if _corrigida >= _today:
+                                    print(f"⚠️ Ano corrigido no agendamento: {agendamento_data} → {_corrigida.isoformat()}")
+                                    agendamento_data = _corrigida.isoformat()
+                                else:
+                                    # Tentar com o próximo ano
+                                    _corrigida = _parsed.replace(year=_today.year + 1)
+                                    print(f"⚠️ Ano corrigido para próximo ano: {agendamento_data} → {_corrigida.isoformat()}")
+                                    agendamento_data = _corrigida.isoformat()
+                        except Exception:
+                            pass
+
+                    # Detectar cancelamento: [CANCELAR_AGENDAMENTO:id]
+                    cancelar_ag_id = None
+                    _cancel_match = _re.search(r'\[CANCELAR_AGENDAMENTO:(\d+)\]', resposta_ia)
+                    if _cancel_match:
+                        cancelar_ag_id = int(_cancel_match.group(1))
+
+                    # Remover todos os marcadores da resposta que vai para o cliente
+                    resposta_limpa = _re.sub(r'\[AGENDAMENTO:[^\]]+\]', '', resposta_ia)
+                    resposta_limpa = _re.sub(r'\[CANCELAR_AGENDAMENTO:[^\]]+\]', '', resposta_limpa)
+                    resposta_limpa = resposta_limpa.replace('[CONVERSA_ENCERRADA]', '').strip()
 
                     # IA "assume" a conversa se ainda não está em atendimento ou não foi marcada
                     if atendimento.status != 'em_atendimento' or not getattr(atendimento, 'atendido_por_ia', False):
@@ -663,6 +799,30 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     db.commit()
                     print(f"🤖 IA respondeu para {from_number}: {resposta_limpa[:60]}...")
 
+                    # Processar cancelamento de agendamento (pode ocorrer sem encerrar conversa)
+                    if cancelar_ag_id:
+                        try:
+                            from app.models.models import AgendaAgendamento, AgendaSlot as _AgSlot
+                            _ag_cancel = db.query(AgendaAgendamento).filter(
+                                AgendaAgendamento.id == cancelar_ag_id,
+                                AgendaAgendamento.empresa_id == empresa.id,
+                                AgendaAgendamento.whatsapp_number == from_number,
+                            ).first()
+                            if _ag_cancel and _ag_cancel.status != 'cancelado':
+                                _ag_cancel.status = 'cancelado'
+                                # Liberar vaga no slot
+                                _slot_cancel = db.query(_AgSlot).filter(_AgSlot.id == _ag_cancel.slot_id).first()
+                                if _slot_cancel:
+                                    _slot_cancel.vagas_ocupadas = max(0, _slot_cancel.vagas_ocupadas - 1)
+                                    if _slot_cancel.status == 'lotado':
+                                        _slot_cancel.status = 'disponivel'
+                                db.commit()
+                                print(f"❌ Agendamento {cancelar_ag_id} cancelado via IA para {from_number}")
+                            else:
+                                print(f"⚠️ Agendamento {cancelar_ag_id} não encontrado ou já cancelado")
+                        except Exception as _ce:
+                            print(f"⚠️ Erro ao cancelar agendamento via IA: {_ce}")
+
                     if encerrar_agora:
                         print(f"🏁 IA encerrou conversa com {from_number}")
                         # Finalizar atendimento
@@ -670,12 +830,55 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         atendimento.finalizado_em = datetime.now()
                         atendimento.motivo_encerramento = 'ia_concluiu'
 
-                        # Resetar sessão do bot
+                        # Criar agendamento no banco se IA confirmou um horário
+                        if agendamento_data and agendamento_hora:
+                            try:
+                                from app.models.models import AgendaSlot, AgendaAgendamento
+                                from datetime import date as _date
+                                _slot = db.query(AgendaSlot).filter(
+                                    AgendaSlot.empresa_id == empresa.id,
+                                    AgendaSlot.data == _date.fromisoformat(agendamento_data),
+                                    AgendaSlot.hora_inicio == agendamento_hora,
+                                    AgendaSlot.status == 'disponivel',
+                                ).first()
+                                if _slot and _slot.vagas_ocupadas < _slot.vagas_total:
+                                    _cliente = db.query(Cliente).filter(
+                                        Cliente.empresa_id == empresa.id,
+                                        Cliente.whatsapp_number == from_number,
+                                    ).first()
+                                    _ag = AgendaAgendamento(
+                                        empresa_id=empresa.id,
+                                        slot_id=_slot.id,
+                                        whatsapp_number=from_number,
+                                        nome_cliente=_cliente.nome_completo if _cliente else None,
+                                        cliente_id=_cliente.id if _cliente else None,
+                                        status='confirmado',
+                                    )
+                                    db.add(_ag)
+                                    _slot.vagas_ocupadas += 1
+                                    if _slot.vagas_ocupadas >= _slot.vagas_total:
+                                        _slot.status = 'lotado'
+                                    db.commit()
+                                    print(f"📅 Agendamento criado: {agendamento_data} {agendamento_hora} para {from_number}")
+                                else:
+                                    print(f"⚠️ Slot {agendamento_data} {agendamento_hora} não encontrado ou sem vagas")
+                            except Exception as _ag_err:
+                                print(f"⚠️ Erro ao criar agendamento da IA: {_ag_err}")
+
+                        # Garantir sessão — criar se não existir (essencial para pesquisa funcionar)
                         sessao_ia = db.query(ChatSessao).filter(
                             ChatSessao.empresa_id == empresa.id,
                             ChatSessao.whatsapp_number == from_number
                         ).first()
-                        if sessao_ia:
+                        if not sessao_ia:
+                            sessao_ia = ChatSessao(
+                                empresa_id=empresa.id,
+                                whatsapp_number=from_number,
+                                estado_atual='inicio',
+                                dados_temporarios={},
+                            )
+                            db.add(sessao_ia)
+                        else:
                             sessao_ia.estado_atual = 'inicio'
                         db.commit()
 
@@ -703,10 +906,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                                         ]
                                     }]
                                 ))
-                                if sessao_ia:
-                                    sessao_ia.estado_atual = 'pesquisa_satisfacao'
-                                    sessao_ia.dados_temporarios = {'atendimento_id': atendimento.id}
-                                    db.commit()
+                                # Colocar sessão em estado de pesquisa (SEMPRE — sessão já existe)
+                                sessao_ia.estado_atual = 'pesquisa_satisfacao'
+                                sessao_ia.dados_temporarios = {'atendimento_id': atendimento.id}
+                                db.commit()
                         except Exception as _enc_e:
                             print(f"⚠️ Erro ao enviar pesquisa pós-IA: {_enc_e}")
 
@@ -1841,5 +2044,132 @@ def atualizar_crm_ia(empresa_id: int, whatsapp_number: str, force: bool = False)
         import traceback
         traceback.print_exc()
         db.rollback()
+    finally:
+        db.close()
+
+
+# ========== TASK: ENCERRAR CHATS IA INATIVOS (Celery Beat a cada 5 min) ==========
+
+@celery_app.task(name="app.tasks.tasks.encerrar_chats_ia_inativos")
+def encerrar_chats_ia_inativos():
+    """
+    Varre todos os atendimentos ativos pela IA e encerra os que ficaram
+    sem mensagem há mais de 5 minutos.
+    Envia mensagem de encerramento + pesquisa de satisfação (se ativa).
+    Agenda CRM update imediato.
+    Executado pelo Celery Beat a cada 5 minutos.
+    """
+    import asyncio
+    from datetime import timezone
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        # Buscar atendimentos em_atendimento pela IA
+        atendimentos_ia = db.query(Atendimento).filter(
+            Atendimento.status == 'em_atendimento',
+            Atendimento.atendido_por_ia == True,
+        ).all()
+
+        if not atendimentos_ia:
+            return
+
+        print(f"⏰ Verificando {len(atendimentos_ia)} chats ativos pela IA...")
+
+        for atendimento in atendimentos_ia:
+            try:
+                # Checar última mensagem (recebida ou enviada)
+                ultima_msg = db.query(MensagemLog).filter(
+                    MensagemLog.empresa_id == atendimento.empresa_id,
+                    MensagemLog.whatsapp_number == atendimento.whatsapp_number,
+                ).order_by(MensagemLog.timestamp.desc()).first()
+
+                if not ultima_msg:
+                    continue
+
+                ts = ultima_msg.timestamp
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+
+                if ts > cutoff:
+                    # Conversa ainda ativa
+                    continue
+
+                # --- Encerrar por inatividade ---
+                empresa = db.query(Empresa).filter(
+                    Empresa.id == atendimento.empresa_id
+                ).first()
+                if not empresa:
+                    continue
+
+                from_number = atendimento.whatsapp_number
+                print(f"⏱️  Encerrando chat IA inativo: {from_number} (última msg: {ts})")
+
+                atendimento.status = 'finalizado'
+                atendimento.finalizado_em = datetime.now()
+                atendimento.motivo_encerramento = 'ia_inatividade'
+
+                sessao = db.query(ChatSessao).filter(
+                    ChatSessao.empresa_id == empresa.id,
+                    ChatSessao.whatsapp_number == from_number,
+                ).first()
+                if sessao:
+                    sessao.estado_atual = 'inicio'
+                db.commit()
+
+                # Enviar mensagem de encerramento + pesquisa
+                try:
+                    from app.services.whatsapp import WhatsAppService
+                    wa_service = WhatsAppService(empresa)
+                    msg_enc = getattr(empresa, 'mensagem_encerramento', None) or \
+                        "Seu atendimento foi encerrado por inatividade. Obrigado por entrar em contato!"
+                    asyncio.run(wa_service.send_text_message(from_number, msg_enc))
+
+                    pesquisa_ativa = getattr(empresa, 'pesquisa_satisfacao_ativa', False)
+                    if pesquisa_ativa:
+                        numero_fmt = from_number if from_number.startswith('+') else f'+{from_number}'
+                        asyncio.run(wa_service.send_list_message(
+                            to=numero_fmt,
+                            body_text="Gostaríamos de saber sua opinião sobre o atendimento que você recebeu.",
+                            button_text="Avaliar Atendimento",
+                            header="Pesquisa de Satisfação",
+                            footer="Sua opinião é muito importante para nós!",
+                            sections=[{
+                                "title": "Selecione sua avaliação",
+                                "rows": [
+                                    {"id": "nota_5", "title": "⭐ Excelente", "description": "Atendimento excepcional"},
+                                    {"id": "nota_4", "title": "😊 Bom", "description": "Atendimento satisfatório"},
+                                    {"id": "nota_3", "title": "😐 Regular", "description": "Poderia ser melhor"},
+                                    {"id": "nota_2", "title": "😕 Ruim", "description": "Atendimento insatisfatório"},
+                                    {"id": "nota_1", "title": "😞 Muito Ruim", "description": "Experiência muito negativa"},
+                                ]
+                            }]
+                        ))
+                        if sessao:
+                            sessao.estado_atual = 'pesquisa_satisfacao'
+                            sessao.dados_temporarios = {'atendimento_id': atendimento.id}
+                            db.commit()
+                except Exception as _enc_e:
+                    print(f"⚠️ Erro ao enviar mensagens de encerramento para {from_number}: {_enc_e}")
+
+                # CRM update imediato
+                try:
+                    celery_app.send_task(
+                        'app.tasks.tasks.atualizar_crm_ia',
+                        args=[empresa.id, from_number, True],
+                        countdown=0,
+                    )
+                except Exception as _crm_e:
+                    print(f"⚠️ Falha ao agendar CRM update para {from_number}: {_crm_e}")
+
+            except Exception as _loop_e:
+                print(f"❌ Erro ao processar chat IA inativo {atendimento.whatsapp_number}: {_loop_e}")
+                db.rollback()
+
+    except Exception as e:
+        print(f"❌ Erro em encerrar_chats_ia_inativos: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         db.close()
