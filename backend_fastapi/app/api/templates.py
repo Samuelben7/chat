@@ -380,7 +380,9 @@ async def enviar_template_massa(
     if not template:
         raise HTTPException(status_code=404, detail="Template não encontrado")
 
-    if template.status != "APPROVED":
+    is_carousel = template.category.upper() == "INTERACTIVE_CAROUSEL"
+
+    if not is_carousel and template.status != "APPROVED":
         raise HTTPException(status_code=400, detail=f"Template não aprovado (status: {template.status})")
 
     # Coletar números
@@ -436,6 +438,50 @@ async def enviar_template_massa(
             )
         except ImportError:
             logger.warning("Celery task não disponível, processando sincronamente")
+
+    # ---- CAROUSEL BULK SEND ----
+    if is_carousel:
+        carousel_comp = None
+        for comp in (template.components or []):
+            if comp.get("type", "").upper() == "CAROUSEL":
+                carousel_comp = comp
+                break
+
+        if not carousel_comp:
+            raise HTTPException(status_code=400, detail="Componente CAROUSEL não encontrado no template")
+
+        example = carousel_comp.get("example", {})
+        cards = example.get("cards", [])
+        body_text = carousel_comp.get("text", "") or "Confira nossas opções:"
+
+        resultados = []
+        enviados = 0
+        erros = 0
+
+        for number in numbers:
+            try:
+                message_id = await service.send_carousel_message(
+                    to=number,
+                    body_text=body_text,
+                    cards=cards,
+                )
+                service.log_template_send(db, number, template.name, message_id)
+                resultados.append(TemplateSendResponse(
+                    success=True, message_id=message_id, whatsapp_number=number
+                ))
+                enviados += 1
+            except Exception as e:
+                resultados.append(TemplateSendResponse(
+                    success=False, whatsapp_number=number, error=str(e)
+                ))
+                erros += 1
+
+        return TemplateBulkSendResponse(
+            total=len(numbers),
+            enviados=enviados,
+            erros=erros,
+            resultados=resultados,
+        )
 
     # Processamento síncrono para listas pequenas (<=50)
     resultados = []

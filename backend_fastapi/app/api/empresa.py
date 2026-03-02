@@ -100,46 +100,37 @@ async def obter_metricas_dashboard(
     else:
         data_inicial = now - timedelta(days=1)
 
-    # Total de conversas no período
-    total_conversas = db.query(Atendimento).join(
-        Atendente, Atendimento.atendente_id == Atendente.id
+    # Conversas: total no período + ativas (single query with conditional count)
+    conv_stats = db.query(
+        func.count(Atendimento.id).filter(Atendimento.iniciado_em >= data_inicial).label('total'),
+        func.count(Atendimento.id).filter(Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])).label('ativas'),
     ).filter(
-        Atendente.empresa_id == empresa_id,
-        Atendimento.iniciado_em >= data_inicial
-    ).count()
+        Atendimento.empresa_id == empresa_id,
+    ).first()
+    total_conversas = conv_stats.total if conv_stats else 0
+    conversas_ativas = conv_stats.ativas if conv_stats else 0
 
-    # Conversas ativas (não finalizadas)
-    conversas_ativas = db.query(Atendimento).join(
-        Atendente, Atendimento.atendente_id == Atendente.id
+    # Atendentes: online + total (single query)
+    atd_stats = db.query(
+        func.count(Atendente.id).label('total'),
+        func.count(Atendente.id).filter(
+            and_(Atendente.status == 'online', Atendente.pode_atender == True)
+        ).label('online'),
+    ).filter(Atendente.empresa_id == empresa_id).first()
+    total_atendentes = atd_stats.total if atd_stats else 0
+    atendentes_online = atd_stats.online if atd_stats else 0
+
+    # Mensagens: enviadas + recebidas (single GROUP BY query)
+    msg_stats = db.query(
+        MensagemLog.direcao,
+        func.count(MensagemLog.id)
     ).filter(
-        Atendente.empresa_id == empresa_id,
-        Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])
-    ).count()
-
-    # Atendentes online
-    atendentes_online = db.query(Atendente).filter(
-        Atendente.empresa_id == empresa_id,
-        Atendente.status == 'online',
-        Atendente.pode_atender == True
-    ).count()
-
-    # Total de atendentes
-    total_atendentes = db.query(Atendente).filter(
-        Atendente.empresa_id == empresa_id
-    ).count()
-
-    # Mensagens enviadas e recebidas no período
-    mensagens_enviadas = db.query(MensagemLog).filter(
         MensagemLog.empresa_id == empresa_id,
-        MensagemLog.direcao == 'enviada',
         MensagemLog.timestamp >= data_inicial
-    ).count()
-
-    mensagens_recebidas = db.query(MensagemLog).filter(
-        MensagemLog.empresa_id == empresa_id,
-        MensagemLog.direcao == 'recebida',
-        MensagemLog.timestamp >= data_inicial
-    ).count()
+    ).group_by(MensagemLog.direcao).all()
+    msg_map = dict(msg_stats)
+    mensagens_enviadas = msg_map.get('enviada', 0)
+    mensagens_recebidas = msg_map.get('recebida', 0)
 
     # Taxa de resposta média (simplificado - tempo entre recebida e enviada)
     # TODO: Melhorar este cálculo para ser mais preciso
@@ -225,22 +216,33 @@ async def listar_atendentes_empresa(
         Atendente.empresa_id == empresa_id
     ).all()
 
-    resultado = []
-
-    for atendente in atendentes:
-        # Contar chats ativos do atendente
-        total_chats = db.query(Atendimento).filter(
-            Atendimento.atendente_id == atendente.id,
+    # Single aggregated query instead of N+1
+    chats_por_atendente = dict(
+        db.query(
+            Atendimento.atendente_id,
+            func.count(Atendimento.id)
+        ).filter(
+            Atendimento.atendente_id.in_([a.id for a in atendentes]),
             Atendimento.status.in_(['em_atendimento', 'aguardando'])
-        ).count()
+        ).group_by(Atendimento.atendente_id).all()
+    )
+
+    from app.core.config import settings
+    base_url = settings.PUBLIC_BASE_URL.rstrip('/')
+
+    resultado = []
+    for atendente in atendentes:
+        foto_url_full = None
+        if atendente.foto_url:
+            foto_url_full = f"{base_url}/{atendente.foto_url.lstrip('/')}"
 
         resultado.append(AtendenteStatusResponse(
             id=atendente.id,
             nome_exibicao=atendente.nome_exibicao,
             email=atendente.email,
             status=atendente.status,
-            foto_url=atendente.foto_url,
-            total_chats_ativos=total_chats,
+            foto_url=foto_url_full,
+            total_chats_ativos=chats_por_atendente.get(atendente.id, 0),
             ultima_atividade=atendente.ultima_atividade,
             pode_atender=atendente.pode_atender
         ))
@@ -264,60 +266,66 @@ async def obter_dados_grafico(
     now = datetime.now()
     labels = []
     valores = []
+    dias_semana = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
     if periodo == "semana":
-        # Últimos 7 dias
+        data_inicio = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Single GROUP BY date query
+        rows = db.query(
+            func.date(Atendimento.iniciado_em).label('dia'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.iniciado_em >= data_inicio,
+        ).group_by(func.date(Atendimento.iniciado_em)).all()
+        counts_by_date = {str(r[0]): r[1] for r in rows}
+
         for i in range(6, -1, -1):
             data = now - timedelta(days=i)
-            data_inicio = data.replace(hour=0, minute=0, second=0)
-            data_fim = data.replace(hour=23, minute=59, second=59)
-
-            count = db.query(Atendimento).join(
-                Atendente, Atendimento.atendente_id == Atendente.id
-            ).filter(
-                Atendente.empresa_id == empresa_id,
-                Atendimento.iniciado_em >= data_inicio,
-                Atendimento.iniciado_em <= data_fim
-            ).count()
-
-            # Label: Seg, Ter, Qua, etc
-            dias_semana = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
             labels.append(dias_semana[data.weekday()])
-            valores.append(count)
+            valores.append(counts_by_date.get(str(data.date()), 0))
 
     elif periodo == "mes":
-        # Últimos 30 dias (agrupado de 5 em 5 dias)
+        data_inicio = now - timedelta(days=30)
+        rows = db.query(
+            func.date(Atendimento.iniciado_em).label('dia'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.iniciado_em >= data_inicio,
+        ).group_by(func.date(Atendimento.iniciado_em)).all()
+        counts_by_date = {str(r[0]): r[1] for r in rows}
+
         for i in range(5, -1, -1):
             inicio = now - timedelta(days=(i+1)*5)
             fim = now - timedelta(days=i*5)
-
-            count = db.query(Atendimento).join(
-                Atendente, Atendimento.atendente_id == Atendente.id
-            ).filter(
-                Atendente.empresa_id == empresa_id,
-                Atendimento.iniciado_em >= inicio,
-                Atendimento.iniciado_em < fim
-            ).count()
-
+            total = sum(
+                counts_by_date.get(str((inicio + timedelta(days=d)).date()), 0)
+                for d in range(5)
+            )
             labels.append(f"{inicio.day}-{fim.day}")
-            valores.append(count)
+            valores.append(total)
 
     else:  # dia
-        # Últimas 24 horas (de 4 em 4 horas)
+        data_inicio = now - timedelta(hours=24)
+        rows = db.query(
+            extract('hour', Atendimento.iniciado_em).label('hora'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.iniciado_em >= data_inicio,
+        ).group_by(extract('hour', Atendimento.iniciado_em)).all()
+        counts_by_hour = {int(r[0]): r[1] for r in rows}
+
         for i in range(5, -1, -1):
             hora_inicio = now - timedelta(hours=(i+1)*4)
             hora_fim = now - timedelta(hours=i*4)
-
-            count = db.query(Atendimento).join(
-                Atendente, Atendimento.atendente_id == Atendente.id
-            ).filter(
-                Atendente.empresa_id == empresa_id,
-                Atendimento.iniciado_em >= hora_inicio,
-                Atendimento.iniciado_em < hora_fim
-            ).count()
-
+            total = sum(
+                counts_by_hour.get(h % 24, 0)
+                for h in range(hora_inicio.hour, hora_inicio.hour + 4)
+            )
             labels.append(f"{hora_inicio.hour}h")
-            valores.append(count)
+            valores.append(total)
 
     return GraficoAtendimentosResponse(
         labels=labels,
@@ -514,10 +522,16 @@ async def obter_metricas_satisfacao(
             ).count()
             dist_atd[n] = cnt
 
+        foto_url_full = None
+        if row.foto_url:
+            from app.core.config import settings
+            base_url_m = settings.PUBLIC_BASE_URL.rstrip('/')
+            foto_url_full = f"{base_url_m}/{row.foto_url.lstrip('/')}"
+
         por_atendente.append({
             "id": row.id,
             "nome": row.nome_exibicao,
-            "foto_url": row.foto_url,
+            "foto_url": foto_url_full,
             "media": round(float(row.media), 1),
             "total": row.total,
             "distribuicao": dist_atd,

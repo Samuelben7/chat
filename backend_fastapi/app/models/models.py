@@ -118,6 +118,8 @@ class Cliente(Base):
     resumo_conversa = Column(Text, nullable=True)
     preferencias = Column(Text, nullable=True)
     observacoes_crm = Column(Text, nullable=True)
+    crm_arquivado = Column(Boolean, default=False)
+    crm_arquivado_em = Column(DateTime, nullable=True)
     criado_em_crm = Column(DateTime, server_default=func.now())
     atualizado_em_crm = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -752,3 +754,31 @@ class GatewayLog(Base):
     # Relationships
     dev = relationship("DevUsuario", back_populates="gateway_logs")
     api_key = relationship("ApiKey", back_populates="gateway_logs")
+
+
+# ==================== RECUPERAÇÃO DE SENHA ====================
+
+class TokenResetSenha(Base):
+    """Tokens para recuperação de senha (empresa, atendente ou dev)."""
+    __tablename__ = "tokens_reset_senha"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    tipo = Column(String(20), nullable=False)  # 'empresa', 'atendente', 'dev'
+    usado = Column(Boolean, default=False)
+    expira_em = Column(DateTime, nullable=False)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
+class TokenConfirmacaoEmailDev(Base):
+    """Tokens para confirmação de email de novos desenvolvedores."""
+    __tablename__ = "tokens_confirmacao_email_dev"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    usado = Column(Boolean, default=False)
+    expira_em = Column(DateTime, nullable=False)
+    criado_em = Column(DateTime, server_default=func.now())

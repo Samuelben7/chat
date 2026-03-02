@@ -490,12 +490,8 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
         # Atualizar ou criar atendimento
         atendimento = db.query(Atendimento).filter(
-            Atendimento.whatsapp_number == from_number
-        ).join(
-            MensagemLog,
-            MensagemLog.whatsapp_number == Atendimento.whatsapp_number
-        ).filter(
-            MensagemLog.empresa_id == empresa.id,
+            Atendimento.whatsapp_number == from_number,
+            Atendimento.empresa_id == empresa.id,
             Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])
         ).order_by(Atendimento.iniciado_em.desc()).first()
 
@@ -520,7 +516,8 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
             if msg_existente:
                 atendimento = db.query(Atendimento).filter(
-                    Atendimento.whatsapp_number == from_number
+                    Atendimento.whatsapp_number == from_number,
+                    Atendimento.empresa_id == empresa.id,
                 ).order_by(Atendimento.iniciado_em.desc()).first()
 
             # Se o atendimento encontrado está finalizado, reabrir com nova entrada na fila
@@ -535,7 +532,8 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             elif not atendimento:
                 atendimento = Atendimento(
                     whatsapp_number=from_number,
-                    status='bot'
+                    status='bot',
+                    empresa_id=empresa.id,
                 )
                 db.add(atendimento)
         else:
@@ -810,14 +808,30 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             ).first()
                             if _ag_cancel and _ag_cancel.status != 'cancelado':
                                 _ag_cancel.status = 'cancelado'
-                                # Liberar vaga no slot
-                                _slot_cancel = db.query(_AgSlot).filter(_AgSlot.id == _ag_cancel.slot_id).first()
+                                # Liberar vaga no slot (com lock + proteção se slot foi deletado)
+                                _slot_cancel = db.query(_AgSlot).filter(
+                                    _AgSlot.id == _ag_cancel.slot_id
+                                ).with_for_update().first()
+                                _cancel_data = None
                                 if _slot_cancel:
                                     _slot_cancel.vagas_ocupadas = max(0, _slot_cancel.vagas_ocupadas - 1)
                                     if _slot_cancel.status == 'lotado':
                                         _slot_cancel.status = 'disponivel'
+                                    _cancel_data = _slot_cancel.data
                                 db.commit()
                                 print(f"❌ Agendamento {cancelar_ag_id} cancelado via IA para {from_number}")
+                                # Invalidar cache Redis
+                                if _cancel_data:
+                                    try:
+                                        import redis as _redis_cancel
+                                        from app.core.config import settings as _cs
+                                        _rc = _redis_cancel.from_url(_cs.REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
+                                        _rc.delete(
+                                            f"agenda:slots:{empresa.id}:{_cancel_data.isoformat()}",
+                                            f"agenda:cal:{empresa.id}:{_cancel_data.year}:{_cancel_data.month}",
+                                        )
+                                    except Exception:
+                                        pass
                             else:
                                 print(f"⚠️ Agendamento {cancelar_ag_id} não encontrado ou já cancelado")
                         except Exception as _ce:
@@ -835,33 +849,66 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             try:
                                 from app.models.models import AgendaSlot, AgendaAgendamento
                                 from datetime import date as _date
-                                _slot = db.query(AgendaSlot).filter(
-                                    AgendaSlot.empresa_id == empresa.id,
-                                    AgendaSlot.data == _date.fromisoformat(agendamento_data),
-                                    AgendaSlot.hora_inicio == agendamento_hora,
-                                    AgendaSlot.status == 'disponivel',
-                                ).first()
-                                if _slot and _slot.vagas_ocupadas < _slot.vagas_total:
-                                    _cliente = db.query(Cliente).filter(
-                                        Cliente.empresa_id == empresa.id,
-                                        Cliente.whatsapp_number == from_number,
-                                    ).first()
-                                    _ag = AgendaAgendamento(
-                                        empresa_id=empresa.id,
-                                        slot_id=_slot.id,
-                                        whatsapp_number=from_number,
-                                        nome_cliente=_cliente.nome_completo if _cliente else None,
-                                        cliente_id=_cliente.id if _cliente else None,
-                                        status='confirmado',
-                                    )
-                                    db.add(_ag)
-                                    _slot.vagas_ocupadas += 1
-                                    if _slot.vagas_ocupadas >= _slot.vagas_total:
-                                        _slot.status = 'lotado'
-                                    db.commit()
-                                    print(f"📅 Agendamento criado: {agendamento_data} {agendamento_hora} para {from_number}")
+
+                                # Cenário 4: bloquear datas no passado
+                                _data_ag = _date.fromisoformat(agendamento_data)
+                                if _data_ag < _date.today():
+                                    print(f"⚠️ Data no passado ignorada: {agendamento_data} para {from_number}")
                                 else:
-                                    print(f"⚠️ Slot {agendamento_data} {agendamento_hora} não encontrado ou sem vagas")
+                                    # Cenário 3: SELECT FOR UPDATE = lock de row contra race condition
+                                    _slot = db.query(AgendaSlot).filter(
+                                        AgendaSlot.empresa_id == empresa.id,
+                                        AgendaSlot.data == _data_ag,
+                                        AgendaSlot.hora_inicio == agendamento_hora,
+                                    ).with_for_update().first()
+
+                                    if not _slot:
+                                        print(f"⚠️ Slot {agendamento_data} {agendamento_hora} não encontrado")
+                                    elif _slot.status == 'bloqueado':
+                                        # Cenário 2: slot bloqueado entre resposta IA e commit
+                                        print(f"⚠️ Slot bloqueado: {agendamento_data} {agendamento_hora}")
+                                    elif _slot.vagas_ocupadas >= _slot.vagas_total:
+                                        print(f"⚠️ Slot lotado: {agendamento_data} {agendamento_hora} ({_slot.vagas_ocupadas}/{_slot.vagas_total})")
+                                    else:
+                                        # Cenário 1: anti-duplicata
+                                        _ja_agendado = db.query(AgendaAgendamento).filter(
+                                            AgendaAgendamento.slot_id == _slot.id,
+                                            AgendaAgendamento.whatsapp_number == from_number,
+                                            AgendaAgendamento.status != 'cancelado',
+                                        ).first()
+                                        if _ja_agendado:
+                                            print(f"⚠️ Duplicata ignorada: {from_number} já tem agendamento no slot {_slot.id}")
+                                        else:
+                                            _cliente = db.query(Cliente).filter(
+                                                Cliente.empresa_id == empresa.id,
+                                                Cliente.whatsapp_number == from_number,
+                                            ).first()
+                                            _ag = AgendaAgendamento(
+                                                empresa_id=empresa.id,
+                                                slot_id=_slot.id,
+                                                whatsapp_number=from_number,
+                                                nome_cliente=_cliente.nome_completo if _cliente else None,
+                                                cliente_id=_cliente.id if _cliente else None,
+                                                status='confirmado',
+                                            )
+                                            db.add(_ag)
+                                            _slot.vagas_ocupadas += 1
+                                            if _slot.vagas_ocupadas >= _slot.vagas_total:
+                                                _slot.status = 'lotado'
+                                            db.commit()
+                                            print(f"📅 Agendamento criado: {agendamento_data} {agendamento_hora} para {from_number}")
+
+                                            # Invalidar cache Redis da agenda
+                                            try:
+                                                import redis as _redis_ag
+                                                from app.core.config import settings as _ag_settings
+                                                _r = _redis_ag.from_url(_ag_settings.REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
+                                                _r.delete(
+                                                    f"agenda:slots:{empresa.id}:{_data_ag.isoformat()}",
+                                                    f"agenda:cal:{empresa.id}:{_data_ag.year}:{_data_ag.month}",
+                                                )
+                                            except Exception:
+                                                pass
                             except Exception as _ag_err:
                                 print(f"⚠️ Erro ao criar agendamento da IA: {_ag_err}")
 
@@ -956,6 +1003,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
                 except Exception as e:
                     print(f"❌ Erro no bot: {e}")
+                    try:
+                        db.rollback()  # Restaurar sessão DB para o broadcast poder continuar
+                    except Exception:
+                        pass
 
         # WebSocket broadcast - TODAS as mensagens novas (recebida + respostas bot)
         try:
@@ -1263,6 +1314,55 @@ def enviar_email_confirmacao_task(destinatario: str, nome_empresa: str, token: s
             "email": destinatario,
             "error": str(e)
         }
+
+
+@celery_app.task(name="app.tasks.tasks.enviar_email_reset_senha_task")
+def enviar_email_reset_senha_task(destinatario: str, nome: str, token: str, tipo_usuario: str):
+    """Task assíncrona para enviar email de recuperação de senha."""
+    try:
+        from app.services.email_service import enviar_email_reset_senha
+
+        sucesso = enviar_email_reset_senha(
+            destinatario=destinatario,
+            nome=nome,
+            token=token,
+            tipo_usuario=tipo_usuario,
+        )
+
+        if sucesso:
+            print(f"✅ Email reset senha enviado para {destinatario}")
+            return {"success": True, "email": destinatario}
+        else:
+            print(f"⚠️  Falha ao enviar email reset para {destinatario}")
+            return {"success": False, "email": destinatario, "error": "Falha no envio"}
+
+    except Exception as e:
+        print(f"❌ Erro enviando email reset senha: {e}")
+        return {"success": False, "email": destinatario, "error": str(e)}
+
+
+@celery_app.task(name="app.tasks.tasks.enviar_email_confirmacao_dev_task")
+def enviar_email_confirmacao_dev_task(destinatario: str, nome_dev: str, token: str):
+    """Task assíncrona para enviar email de confirmação de cadastro de dev."""
+    try:
+        from app.services.email_service import enviar_email_confirmacao_dev
+
+        sucesso = enviar_email_confirmacao_dev(
+            destinatario=destinatario,
+            nome_dev=nome_dev,
+            token=token,
+        )
+
+        if sucesso:
+            print(f"✅ Email confirmação dev enviado para {destinatario}")
+            return {"success": True, "email": destinatario}
+        else:
+            print(f"⚠️  Falha ao enviar email confirmação dev para {destinatario}")
+            return {"success": False, "email": destinatario, "error": "Falha no envio"}
+
+    except Exception as e:
+        print(f"❌ Erro enviando email confirmação dev: {e}")
+        return {"success": False, "email": destinatario, "error": str(e)}
 
 
 # ========== TASK: ENVIO EM MASSA DE TEMPLATE ==========
@@ -2171,5 +2271,55 @@ def encerrar_chats_ia_inativos():
         print(f"❌ Erro em encerrar_chats_ia_inativos: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.tasks.arquivar_leads_antigos")
+def arquivar_leads_antigos():
+    """
+    Auto-arquiva leads antigos:
+    - Perdido há >30 dias → arquivar
+    - Fechado há >60 dias → arquivar
+    Executado diariamente pelo Celery Beat.
+    """
+    db = SessionLocal()
+    try:
+        from datetime import timezone as tz
+        now = datetime.now(tz.utc)
+        cutoff_perdido = now - timedelta(days=30)
+        cutoff_fechado = now - timedelta(days=60)
+
+        # Perdidos há mais de 30 dias
+        perdidos = db.query(Cliente).filter(
+            Cliente.funil_etapa == 'perdido',
+            Cliente.crm_arquivado == False,
+            Cliente.atualizado_em_crm < cutoff_perdido,
+        ).all()
+
+        # Fechados há mais de 60 dias
+        fechados = db.query(Cliente).filter(
+            Cliente.funil_etapa == 'fechado',
+            Cliente.crm_arquivado == False,
+            Cliente.atualizado_em_crm < cutoff_fechado,
+        ).all()
+
+        total = 0
+        for cliente in perdidos + fechados:
+            cliente.crm_arquivado = True
+            cliente.crm_arquivado_em = now
+            total += 1
+
+        if total > 0:
+            db.commit()
+            print(f"📦 {total} leads auto-arquivados ({len(perdidos)} perdidos, {len(fechados)} fechados)")
+        else:
+            print("📦 Nenhum lead para auto-arquivar")
+
+    except Exception as e:
+        print(f"❌ Erro em arquivar_leads_antigos: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
     finally:
         db.close()

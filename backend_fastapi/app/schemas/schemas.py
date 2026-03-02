@@ -78,6 +78,7 @@ class AtendimentoResponse(AtendimentoBase):
     atribuido_em: Optional[datetime]
     finalizado_em: Optional[datetime]
     ultima_mensagem_em: datetime
+    atendido_por_ia: bool = False
 
     class Config:
         from_attributes = True

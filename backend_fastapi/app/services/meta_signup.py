@@ -77,6 +77,81 @@ async def subscribe_app_to_waba(waba_id: str, access_token: str) -> bool:
         return True
 
 
+async def assign_system_user_to_waba(waba_id: str, user_token: str, system_user_id: str) -> bool:
+    """
+    Atribui o System User permanente ao WABA com permissão MANAGE (Full Control).
+    Deve ser chamado após o Embedded Signup para garantir acesso permanente.
+
+    Args:
+        waba_id: ID da WhatsApp Business Account
+        user_token: Token do usuário que completou o Embedded Signup
+        system_user_id: ID do System User da plataforma (tech provider)
+
+    Returns:
+        True se atribuído com sucesso
+    """
+    url = f"{GRAPH_API_BASE}/{waba_id}/assigned_users"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {user_token}"},
+            params={
+                "user": system_user_id,
+                "tasks": "MANAGE",
+            },
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"Erro ao atribuir System User ao WABA {waba_id}: {response.text}")
+            return False
+
+        logger.info(f"System User {system_user_id} atribuído ao WABA {waba_id} com MANAGE")
+        return True
+
+
+async def generate_system_user_token(
+    system_user_id: str,
+    business_id: str,
+    app_id: str,
+    user_token: str,
+) -> str | None:
+    """
+    Gera um token de longa duração para o System User via Graph API.
+    Requer que o user_token tenha permissão business_management.
+
+    Args:
+        system_user_id: ID do System User da plataforma
+        business_id: ID do Business Manager
+        app_id: ID do app Meta
+        user_token: Token do usuário com business_management
+
+    Returns:
+        Token do System User ou None se falhar
+    """
+    url = f"{GRAPH_API_BASE}/{business_id}/system_users/{system_user_id}/access_tokens"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {user_token}"},
+            params={
+                "appsecret_proof": "",  # opcional, ignorado sem app_secret
+                "app_id": app_id,
+                "scope": "whatsapp_business_management,whatsapp_business_messaging",
+            },
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"Erro ao gerar token do System User: {response.text}")
+            return None
+
+        data = response.json()
+        token = data.get("access_token")
+        logger.info(f"Token do System User gerado com sucesso para WABA")
+        return token
+
+
 async def get_phone_number_info(phone_number_id: str, access_token: str) -> dict:
     """
     Busca status e informações do número de telefone via Meta API.

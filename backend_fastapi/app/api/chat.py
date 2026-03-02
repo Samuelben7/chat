@@ -172,15 +172,21 @@ async def listar_conversas(
     # Filtrar por empresa
     query = query.filter(MensagemLog.empresa_id == empresa_id)
 
-    # PERMISSÃO: Atendente vê apenas SUAS conversas OU fila real (aguardando/bot sem atendente)
-    # NÃO vê chats sendo atendidos pela empresa (atendente_id=None + status=em_atendimento)
+    # PERMISSÃO: Atendente vê apenas SUAS conversas OU fila real
+    # Inclui: suas conversas, bot/aguardando sem atendente, IA ativa (pode assumir)
     if user.role == "atendente":
         query = query.filter(
             or_(
                 Atendimento.atendente_id == user.atendente_id,  # Suas conversas
                 and_(
                     Atendimento.atendente_id == None,
-                    Atendimento.status.in_(["aguardando", "bot"])  # Fila real, não empresa atendendo
+                    or_(
+                        Atendimento.status.in_(["aguardando", "bot"]),
+                        and_(
+                            Atendimento.status == "em_atendimento",
+                            Atendimento.atendido_por_ia == True,  # IA gerenciando — pode assumir
+                        )
+                    )
                 )
             )
         )
@@ -389,7 +395,12 @@ async def assumir_atendimento(
         "data": {
             "whatsapp": whatsapp_number,
             "assumido_por": nome_assumiu,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "atendimento": {
+                "status": "em_atendimento",
+                "atendente_id": novo_atendente_id,
+                "atendido_por_ia": False,
+            }
         }
     })
 

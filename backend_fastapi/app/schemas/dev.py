@@ -29,6 +29,25 @@ class DevTokenResponse(BaseModel):
     email: str
 
 
+class DevRegistroResponse(BaseModel):
+    """Response após cadastro dev (sem token — aguarda confirmação de email)"""
+    mensagem: str
+    email: str
+
+
+class DevEsqueciSenhaRequest(BaseModel):
+    email: EmailStr
+
+
+class DevRedefinirSenhaRequest(BaseModel):
+    token: str
+    nova_senha: str
+
+
+class DevConfirmarEmailRequest(BaseModel):
+    token: str
+
+
 # ==================== WHATSAPP ====================
 
 class DevConnectWhatsAppRequest(BaseModel):

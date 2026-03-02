@@ -52,6 +52,14 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.tasks.registrar_numeros_pendentes_task',
         'schedule': 14400.0,  # A cada 4 horas
     },
+    'encerrar-chats-ia-inativos': {
+        'task': 'app.tasks.tasks.encerrar_chats_ia_inativos',
+        'schedule': 300.0,  # A cada 5 minutos
+    },
+    'arquivar-leads-antigos': {
+        'task': 'app.tasks.tasks.arquivar_leads_antigos',
+        'schedule': 86400.0,  # Diário (24 horas)
+    },
 }
 
 print("✅ Celery configurado com sucesso!")

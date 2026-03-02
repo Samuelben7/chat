@@ -63,21 +63,29 @@ class BotMessageHandler:
         self.message_type = message_type
         self.dados_extras = dados_extras or {}
 
-        # Busca ou cria sessão
+        # Busca ou cria sessão — com proteção contra race condition (UniqueViolation)
         self.session = self.db.query(ChatSessao).filter(
             ChatSessao.empresa_id == empresa.id,
             ChatSessao.whatsapp_number == from_number
         ).first()
 
         if not self.session:
-            self.session = ChatSessao(
-                empresa_id=empresa.id,
-                whatsapp_number=from_number,
-                estado_atual='inicio',
-                dados_temporarios={}
-            )
-            self.db.add(self.session)
-            self.db.commit()
+            try:
+                self.session = ChatSessao(
+                    empresa_id=empresa.id,
+                    whatsapp_number=from_number,
+                    estado_atual='inicio',
+                    dados_temporarios={}
+                )
+                self.db.add(self.session)
+                self.db.commit()
+            except Exception:
+                # Race condition: outra task criou a sessão entre o SELECT e o INSERT
+                self.db.rollback()
+                self.session = self.db.query(ChatSessao).filter(
+                    ChatSessao.empresa_id == empresa.id,
+                    ChatSessao.whatsapp_number == from_number
+                ).first()
 
         # Inicializa serviço WhatsApp
         self.whatsapp = WhatsAppService(empresa)

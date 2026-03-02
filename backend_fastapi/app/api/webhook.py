@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 
 from app.database.database import get_db
 from app.models.models import MensagemLog, ChatSessao, Atendimento, Empresa, Cliente
-from app.services.whatsapp import extract_message_data
+from app.services.whatsapp import extract_message_data, WhatsAppService
 from app.services.bot_handler import BotMessageHandler
+from app.services.ai_chat_service import gerar_resposta_ia
 from app.core.redis_client import redis_cache
 
 router = APIRouter()
@@ -370,26 +371,17 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
             Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])
         ).order_by(Atendimento.iniciado_em.desc()).first()
 
-        # Se não existe atendimento ou está em atendimento humano, não processa no bot
+        # Determinar se processa com bot/IA ou está em atendimento humano
         processar_bot = True
 
         if atendimento and atendimento.status == 'em_atendimento':
+            # Humano assumiu o chat via painel — bot e IA ficam pausados
             processar_bot = False
-            print(f"ℹ️  Mensagem em atendimento humano, não processar bot")
-
-        # CRÍTICO: Verificar se humano respondeu recentemente (últimos 5 min)
-        # Se sim, NÃO processar bot (evita conflito humano vs bot)
-        from datetime import timedelta
-        ultima_enviada = db.query(MensagemLog).filter(
-            MensagemLog.whatsapp_number == from_number,
-            MensagemLog.empresa_id == empresa.id,
-            MensagemLog.direcao == 'enviada',
-            MensagemLog.timestamp >= datetime.now(timezone.utc) - timedelta(minutes=5)
-        ).order_by(MensagemLog.timestamp.desc()).first()
-
-        if ultima_enviada:
-            processar_bot = False
-            print(f"🚫 Humano respondeu recentemente ({ultima_enviada.timestamp}) - Bot pausado")
+            print(f"ℹ️  Chat em atendimento humano (status=em_atendimento) — bot/IA pausado")
+        elif atendimento and atendimento.atendente_id is not None:
+            # Tem atendente vinculado mas pode não ter assumido ainda — deixa bot/IA rodar
+            # (apenas status 'em_atendimento' pausa, não só ter atendente_id)
+            pass
 
         if not atendimento:
             # Busca na tabela de mensagens para ver se já existe registro
@@ -424,28 +416,75 @@ async def process_incoming_message(message: Dict[str, Any], empresa: Empresa, db
 
         db.commit()
 
-        # Processar com bot se necessário
+        # Processar com IA ou bot
         if processar_bot:
-            try:
-                # Cria handler do bot
-                bot_handler = BotMessageHandler(
-                    empresa=empresa,
-                    from_number=from_number,
-                    message_content=content,
-                    message_id=message_id,
-                    db=db,
-                    message_type=message_type,
-                    dados_extras=dados_extras,
-                )
+            # ── IA Conversacional (tem prioridade sobre o bot) ──
+            if getattr(empresa, 'ia_ativa', False) and content and message_type in ('text', 'button', 'interactive'):
+                try:
+                    # Buscar histórico da conversa (sem a mensagem atual)
+                    historico = (
+                        db.query(MensagemLog)
+                        .filter(
+                            MensagemLog.empresa_id == empresa.id,
+                            MensagemLog.whatsapp_number == from_number,
+                        )
+                        .order_by(MensagemLog.timestamp.desc())
+                        .limit(25)
+                        .all()
+                    )
+                    historico = list(reversed(historico))
 
-                # Processa mensagem
-                await bot_handler.process_message()
-                print(f"✅ Mensagem processada pelo bot")
+                    resposta_ia = await gerar_resposta_ia(
+                        mensagens=historico,
+                        nova_mensagem=content,
+                        nome_assistente=getattr(empresa, 'ia_nome_assistente', 'Assistente') or 'Assistente',
+                        contexto_negocio=getattr(empresa, 'ia_contexto', None),
+                        delay_min=getattr(empresa, 'ia_delay_min', 3) or 3,
+                        delay_max=getattr(empresa, 'ia_delay_max', 10) or 10,
+                    )
 
-            except Exception as e:
-                print(f"❌ Erro ao processar mensagem com bot: {e}")
-                import traceback
-                traceback.print_exc()
+                    # Enviar resposta via WhatsApp API (direto para Meta)
+                    wa_service = WhatsAppService(empresa)
+                    await wa_service.send_text_message(from_number, resposta_ia)
+
+                    # Salvar resposta da IA no banco
+                    msg_ia = MensagemLog(
+                        empresa_id=empresa.id,
+                        whatsapp_number=from_number,
+                        message_id=f"ia_{message_id}",
+                        direcao="enviada",
+                        tipo_mensagem="text",
+                        conteudo=resposta_ia,
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    db.add(msg_ia)
+                    db.commit()
+                    print(f"🤖 IA respondeu para {from_number}: {resposta_ia[:60]}...")
+
+                except Exception as e:
+                    print(f"❌ Erro na IA conversacional: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            else:
+                # ── Bot tradicional ──
+                try:
+                    bot_handler = BotMessageHandler(
+                        empresa=empresa,
+                        from_number=from_number,
+                        message_content=content,
+                        message_id=message_id,
+                        db=db,
+                        message_type=message_type,
+                        dados_extras=dados_extras,
+                    )
+                    await bot_handler.process_message()
+                    print(f"✅ Mensagem processada pelo bot")
+
+                except Exception as e:
+                    print(f"❌ Erro ao processar mensagem com bot: {e}")
+                    import traceback
+                    traceback.print_exc()
 
         # Broadcast via WebSocket para atendentes conectados
         # BROADCAST AMBAS: mensagem recebida E resposta do bot (se houver)

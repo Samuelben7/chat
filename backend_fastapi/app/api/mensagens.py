@@ -68,8 +68,8 @@ async def enviar_mensagem(
 
         # Modo REAL: envia pela API do WhatsApp
         else:
-            # Buscar empresa (por enquanto usa empresa_id=1, depois pegar do JWT)
-            empresa = db.query(Empresa).filter(Empresa.id == 1).first()
+            # Multi-tenant: usar empresa_id extraído do JWT
+            empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
 
             if not empresa:
                 raise HTTPException(status_code=404, detail="Empresa não encontrada")
@@ -93,7 +93,7 @@ async def enviar_mensagem(
 
         # Salvar no log (tanto para mock quanto real)
         mensagem_log = MensagemLog(
-            empresa_id=1,  # TODO: pegar do JWT quando tiver multi-tenant
+            empresa_id=empresa_id,
             whatsapp_number=mensagem.whatsapp_number,
             message_id=message_id,
             direcao="enviada",
@@ -108,6 +108,7 @@ async def enviar_mensagem(
         # Atualizar atendimento
         atendimento = db.query(Atendimento).filter(
             Atendimento.whatsapp_number == mensagem.whatsapp_number,
+            Atendimento.empresa_id == empresa_id,
             Atendimento.status.in_(['bot', 'aguardando', 'em_atendimento'])
         ).order_by(Atendimento.iniciado_em.desc()).first()
 

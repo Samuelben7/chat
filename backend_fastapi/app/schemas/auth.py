@@ -130,6 +130,22 @@ class WhatsAppProfileResponse(BaseModel):
     token_preview: Optional[str] = None
 
 
+class EsqueciSenhaRequest(BaseModel):
+    """Request para solicitar recuperação de senha"""
+    email: EmailStr
+
+
+class RedefinirSenhaRequest(BaseModel):
+    """Request para redefinir senha com token"""
+    token: str
+    nova_senha: str
+
+
+class EsqueciSenhaResponse(BaseModel):
+    """Response genérica após solicitar recuperação (não revela se email existe)"""
+    mensagem: str
+
+
 class EmpresaAdminResponse(BaseModel):
     """Response com dados da empresa para painel admin"""
     id: int

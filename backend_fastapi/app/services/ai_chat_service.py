@@ -5,6 +5,7 @@ Responde mensagens de WhatsApp com contexto do negócio + histórico da conversa
 import asyncio
 import random
 import logging
+from datetime import date
 from typing import Optional
 import anthropic
 
@@ -66,6 +67,17 @@ INSTRUÇÕES DE COMPORTAMENTO:
 10. Responda SEMPRE em português brasileiro.
 11. Quando o objetivo da conversa estiver COMPLETAMENTE concluído (agendamento confirmado com nome/procedimento/horário, dúvida totalmente esclarecida, cliente se despede explicitamente), adicione exatamente este marcador no final da sua resposta: [CONVERSA_ENCERRADA]
     IMPORTANTE: Use esse marcador SOMENTE quando tiver certeza que o atendimento está finalizado. Não use em meio à conversa. Só uma vez, no final.
+12. Quando confirmar um agendamento com data e hora específicos, adicione ANTES do [CONVERSA_ENCERRADA] o marcador: [AGENDAMENTO:AAAA-MM-DD|HH:MM]
+    Exemplo: se agendou para 07 de março de 2026 às 10:00, escreva: [AGENDAMENTO:2026-03-07|10:00][CONVERSA_ENCERRADA]
+    Use sempre o formato de ano com 4 dígitos, mês e dia com 2 dígitos, hora com 2 dígitos.
+    NUNCA coloque esse marcador se o agendamento não foi confirmado com data e hora exatas.
+13. Quando o cliente solicitar CANCELAMENTO de um agendamento:
+    a) Consulte os agendamentos futuros dele listados no contexto da agenda.
+    b) Se houver mais de um, pergunte qual ele deseja cancelar.
+    c) Confirme os detalhes e peça confirmação: "Confirma o cancelamento do dia X às H?"
+    d) Após confirmação explícita, adicione o marcador: [CANCELAR_AGENDAMENTO:ID] com o ID do agendamento.
+    e) Não use esse marcador sem confirmação explícita do cliente.
+    f) Informe que o horário será liberado para outros clientes.
 """
 
 
@@ -101,6 +113,7 @@ async def gerar_resposta_ia(
     delay_min: int = 7,
     delay_max: int = 10,
     crm_context: Optional[str] = None,
+    agenda_context: Optional[str] = None,
 ) -> str:
     """
     Gera resposta da IA para uma mensagem recebida.
@@ -122,10 +135,17 @@ async def gerar_resposta_ia(
 
     contexto = contexto_negocio.strip() if contexto_negocio and contexto_negocio.strip() else CONTEXTO_DEMO_ODONTOLOGIA
 
+    today = date.today()
     system_prompt = SYSTEM_PROMPT_BASE.format(
         nome_assistente=nome_assistente or "Assistente",
         contexto_negocio=contexto,
     )
+
+    # Injetar data atual para evitar alucinação de ano errado no marcador [AGENDAMENTO:]
+    system_prompt = (
+        f"DATA DE HOJE: {today.strftime('%d/%m/%Y')} (ano {today.year}). "
+        f"Ao usar o marcador [AGENDAMENTO:AAAA-MM-DD|HH:MM], o ano DEVE ser {today.year} ou posterior.\n\n"
+    ) + system_prompt
 
     # Enriquecer com contexto CRM quando disponível
     if crm_context:
@@ -134,6 +154,18 @@ async def gerar_resposta_ia(
             + crm_context
             + "\n\nCom base nesse contexto, personalize a conversa: não pergunte informações que o cliente já forneceu, "
             "e avance naturalmente no atendimento considerando a etapa atual do funil."
+        )
+
+    # Enriquecer com dados reais da agenda quando disponíveis
+    if agenda_context:
+        system_prompt += (
+            "\n\nAGENDA REAL — HORÁRIOS DISPONÍVEIS (use esses dados para informar o cliente sobre disponibilidade):\n"
+            + agenda_context
+            + "\n\nIMPORTANTE sobre agendamentos:\n"
+            "- Use SOMENTE os horários listados acima para sugerir ao cliente.\n"
+            "- Se o horário desejado pelo cliente não estiver disponível, ofereça as alternativas mais próximas.\n"
+            "- Quando o cliente confirmar nome + procedimento + horário específico disponível, "
+            "confirme o agendamento e use o marcador [CONVERSA_ENCERRADA] ao final."
         )
 
     # Montar histórico sem a mensagem atual (será adicionada como último user)

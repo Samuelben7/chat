@@ -339,6 +339,377 @@ def enviar_email_confirmacao(
         return False
 
 
+def enviar_email_reset_senha(
+    destinatario: str,
+    nome: str,
+    token: str,
+    tipo_usuario: str = "empresa",
+    frontend_url: str = None
+) -> bool:
+    """
+    Envia email de recuperação de senha para empresa, atendente ou dev.
+    """
+    try:
+        if not frontend_url:
+            from app.core.config import settings
+            frontend_url = settings.FRONTEND_URL or "http://localhost:3000"
+
+        if tipo_usuario == "dev":
+            link_reset = f"{frontend_url}/dev/redefinir-senha?token={token}"
+        else:
+            link_reset = f"{frontend_url}/redefinir-senha?token={token}"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+                    background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+                    padding: 40px 20px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    overflow: hidden;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+                    padding: 50px 30px;
+                    text-align: center;
+                }}
+                .lock-icon {{
+                    font-size: 56px;
+                    margin-bottom: 16px;
+                    display: block;
+                }}
+                .header h1 {{
+                    color: white;
+                    font-size: 26px;
+                    font-weight: 700;
+                    margin: 0;
+                    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+                }}
+                .content {{ padding: 50px 40px; }}
+                .greeting {{
+                    font-size: 22px;
+                    color: #1a1f3a;
+                    font-weight: 700;
+                    margin-bottom: 20px;
+                }}
+                .content p {{
+                    color: #555;
+                    line-height: 1.8;
+                    margin-bottom: 20px;
+                    font-size: 16px;
+                }}
+                .button-container {{ text-align: center; margin: 40px 0; }}
+                .button {{
+                    display: inline-block;
+                    padding: 18px 50px;
+                    background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+                    color: white !important;
+                    text-decoration: none;
+                    border-radius: 10px;
+                    font-weight: 700;
+                    font-size: 18px;
+                    box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+                }}
+                .link-box {{
+                    background-color: #f0f2f5;
+                    border-left: 4px solid #00d4ff;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 30px 0;
+                }}
+                .link-box p {{ margin-bottom: 10px; font-size: 14px; color: #666; }}
+                .link-box a {{ color: #00d4ff; word-break: break-all; font-size: 13px; }}
+                .warning-box {{
+                    background-color: #fff8e6;
+                    border-left: 4px solid #ffa000;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 30px 0;
+                }}
+                .warning-box p {{ color: #8b6200; font-size: 14px; margin: 0; }}
+                .footer {{
+                    background: linear-gradient(135deg, #1a1f3a 0%, #0a0e27 100%);
+                    padding: 40px 30px;
+                    text-align: center;
+                }}
+                .footer p {{ color: #b8c1ec; font-size: 14px; margin-bottom: 8px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <span class="lock-icon">🔐</span>
+                    <h1>Redefinição de Senha</h1>
+                </div>
+                <div class="content">
+                    <div class="greeting">Olá, {nome}!</div>
+                    <p>
+                        Recebemos uma solicitação para <strong>redefinir a senha</strong> da sua conta
+                        no <strong>YourSystem CRM</strong>.
+                    </p>
+                    <p>
+                        Clique no botão abaixo para criar uma nova senha. Este link é válido por
+                        <strong>1 hora</strong>.
+                    </p>
+                    <div class="button-container">
+                        <a href="{link_reset}" class="button">🔑 Redefinir Senha</a>
+                    </div>
+                    <div class="link-box">
+                        <p><strong>Ou copie e cole este link no seu navegador:</strong></p>
+                        <a href="{link_reset}">{link_reset}</a>
+                    </div>
+                    <div class="warning-box">
+                        <p>
+                            ⚠️ <strong>Não solicitou?</strong> Ignore este email com segurança.
+                            Sua senha permanece a mesma. Nenhuma ação é necessária.
+                        </p>
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>© 2026 <strong>YourSystem CRM</strong></p>
+                    <p style="font-size: 12px; margin-top: 12px;">
+                        Por segurança, nunca compartilhe este link com ninguém.
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        from app.core.config import settings
+
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
+
+        if not sender_password or not sender_email:
+            print("=" * 80)
+            print("📧 EMAIL RESET SENHA (DEBUG)")
+            print("=" * 80)
+            print(f"Para: {destinatario} | Tipo: {tipo_usuario}")
+            print(f"Link: {link_reset}")
+            print("=" * 80)
+            return True
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = "🔐 Redefinição de senha - YourSystem CRM"
+        msg['From'] = f"YourSystem CRM <{sender_email}>"
+        msg['To'] = destinatario
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, destinatario, msg.as_string())
+
+        print(f"✅ Email reset senha enviado para {destinatario}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Erro ao enviar email reset senha: {e}")
+        return False
+
+
+def enviar_email_confirmacao_dev(
+    destinatario: str,
+    nome_dev: str,
+    token: str,
+    frontend_url: str = None
+) -> bool:
+    """
+    Envia email de confirmação de cadastro para novo desenvolvedor.
+    """
+    try:
+        if not frontend_url:
+            from app.core.config import settings
+            frontend_url = settings.FRONTEND_URL or "http://localhost:3000"
+
+        link_confirmacao = f"{frontend_url}/dev/confirmar-email?token={token}"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+                    background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+                    padding: 40px 20px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    overflow: hidden;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+                    padding: 50px 30px;
+                    text-align: center;
+                }}
+                .header h1 {{ color: white; font-size: 26px; font-weight: 700; margin: 8px 0 0; text-shadow: 0 2px 10px rgba(0,0,0,0.2); }}
+                .header p {{ color: rgba(255,255,255,0.8); font-size: 15px; margin-top: 8px; }}
+                .content {{ padding: 50px 40px; }}
+                .greeting {{ font-size: 22px; color: #1a1f3a; font-weight: 700; margin-bottom: 10px; }}
+                .name {{ font-size: 18px; color: #00d4ff; font-weight: 600; margin-bottom: 28px; }}
+                .content p {{ color: #555; line-height: 1.8; margin-bottom: 20px; font-size: 16px; }}
+                .features {{
+                    background-color: #f8f9ff;
+                    border-radius: 12px;
+                    padding: 24px;
+                    margin: 24px 0;
+                }}
+                .feature-item {{ display: flex; align-items: center; margin-bottom: 12px; }}
+                .feature-icon {{ font-size: 20px; margin-right: 12px; }}
+                .feature-text {{ color: #555; font-size: 15px; }}
+                .button-container {{ text-align: center; margin: 40px 0; }}
+                .button {{
+                    display: inline-block;
+                    padding: 18px 50px;
+                    background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+                    color: white !important;
+                    text-decoration: none;
+                    border-radius: 10px;
+                    font-weight: 700;
+                    font-size: 18px;
+                    box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+                }}
+                .link-box {{
+                    background-color: #f0f2f5;
+                    border-left: 4px solid #00d4ff;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 30px 0;
+                }}
+                .link-box p {{ margin-bottom: 10px; font-size: 14px; color: #666; }}
+                .link-box a {{ color: #00d4ff; word-break: break-all; font-size: 13px; }}
+                .warning-box {{
+                    background-color: #fff8e6;
+                    border-left: 4px solid #ffa000;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 30px 0;
+                }}
+                .warning-box p {{ color: #8b6200; font-size: 14px; margin: 0; }}
+                .footer {{
+                    background: linear-gradient(135deg, #1a1f3a 0%, #0a0e27 100%);
+                    padding: 40px 30px;
+                    text-align: center;
+                }}
+                .footer p {{ color: #b8c1ec; font-size: 14px; margin-bottom: 8px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div style="font-size: 48px; margin-bottom: 12px;">{'</>'}</div>
+                    <h1>Bem-vindo ao Portal Dev!</h1>
+                    <p>YourSystem CRM — API Gateway</p>
+                </div>
+                <div class="content">
+                    <div class="greeting">Olá!</div>
+                    <div class="name">{nome_dev}</div>
+                    <p>
+                        Sua conta de desenvolvedor foi criada com sucesso!
+                        Para <strong>ativar seu acesso</strong> ao API Gateway e começar a integrar,
+                        confirme seu email clicando no botão abaixo.
+                    </p>
+                    <div class="features">
+                        <div class="feature-item">
+                            <span class="feature-icon">🔑</span>
+                            <span class="feature-text">Gerencie suas API Keys com segurança</span>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">📨</span>
+                            <span class="feature-text">Envie mensagens WhatsApp via REST API</span>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">📊</span>
+                            <span class="feature-text">Monitore uso e limites em tempo real</span>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">🔗</span>
+                            <span class="feature-text">Configure webhooks para receber eventos</span>
+                        </div>
+                    </div>
+                    <div class="button-container">
+                        <a href="{link_confirmacao}" class="button">✅ Confirmar Email e Ativar Conta</a>
+                    </div>
+                    <div class="link-box">
+                        <p><strong>Ou copie e cole este link no seu navegador:</strong></p>
+                        <a href="{link_confirmacao}">{link_confirmacao}</a>
+                    </div>
+                    <div class="warning-box">
+                        <p>
+                            ⏰ <strong>Importante:</strong> Este link expira em <strong>24 horas</strong>.
+                            Confirme seu email o quanto antes para não perder o acesso!
+                        </p>
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>© 2026 <strong>YourSystem CRM</strong></p>
+                    <p style="margin-top: 12px; font-size: 12px;">
+                        Se você não solicitou este cadastro, ignore este email com segurança.
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        from app.core.config import settings
+
+        smtp_server = settings.SMTP_SERVER
+        smtp_port = settings.SMTP_PORT
+        sender_email = settings.SMTP_SENDER_EMAIL
+        sender_password = settings.SMTP_PASSWORD
+
+        if not sender_password or not sender_email:
+            print("=" * 80)
+            print("📧 EMAIL CONFIRMAÇÃO DEV (DEBUG)")
+            print("=" * 80)
+            print(f"Para: {destinatario} | Dev: {nome_dev}")
+            print(f"Link: {link_confirmacao}")
+            print("=" * 80)
+            return True
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = "✅ Confirme seu email - YourSystem Dev Portal"
+        msg['From'] = f"YourSystem CRM <{sender_email}>"
+        msg['To'] = destinatario
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, destinatario, msg.as_string())
+
+        print(f"✅ Email confirmação dev enviado para {destinatario}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Erro ao enviar email confirmação dev: {e}")
+        return False
+
+
 def enviar_email_admin_notificacao(
     empresa_id: int,
     nome_empresa: str,

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     META_APP_ID: str = ""
     META_APP_SECRET: str = ""
     META_ES_CONFIG_ID: str = ""
+    META_BUSINESS_ID: str = ""        # ID do Business Manager (Tech Provider)
+    META_SYSTEM_USER_ID: str = ""     # ID do System User permanente
+    META_PLATFORM_TOKEN: str = ""     # Token permanente do System User da plataforma (para subscribe/assign em todos os WABAs)
     ADMIN_NOTIFICATION_EMAIL: str = ""
     ADMIN_SECRET_KEY: str = ""
 

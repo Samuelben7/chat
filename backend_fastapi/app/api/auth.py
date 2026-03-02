@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.database.database import get_db
-from app.models.models import Empresa, Atendente, EmpresaAuth, AtendenteAuth, TokenConfirmacaoEmail
+from app.models.models import Empresa, Atendente, EmpresaAuth, AtendenteAuth, TokenConfirmacaoEmail, TokenResetSenha
 from app.schemas.auth import (
     LoginEmpresaRequest,
     LoginAtendenteRequest,
@@ -25,8 +25,12 @@ from app.schemas.auth import (
     WhatsAppStatusResponse,
     WhatsAppProfileResponse,
     EmpresaAdminResponse,
+    EsqueciSenhaRequest,
+    RedefinirSenhaRequest,
+    EsqueciSenhaResponse,
 )
 from app.core.config import settings
+from app.core.dependencies import CurrentUser, EmpresaIdFromToken
 from app.core.auth import (
     verificar_senha,
     hash_senha,
@@ -563,6 +567,8 @@ async def connect_whatsapp(
     from app.services.meta_signup import (
         exchange_code_for_token,
         subscribe_app_to_waba,
+        assign_system_user_to_waba,
+        generate_system_user_token,
         register_phone_number,
     )
 
@@ -574,18 +580,36 @@ async def connect_whatsapp(
             detail=f"Erro ao obter token da Meta: {str(e)}"
         )
 
-    # 2. Inscrever app na WABA (falha não é fatal)
-    subscribe_ok = False
+    # 2. Atribuir System User permanente ao WABA com MANAGE (Full Control)
+    #    Usa o token do usuário que fez o signup (tem permissão sobre a WABA dele)
+    if settings.META_SYSTEM_USER_ID:
+        try:
+            assign_ok = await assign_system_user_to_waba(
+                dados.waba_id, access_token, settings.META_SYSTEM_USER_ID
+            )
+            if assign_ok:
+                print(f"[INFO] System User atribuído ao WABA {dados.waba_id} com Full Control")
+            else:
+                print(f"[WARN] Falha ao atribuir System User ao WABA — continuando sem assign")
+        except Exception as e:
+            print(f"[WARN] Erro no assign System User: {e}")
+    else:
+        print(f"[WARN] META_SYSTEM_USER_ID não configurado — pulando assign automático")
+
+    # 3. Inscrever app na WABA
+    #    Usa o META_PLATFORM_TOKEN (token permanente da plataforma) se disponível,
+    #    pois ele sempre tem whatsapp_business_management. Fallback: token do usuário.
+    subscribe_token = settings.META_PLATFORM_TOKEN if settings.META_PLATFORM_TOKEN else access_token
     try:
-        subscribe_ok = await subscribe_app_to_waba(dados.waba_id, access_token)
+        subscribe_ok = await subscribe_app_to_waba(dados.waba_id, subscribe_token)
         if subscribe_ok:
             print(f"[INFO] Subscribe WABA OK: {dados.waba_id}")
         else:
-            print(f"[WARN] Subscribe WABA falhou (token sem whatsapp_business_management?) — será retentado automaticamente")
+            print(f"[WARN] Subscribe WABA falhou — será necessário retry manual via /empresa/subscribe-waba")
     except Exception as e:
         print(f"[WARN] Erro ao inscrever app na WABA: {e}")
 
-    # 3. Registrar número (falha não é fatal — pode estar em PENDING review)
+    # 4. Registrar número (falha não é fatal — pode estar em PENDING review)
     try:
         register_ok = await register_phone_number(dados.phone_number_id, access_token)
         if register_ok:
@@ -595,7 +619,7 @@ async def connect_whatsapp(
     except Exception as e:
         print(f"[WARN] Erro ao registrar número: {e}")
 
-    # 4. Salvar credenciais
+    # 5. Salvar credenciais da empresa (token do usuário para operações de envio/recebimento)
     empresa.whatsapp_token = access_token
     empresa.phone_number_id = dados.phone_number_id
     empresa.waba_id = dados.waba_id
@@ -603,7 +627,7 @@ async def connect_whatsapp(
 
     print(f"[INFO] WhatsApp conectado - Empresa: {empresa.nome} | WABA: {dados.waba_id} | Phone: {dados.phone_number_id}")
 
-    # 5. Notificar admin via Celery
+    # 6. Notificar admin via Celery
     try:
         from app.tasks.tasks import notificar_admin_nova_empresa_task
         notificar_admin_nova_empresa_task.delay(
@@ -622,6 +646,35 @@ async def connect_whatsapp(
         waba_id=dados.waba_id,
         conectado=True
     )
+
+
+# ========== SUBSCRIBE WABA (RETRY MANUAL) ==========
+
+@router.post("/empresa/subscribe-waba")
+async def subscribe_waba_retry(
+    token: str = Depends(get_token_from_header),
+    db: Session = Depends(get_db),
+):
+    """
+    Retry manual de subscribe do WABA ao app.
+    Útil quando o subscribe falhou no Embedded Signup por falta de permissão.
+    Usa o token salvo no banco (deve ser token com whatsapp_business_management).
+    """
+    empresa_id = validar_permissao_empresa(token)
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    if not empresa.waba_id or not empresa.whatsapp_token:
+        raise HTTPException(status_code=400, detail="WABA ou token não configurados")
+
+    from app.services.meta_signup import subscribe_app_to_waba
+    ok = await subscribe_app_to_waba(empresa.waba_id, empresa.whatsapp_token)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Subscribe falhou — verifique se o token tem permissão whatsapp_business_management"
+        )
+    return {"message": "WABA inscrita no app com sucesso", "waba_id": empresa.waba_id}
 
 
 # ========== WHATSAPP STATUS ==========
@@ -827,3 +880,164 @@ async def whatsapp_profile_admin(
         profile_picture_url=biz_profile.get("profile_picture_url"),
         token_preview=token_preview,
     )
+
+
+# ========== IA CONVERSACIONAL CONFIG ==========
+
+@router.get("/empresa/ia-config")
+async def get_ia_config(
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Retorna configuração atual da IA para a empresa."""
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    return {
+        "ia_ativa": getattr(empresa, "ia_ativa", False) or False,
+        "ia_contexto": getattr(empresa, "ia_contexto", "") or "",
+        "ia_delay_min": getattr(empresa, "ia_delay_min", 3) or 3,
+        "ia_delay_max": getattr(empresa, "ia_delay_max", 10) or 10,
+        "ia_nome_assistente": getattr(empresa, "ia_nome_assistente", "Assistente") or "Assistente",
+    }
+
+
+@router.patch("/empresa/ia-config")
+async def update_ia_config(
+    dados: dict,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Atualiza configuração da IA para a empresa."""
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    campos_permitidos = {"ia_ativa", "ia_contexto", "ia_delay_min", "ia_delay_max", "ia_nome_assistente"}
+    for campo, valor in dados.items():
+        if campo in campos_permitidos:
+            setattr(empresa, campo, valor)
+
+    db.commit()
+    return {
+        "success": True,
+        "ia_ativa": empresa.ia_ativa,
+        "ia_nome_assistente": empresa.ia_nome_assistente,
+    }
+
+
+# ========== RECUPERAÇÃO DE SENHA (EMPRESA + ATENDENTE) ==========
+
+@router.post("/esqueci-senha", response_model=EsqueciSenhaResponse)
+async def esqueci_senha(
+    dados: EsqueciSenhaRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Solicita recuperação de senha para empresa ou atendente.
+    Sempre retorna mensagem genérica (não revela se o email existe).
+    """
+    from app.services.email_service import gerar_token_confirmacao
+    from datetime import timedelta
+
+    RESPOSTA_GENERICA = EsqueciSenhaResponse(
+        mensagem="Se esse email estiver cadastrado, você receberá as instruções em breve."
+    )
+
+    # Buscar em EmpresaAuth
+    empresa_auth = db.query(EmpresaAuth).filter(EmpresaAuth.email == dados.email).first()
+    if empresa_auth:
+        tipo = "empresa"
+        # Buscar nome da empresa
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_auth.empresa_id).first()
+        nome = empresa.nome if empresa else dados.email
+    else:
+        # Buscar em AtendenteAuth
+        atendente_auth = db.query(AtendenteAuth).filter(AtendenteAuth.email == dados.email).first()
+        if atendente_auth:
+            tipo = "atendente"
+            atendente = db.query(Atendente).filter(Atendente.id == atendente_auth.atendente_id).first()
+            nome = atendente.nome_exibicao if atendente else dados.email
+        else:
+            # Email não encontrado — retornar mensagem genérica sem revelar
+            return RESPOSTA_GENERICA
+
+    # Criar token de reset
+    token = gerar_token_confirmacao()
+    expira_em = datetime.utcnow() + timedelta(hours=1)
+
+    token_reset = TokenResetSenha(
+        email=dados.email,
+        token=token,
+        tipo=tipo,
+        usado=False,
+        expira_em=expira_em,
+    )
+    db.add(token_reset)
+    db.commit()
+
+    # Enviar email via Celery
+    try:
+        from app.tasks.tasks import enviar_email_reset_senha_task
+        enviar_email_reset_senha_task.delay(
+            destinatario=dados.email,
+            nome=nome,
+            token=token,
+            tipo_usuario=tipo,
+        )
+    except Exception as e:
+        print(f"⚠️  Celery não disponível, enviando sync: {e}")
+        from app.services.email_service import enviar_email_reset_senha
+        enviar_email_reset_senha(dados.email, nome, token, tipo)
+
+    return RESPOSTA_GENERICA
+
+
+@router.post("/redefinir-senha")
+async def redefinir_senha(
+    dados: RedefinirSenhaRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Redefine a senha de empresa ou atendente usando um token válido.
+    """
+    # Buscar token
+    token_obj = db.query(TokenResetSenha).filter(
+        TokenResetSenha.token == dados.token,
+        TokenResetSenha.usado == False,
+        TokenResetSenha.tipo.in_(["empresa", "atendente"]),
+    ).first()
+
+    if not token_obj:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido ou já utilizado"
+        )
+
+    if datetime.utcnow() > token_obj.expira_em:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token expirado. Solicite uma nova recuperação de senha."
+        )
+
+    # Atualizar senha conforme o tipo
+    nova_hash = hash_senha(dados.nova_senha)
+
+    if token_obj.tipo == "empresa":
+        auth = db.query(EmpresaAuth).filter(EmpresaAuth.email == token_obj.email).first()
+        if not auth:
+            raise HTTPException(status_code=404, detail="Conta não encontrada")
+        auth.senha_hash = nova_hash
+    else:
+        auth = db.query(AtendenteAuth).filter(AtendenteAuth.email == token_obj.email).first()
+        if not auth:
+            raise HTTPException(status_code=404, detail="Conta não encontrada")
+        auth.senha_hash = nova_hash
+        auth.primeiro_login = False
+
+    token_obj.usado = True
+    db.commit()
+
+    return {"mensagem": "Senha redefinida com sucesso! Você já pode fazer login."}

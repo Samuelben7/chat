@@ -4,18 +4,73 @@ Endpoints para horários de funcionamento, slots e agendamentos.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 import calendar
+import json as _json
+import redis as _redis_lib
 
 from app.database.database import get_db
 from app.models.models import (
     AgendaHorarioFuncionamento, AgendaSlot, AgendaAgendamento, Cliente
 )
 from app.core.dependencies import CurrentUser, EmpresaIdFromToken
+from app.core.config import settings as _settings
 
 router = APIRouter()
+
+# ─── Redis Cache Helper ────────────────────────────────────────────────────────
+
+_CACHE_TTL_CAL   = 300   # 5 min — calendário mensal
+_CACHE_TTL_SLOTS = 120   # 2 min — slots de um dia
+
+def _redis() -> Optional[_redis_lib.Redis]:
+    """Retorna cliente Redis sync, ou None se indisponível."""
+    try:
+        r = _redis_lib.from_url(
+            _settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+        r.ping()
+        return r
+    except Exception:
+        return None
+
+def _cache_get(r, key):
+    if not r:
+        return None
+    try:
+        v = r.get(key)
+        return _json.loads(v) if v else None
+    except Exception:
+        return None
+
+def _cache_set(r, key, data, ttl: int):
+    if not r:
+        return
+    try:
+        r.setex(key, ttl, _json.dumps(data, default=str))
+    except Exception:
+        pass
+
+def _cache_del(r, *keys):
+    if not r:
+        return
+    try:
+        r.delete(*keys)
+    except Exception:
+        pass
+
+def _invalidar_dia(r, empresa_id: int, data_obj: date):
+    """Invalida cache do dia específico e do mês correspondente."""
+    _cache_del(
+        r,
+        f"agenda:slots:{empresa_id}:{data_obj.isoformat()}",
+        f"agenda:cal:{empresa_id}:{data_obj.year}:{data_obj.month}",
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -202,6 +257,12 @@ async def ver_calendario(
     ano: int = Query(..., ge=2024),
 ):
     """Retorna visão do mês com contagem de slots por dia."""
+    r = _redis()
+    cache_key = f"agenda:cal:{empresa_id}:{ano}:{mes}"
+    cached = _cache_get(r, cache_key)
+    if cached is not None:
+        return cached
+
     primeiro_dia = date(ano, mes, 1)
     ultimo_dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
 
@@ -209,7 +270,7 @@ async def ver_calendario(
         AgendaSlot.data,
         func.count(AgendaSlot.id).label('total'),
         func.sum(
-            func.case((AgendaSlot.status == 'disponivel', 1), else_=0)
+            case((AgendaSlot.status == 'disponivel', 1), else_=0)
         ).label('disponiveis'),
         func.sum(AgendaSlot.vagas_ocupadas).label('ocupados'),
     ).filter(
@@ -238,6 +299,7 @@ async def ver_calendario(
         })
         current += timedelta(days=1)
 
+    _cache_set(r, cache_key, resultado, _CACHE_TTL_CAL)
     return resultado
 
 
@@ -253,6 +315,12 @@ async def listar_slots_dia(
         data_alvo = date.fromisoformat(data)
     except ValueError:
         raise HTTPException(status_code=400, detail="Data inválida. Use YYYY-MM-DD")
+
+    r = _redis()
+    cache_key = f"agenda:slots:{empresa_id}:{data}"
+    cached = _cache_get(r, cache_key)
+    if cached is not None:
+        return cached
 
     slots = db.query(AgendaSlot).filter(
         AgendaSlot.empresa_id == empresa_id,
@@ -285,6 +353,7 @@ async def listar_slots_dia(
             "agendamentos": agendamentos,
         })
 
+    _cache_set(r, cache_key, resultado, _CACHE_TTL_SLOTS)
     return resultado
 
 
@@ -321,9 +390,15 @@ async def gerar_slots(
 
     total_criados = 0
     current = data_ini
+    meses_invalidados = set()
     while current <= data_fim:
         total_criados += _gerar_slots_do_dia(empresa_id, current, horarios, db)
+        meses_invalidados.add((current.year, current.month))
         current += timedelta(days=1)
+
+    r = _redis()
+    for (ano_inv, mes_inv) in meses_invalidados:
+        _cache_del(r, f"agenda:cal:{empresa_id}:{ano_inv}:{mes_inv}")
 
     return {"slots_criados": total_criados, "periodo": f"{data_ini} a {data_fim}"}
 
@@ -357,6 +432,7 @@ async def criar_slot_manual(
     db.add(slot)
     db.commit()
     db.refresh(slot)
+    _invalidar_dia(_redis(), empresa_id, data_alvo)
     return {"id": slot.id, "message": "Slot criado"}
 
 
@@ -382,6 +458,7 @@ async def bloquear_slot(
     slot.status = 'bloqueado'
     slot.observacao = dados.get("motivo", slot.observacao)
     db.commit()
+    _invalidar_dia(_redis(), empresa_id, slot.data)
     return {"message": "Slot bloqueado"}
 
 
@@ -402,7 +479,70 @@ async def desbloquear_slot(
 
     slot.status = 'disponivel' if slot.vagas_ocupadas < slot.vagas_total else 'lotado'
     db.commit()
+    _invalidar_dia(_redis(), empresa_id, slot.data)
     return {"message": "Slot desbloqueado"}
+
+
+@router.patch("/agenda/slots/{slot_id}")
+async def atualizar_slot(
+    slot_id: int,
+    dados: dict,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """Atualiza vagas_total de um slot sem deletar agendamentos."""
+    if user.role != "empresa":
+        raise HTTPException(status_code=403, detail="Apenas empresa pode editar slots")
+
+    slot = db.query(AgendaSlot).filter(
+        AgendaSlot.id == slot_id,
+        AgendaSlot.empresa_id == empresa_id
+    ).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="Slot não encontrado")
+
+    novas_vagas = dados.get("vagas_total")
+    if novas_vagas is not None:
+        if novas_vagas < slot.vagas_ocupadas:
+            raise HTTPException(status_code=400, detail=f"Vagas não podem ser menores que os agendamentos já existentes ({slot.vagas_ocupadas})")
+        slot.vagas_total = novas_vagas
+        if slot.vagas_ocupadas >= novas_vagas:
+            slot.status = 'lotado'
+        elif slot.status == 'lotado':
+            slot.status = 'disponivel'
+
+    db.commit()
+    _invalidar_dia(_redis(), empresa_id, slot.data)
+    return {"id": slot.id, "vagas_total": slot.vagas_total, "message": "Slot atualizado"}
+
+
+@router.delete("/agenda/slots")
+async def deletar_slots_dia(
+    data: str = Query(..., description="Data YYYY-MM-DD"),
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
+    db: Session = Depends(get_db)
+):
+    """Remove todos os slots de um dia inteiro."""
+    if user.role != "empresa":
+        raise HTTPException(status_code=403, detail="Apenas empresa pode remover slots")
+
+    try:
+        data_alvo = date.fromisoformat(data)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Data inválida. Use YYYY-MM-DD")
+
+    slots = db.query(AgendaSlot).filter(
+        AgendaSlot.empresa_id == empresa_id,
+        AgendaSlot.data == data_alvo,
+    ).all()
+
+    for slot in slots:
+        db.delete(slot)
+    db.commit()
+    _invalidar_dia(_redis(), empresa_id, data_alvo)
+    return {"message": f"{len(slots)} slots removidos para {data}"}
 
 
 @router.delete("/agenda/slots/{slot_id}")
@@ -423,8 +563,10 @@ async def deletar_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="Slot não encontrado")
 
+    slot_data = slot.data
     db.delete(slot)
     db.commit()
+    _invalidar_dia(_redis(), empresa_id, slot_data)
     return {"message": "Slot removido"}
 
 
@@ -482,12 +624,18 @@ async def criar_agendamento(
     if not slot_id:
         raise HTTPException(status_code=400, detail="slot_id obrigatório")
 
+    # SELECT FOR UPDATE: lock contra race condition
     slot = db.query(AgendaSlot).filter(
         AgendaSlot.id == slot_id,
         AgendaSlot.empresa_id == empresa_id
-    ).first()
+    ).with_for_update().first()
     if not slot:
         raise HTTPException(status_code=404, detail="Slot não encontrado")
+
+    # Validação: não permitir agendamento em data passada
+    if slot.data < date.today():
+        raise HTTPException(status_code=400, detail="Não é possível agendar em datas passadas")
+
     if slot.status == 'bloqueado':
         raise HTTPException(status_code=400, detail="Slot bloqueado")
     if slot.vagas_ocupadas >= slot.vagas_total:
@@ -507,6 +655,19 @@ async def criar_agendamento(
             nome = cliente.nome_completo
             cliente_id = cliente.id
 
+    # Proteção anti-duplicata: mesmo cliente no mesmo slot
+    if whatsapp:
+        agendamento_existente = db.query(AgendaAgendamento).filter(
+            AgendaAgendamento.slot_id == slot_id,
+            AgendaAgendamento.whatsapp_number == whatsapp,
+            AgendaAgendamento.status != 'cancelado',
+        ).first()
+        if agendamento_existente:
+            raise HTTPException(
+                status_code=400,
+                detail="Este cliente já possui um agendamento neste horário"
+            )
+
     ag = AgendaAgendamento(
         empresa_id=empresa_id,
         slot_id=slot_id,
@@ -525,6 +686,7 @@ async def criar_agendamento(
 
     db.commit()
     db.refresh(ag)
+    _invalidar_dia(_redis(), empresa_id, slot.data)
     return {"id": ag.id, "message": "Agendamento criado"}
 
 
@@ -552,14 +714,19 @@ async def atualizar_agendamento(
     if "observacoes" in dados:
         ag.observacoes = dados["observacoes"]
 
-    # Se cancelou, libera vaga
+    # Se cancelou, libera vaga (com lock no slot)
     if novo_status == 'cancelado' and status_anterior != 'cancelado':
-        slot = ag.slot
-        slot.vagas_ocupadas = max(0, slot.vagas_ocupadas - 1)
-        if slot.status == 'lotado':
-            slot.status = 'disponivel'
+        slot = db.query(AgendaSlot).filter(
+            AgendaSlot.id == ag.slot_id
+        ).with_for_update().first()
+        if slot:
+            slot.vagas_ocupadas = max(0, slot.vagas_ocupadas - 1)
+            if slot.status == 'lotado':
+                slot.status = 'disponivel'
 
+    ag_slot_data = ag.slot.data
     db.commit()
+    _invalidar_dia(_redis(), empresa_id, ag_slot_data)
     return {"message": "Agendamento atualizado"}
 
 
@@ -579,11 +746,16 @@ async def deletar_agendamento(
         raise HTTPException(status_code=404, detail="Agendamento não encontrado")
 
     if ag.status != 'cancelado':
-        slot = ag.slot
-        slot.vagas_ocupadas = max(0, slot.vagas_ocupadas - 1)
-        if slot.status == 'lotado':
-            slot.status = 'disponivel'
+        slot = db.query(AgendaSlot).filter(
+            AgendaSlot.id == ag.slot_id
+        ).with_for_update().first()
+        if slot:
+            slot.vagas_ocupadas = max(0, slot.vagas_ocupadas - 1)
+            if slot.status == 'lotado':
+                slot.status = 'disponivel'
 
+    ag_slot_data = ag.slot.data
     db.delete(ag)
     db.commit()
+    _invalidar_dia(_redis(), empresa_id, ag_slot_data)
     return {"message": "Agendamento removido"}

@@ -2,13 +2,14 @@
 P4 - CRM Completo: Tags, Funil de Vendas (Kanban) e dados CRM dos clientes.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from datetime import datetime, timezone
 
 from app.database.database import get_db
-from app.models.models import Cliente, Atendente, CrmTag, CrmClienteTag
+from app.models.models import Cliente, Atendente, CrmTag, CrmClienteTag, MensagemLog
 from app.core.dependencies import CurrentUser, EmpresaIdFromToken
+from app.services.ai_service import analisar_conversa
 
 router = APIRouter()
 
@@ -40,6 +41,8 @@ def _cliente_to_card(c: Cliente) -> dict:
         "observacoes_crm": c.observacoes_crm,
         "foto_url": c.foto_url,
         "data_nascimento": str(c.data_nascimento) if c.data_nascimento else None,
+        "crm_arquivado": c.crm_arquivado or False,
+        "crm_arquivado_em": c.crm_arquivado_em.isoformat() if c.crm_arquivado_em else None,
         "criado_em_crm": c.criado_em_crm.isoformat() if c.criado_em_crm else None,
         "atualizado_em_crm": c.atualizado_em_crm.isoformat() if c.atualizado_em_crm else None,
         "tags": [
@@ -63,12 +66,21 @@ async def listar_funil(
     db: Session = Depends(get_db),
     responsavel_id: Optional[int] = None,
     tag_id: Optional[int] = None,
+    arquivados: bool = False,
+    limit: int = 200,
+    offset: int = 0,
 ):
     """
-    Retorna todos os leads agrupados por etapa do funil.
-    Suporta filtros por responsável e por tag.
+    Retorna leads agrupados por etapa do funil.
+    Suporta filtros por responsável, tag e arquivados.
     """
-    query = db.query(Cliente).filter(Cliente.empresa_id == empresa_id)
+    query = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.crm_arquivado == arquivados,
+    ).options(
+        joinedload(Cliente.crm_tags).joinedload(CrmClienteTag.tag),
+        joinedload(Cliente.responsavel),
+    )
 
     if responsavel_id:
         query = query.filter(Cliente.responsavel_id == responsavel_id)
@@ -77,7 +89,8 @@ async def listar_funil(
         query = query.join(CrmClienteTag, CrmClienteTag.cliente_id == Cliente.id)\
                      .filter(CrmClienteTag.tag_id == tag_id)
 
-    clientes = query.all()
+    total = query.count()
+    clientes = query.order_by(Cliente.atualizado_em_crm.desc()).offset(offset).limit(limit).all()
 
     # Agrupar por etapa
     grupos: dict = {e["id"]: [] for e in ETAPAS_FUNIL}
@@ -90,7 +103,8 @@ async def listar_funil(
     return {
         "etapas": ETAPAS_FUNIL,
         "colunas": grupos,
-        "total": len(clientes),
+        "total": total,
+        "has_more": offset + limit < total,
     }
 
 
@@ -125,6 +139,28 @@ async def mover_etapa(
     cliente.atualizado_em_crm = datetime.now(timezone.utc)
     db.commit()
     return {"message": "Etapa atualizada", "funil_etapa": nova_etapa}
+
+
+@router.patch("/crm/clientes/{cliente_id}/arquivar")
+async def arquivar_cliente(
+    cliente_id: int,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Toggle arquivamento de um lead no CRM."""
+    cliente = db.query(Cliente).filter(
+        Cliente.id == cliente_id,
+        Cliente.empresa_id == empresa_id,
+    ).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    novo_estado = not (cliente.crm_arquivado or False)
+    cliente.crm_arquivado = novo_estado
+    cliente.crm_arquivado_em = datetime.now(timezone.utc) if novo_estado else None
+    db.commit()
+    return {"crm_arquivado": novo_estado, "cliente_id": cliente_id}
 
 
 @router.put("/crm/clientes/{cliente_id}")
@@ -181,7 +217,10 @@ async def detalhe_crm(
     db: Session = Depends(get_db),
 ):
     """Retorna dados CRM completos de um cliente."""
-    cliente = db.query(Cliente).filter(
+    cliente = db.query(Cliente).options(
+        joinedload(Cliente.crm_tags).joinedload(CrmClienteTag.tag),
+        joinedload(Cliente.responsavel),
+    ).filter(
         Cliente.id == cliente_id,
         Cliente.empresa_id == empresa_id
     ).first()
@@ -332,6 +371,65 @@ async def remover_tag_cliente(
     db.delete(vinculo)
     db.commit()
     return {"message": "Tag removida do cliente"}
+
+
+# ─── Análise de IA ────────────────────────────────────────────────────────────
+
+@router.post("/crm/clientes/{cliente_id}/analisar-ia")
+async def analisar_lead_com_ia(
+    cliente_id: int,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """
+    Analisa a conversa do lead com Claude Haiku e retorna sugestões de:
+    - Resumo da conversa
+    - Etapa do funil
+    - Preferências detectadas
+    - Observações CRM
+    - Valor estimado (se mencionado)
+    """
+    cliente = db.query(Cliente).filter(
+        Cliente.id == cliente_id,
+        Cliente.empresa_id == empresa_id,
+    ).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+
+    # Buscar últimas 60 mensagens da conversa
+    mensagens = (
+        db.query(MensagemLog)
+        .filter(
+            MensagemLog.empresa_id == empresa_id,
+            MensagemLog.whatsapp_number == cliente.whatsapp_number,
+        )
+        .order_by(MensagemLog.timestamp.desc())
+        .limit(60)
+        .all()
+    )
+    mensagens = list(reversed(mensagens))  # ordem cronológica
+
+    if not mensagens:
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhuma mensagem encontrada para este lead. Inicie uma conversa primeiro."
+        )
+
+    try:
+        resultado = await analisar_conversa(mensagens, cliente.nome or cliente.whatsapp_number)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na análise de IA: {str(e)}")
+
+    return {
+        "cliente_id": cliente_id,
+        "nome": cliente.nome,
+        "whatsapp_number": cliente.whatsapp_number,
+        "mensagens_analisadas": len(mensagens),
+        "sugestao": resultado,
+    }
 
 
 # ─── Atendentes disponíveis para responsável ──────────────────────────────────

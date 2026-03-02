@@ -33,6 +33,7 @@ class ConversaFilaResponse(BaseModel):
     ultima_mensagem_timestamp: Optional[datetime] = None
     tempo_espera_minutos: Optional[int] = None
     total_mensagens_pendentes: int = 0
+    atendido_por_ia: bool = False
 
     class Config:
         from_attributes = True
@@ -172,7 +173,11 @@ async def listar_fila_atendimento(
             Cliente.empresa_id == empresa_id,
             or_(
                 Atendimento.status == 'bot',
-                Atendimento.status == 'aguardando'
+                Atendimento.status == 'aguardando',
+                and_(
+                    Atendimento.status == 'em_atendimento',
+                    Atendimento.atendido_por_ia == True
+                )
             )
         )
     ).order_by(
@@ -199,7 +204,8 @@ async def listar_fila_atendimento(
             ultima_mensagem=ultima_msg,
             ultima_mensagem_timestamp=ultima_timestamp,
             tempo_espera_minutos=tempo_espera,
-            total_mensagens_pendentes=total_pendentes
+            total_mensagens_pendentes=total_pendentes,
+            atendido_por_ia=getattr(atendimento, 'atendido_por_ia', False) or False,
         ))
 
     return resultado
@@ -678,13 +684,19 @@ async def listar_equipe_online(
         Atendente.empresa_id == empresa_id
     ).all()
 
+    from app.core.config import settings
+    base_url = settings.PUBLIC_BASE_URL.rstrip('/')
+
     resultado = []
     for atendente, total_chats in atendentes:
+        foto_url_full = None
+        if atendente.foto_url:
+            foto_url_full = f"{base_url}/{atendente.foto_url.lstrip('/')}"
         resultado.append(EquipeOnlineResponse(
             id=atendente.id,
             nome_exibicao=atendente.nome_exibicao,
             status=atendente.status,
-            foto_url=atendente.foto_url,
+            foto_url=foto_url_full,
             total_chats_ativos=total_chats
         ))
 
@@ -712,13 +724,19 @@ async def obter_meu_perfil(
             detail="Atendente não encontrado"
         )
 
+    from app.core.config import settings
+    foto_url_full = None
+    if atendente.foto_url:
+        base = settings.PUBLIC_BASE_URL.rstrip('/')
+        foto_url_full = f"{base}/{atendente.foto_url.lstrip('/')}"
+
     return AtendentePerfilResponse(
         id=atendente.id,
         nome_exibicao=atendente.nome_exibicao,
         email=atendente.email,
         cpf=atendente.cpf,
         data_nascimento=atendente.data_nascimento.isoformat() if atendente.data_nascimento else None,
-        foto_url=atendente.foto_url,
+        foto_url=foto_url_full,
         status=atendente.status
     )
 
@@ -756,13 +774,19 @@ async def atualizar_meu_perfil(
     db.commit()
     db.refresh(atendente)
 
+    from app.core.config import settings
+    foto_url_full2 = None
+    if atendente.foto_url:
+        base2 = settings.PUBLIC_BASE_URL.rstrip('/')
+        foto_url_full2 = f"{base2}/{atendente.foto_url.lstrip('/')}"
+
     return AtendentePerfilResponse(
         id=atendente.id,
         nome_exibicao=atendente.nome_exibicao,
         email=atendente.email,
         cpf=atendente.cpf,
         data_nascimento=atendente.data_nascimento.isoformat() if atendente.data_nascimento else None,
-        foto_url=atendente.foto_url,
+        foto_url=foto_url_full2,
         status=atendente.status
     )
 
@@ -834,20 +858,20 @@ async def transferir_para_empresa(
 
 @router.post("/atendente/foto")
 async def upload_foto_perfil(
+    atendente_info: CurrentAtendente,
     file: UploadFile = File(...),
-    authorization: str = Header(...),
     db: Session = Depends(get_db)
 ):
     """
     Upload de foto de perfil do atendente
-    
+
     Aceita: JPG, JPEG, PNG, GIF
     Tamanho máximo: 5MB
     """
     try:
         # Validar atendente
-        atendente_id, empresa_id = validar_permissao_atendente(authorization, db)
-        
+        atendente_id, empresa_id = atendente_info
+
         # Validar tipo de arquivo
         allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif"]
         if file.content_type not in allowed_types:
@@ -898,10 +922,12 @@ async def upload_foto_perfil(
         atendente.foto_url = str(file_path)
         db.commit()
         
+        from app.core.config import settings
+        base_url = settings.PUBLIC_BASE_URL.rstrip('/')
         return {
             "sucesso": True,
             "mensagem": "Foto atualizada com sucesso",
-            "foto_url": f"/uploads/avatars/{unique_filename}"
+            "foto_url": f"{base_url}/uploads/avatars/{unique_filename}"
         }
         
     except HTTPException:
@@ -913,7 +939,7 @@ async def upload_foto_perfil(
 
 @router.delete("/atendente/foto")
 async def remover_foto_perfil(
-    authorization: str = Header(...),
+    atendente_info: CurrentAtendente,
     db: Session = Depends(get_db)
 ):
     """
@@ -921,12 +947,12 @@ async def remover_foto_perfil(
     """
     try:
         # Validar atendente
-        atendente_id, empresa_id = validar_permissao_atendente(authorization, db)
-        
+        atendente_id, empresa_id = atendente_info
+
         atendente = db.query(Atendente).filter(Atendente.id == atendente_id).first()
         if not atendente:
             raise HTTPException(status_code=404, detail="Atendente não encontrado")
-        
+
         # Deletar arquivo físico
         if atendente.foto_url:
             file_path = Path(atendente.foto_url)
