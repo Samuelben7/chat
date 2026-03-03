@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 # Configuração de segurança
 SECRET_KEY = "your-secret-key-change-in-production-2026"  # TODO: Mover para variável de ambiente
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 horas
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365  # 1 ano
 
 
 def hash_senha(senha: str) -> str:
