@@ -186,6 +186,25 @@ async def whatsapp_status_dev(
     }
 
 
+async def _fetch_phone_info(phone_number_id: str, token: str) -> dict | None:
+    """Busca qualidade e status do número na Meta Graph API. Retorna None se falhar."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"https://graph.facebook.com/v20.0/{phone_number_id}",
+                params={
+                    "fields": "quality_rating,account_mode,display_phone_number,verified_name,code_verification_status",
+                    "access_token": token,
+                },
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception as e:
+        print(f"[WARN] Meta phone info error: {e}")
+    return None
+
+
 @router.get("/perfil", response_model=DevPerfilResponse)
 async def perfil_dev(
     dev_id: CurrentDev = None,
@@ -195,6 +214,15 @@ async def perfil_dev(
     dev = db.query(DevUsuario).filter(DevUsuario.id == dev_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="Dev nao encontrado")
+
+    # Buscar info do número WhatsApp da Meta API (se conectado)
+    phone_info = None
+    if dev.phone_number_id:
+        # Tenta token do dev primeiro, depois platform token como fallback
+        for token in filter(None, [dev.whatsapp_token, settings.META_PLATFORM_TOKEN]):
+            phone_info = await _fetch_phone_info(dev.phone_number_id, token)
+            if phone_info:
+                break
 
     return DevPerfilResponse(
         id=dev.id,
@@ -210,6 +238,11 @@ async def perfil_dev(
         waba_id=dev.waba_id,
         webhook_url=dev.webhook_url,
         criado_em=dev.criado_em,
+        phone_quality_rating=phone_info.get("quality_rating") if phone_info else None,
+        phone_account_mode=phone_info.get("account_mode") if phone_info else None,
+        phone_display_number=phone_info.get("display_phone_number") if phone_info else None,
+        phone_verified_name=phone_info.get("verified_name") if phone_info else None,
+        phone_verified=phone_info.get("code_verification_status") == "VERIFIED" if phone_info else None,
     )
 
 

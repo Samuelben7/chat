@@ -7,9 +7,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 from typing import Optional, List
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 import calendar
 import json as _json
 import redis as _redis_lib
+
+_TZ_BR = ZoneInfo('America/Sao_Paulo')
+
+def _hoje() -> date:
+    """Retorna a data atual no fuso de São Paulo (UTC-3)."""
+    return datetime.now(_TZ_BR).date()
 
 from app.database.database import get_db
 from app.models.models import (
@@ -633,7 +640,7 @@ async def criar_agendamento(
         raise HTTPException(status_code=404, detail="Slot não encontrado")
 
     # Validação: não permitir agendamento em data passada
-    if slot.data < date.today():
+    if slot.data < _hoje():
         raise HTTPException(status_code=400, detail="Não é possível agendar em datas passadas")
 
     if slot.status == 'bloqueado':

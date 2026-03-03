@@ -640,8 +640,10 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     try:
                         from app.models.models import AgendaSlot, AgendaHorarioFuncionamento
                         from datetime import date, timezone
+                        from zoneinfo import ZoneInfo as _ZI
+                        from datetime import datetime as _dt
 
-                        hoje = date.today()
+                        hoje = _dt.now(_ZI('America/Sao_Paulo')).date()
                         limite = hoje + timedelta(days=14)
                         DIAS_PT = ['Segunda-feira', 'Terça-feira', 'Quarta-feira',
                                    'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
@@ -848,11 +850,12 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         if agendamento_data and agendamento_hora:
                             try:
                                 from app.models.models import AgendaSlot, AgendaAgendamento
-                                from datetime import date as _date
+                                from datetime import date as _date, datetime as _dtt
+                                from zoneinfo import ZoneInfo as _ZI2
 
-                                # Cenário 4: bloquear datas no passado
+                                # Cenário 4: bloquear datas no passado (fuso Brasil)
                                 _data_ag = _date.fromisoformat(agendamento_data)
-                                if _data_ag < _date.today():
+                                if _data_ag < _dtt.now(_ZI2('America/Sao_Paulo')).date():
                                     print(f"⚠️ Data no passado ignorada: {agendamento_data} para {from_number}")
                                 else:
                                     # Cenário 3: SELECT FOR UPDATE = lock de row contra race condition

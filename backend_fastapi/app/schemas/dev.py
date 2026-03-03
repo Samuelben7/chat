@@ -99,6 +99,12 @@ class DevPerfilResponse(BaseModel):
     waba_id: Optional[str]
     webhook_url: Optional[str]
     criado_em: datetime
+    # Info do número WhatsApp (buscado da Meta API)
+    phone_quality_rating: Optional[str] = None   # GREEN, YELLOW, RED, UNKNOWN
+    phone_account_mode: Optional[str] = None     # SANDBOX, LIVE
+    phone_display_number: Optional[str] = None
+    phone_verified_name: Optional[str] = None
+    phone_verified: Optional[bool] = None
 
     class Config:
         from_attributes = True

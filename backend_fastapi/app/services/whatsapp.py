@@ -463,7 +463,15 @@ class WhatsAppService:
         Atualiza campos do perfil WhatsApp Business.
         Campos aceitos: about, address, description, email, vertical, websites, profile_picture_handle
         """
-        payload = {"messaging_product": "whatsapp", **campos}
+        # Meta rejeita strings vazias — filtrar campos com valor vazio
+        campos_limpos = {
+            k: v for k, v in campos.items()
+            if v is not None and v != "" and v != []
+        }
+        if not campos_limpos:
+            return True  # Nada para atualizar
+
+        payload = {"messaging_product": "whatsapp", **campos_limpos}
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/whatsapp_business_profile",
@@ -471,7 +479,14 @@ class WhatsAppService:
                 headers=self.headers,
                 timeout=15.0,
             )
-            response.raise_for_status()
+            if not response.is_success:
+                # Inclui body da Meta no erro para facilitar debug
+                try:
+                    meta_error = response.json()
+                    detail = meta_error.get("error", {}).get("message", response.text)
+                except Exception:
+                    detail = response.text
+                raise Exception(f"Meta API {response.status_code}: {detail}")
             return response.json().get("success", False)
 
     async def upload_profile_photo(self, image_bytes: bytes, mime_type: str) -> str:

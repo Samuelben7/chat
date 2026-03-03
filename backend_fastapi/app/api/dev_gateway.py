@@ -4,7 +4,7 @@ Critico para performance do API Gateway.
 """
 from fastapi import APIRouter, HTTPException, Header, Depends, Response
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 import bcrypt
 import json
 import logging
@@ -82,7 +82,7 @@ async def validar_token(
         api_key_id = matched_key.id
 
         # Atualizar ultima utilizacao
-        matched_key.ultima_utilizacao = datetime.utcnow()
+        matched_key.ultima_utilizacao = datetime.now(timezone.utc)
         db.commit()
 
         # 4. Cache no Redis
@@ -106,7 +106,7 @@ async def validar_token(
         raise HTTPException(status_code=403, detail="Account blocked. Please renew your subscription.")
 
     if dev.status == "trial":
-        if dev.trial_fim and dev.trial_fim < datetime.utcnow():
+        if dev.trial_fim and dev.trial_fim < datetime.now(timezone.utc):
             raise HTTPException(status_code=403, detail="Trial expired. Please subscribe to continue.")
 
     # 6. Rate limiting (Redis sliding window)
@@ -134,7 +134,7 @@ async def validar_token(
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
     # 7. Verificar limite mensal de mensagens
-    month_key = f"gateway:msgs:{dev_id}:{datetime.utcnow().strftime('%Y-%m')}"
+    month_key = f"gateway:msgs:{dev_id}:{datetime.now(timezone.utc).strftime('%Y-%m')}"
     monthly_count = int(redis_cache.client.get(month_key) or 0)
 
     # Limite dinamico: WABA real (Meta) > plano > padrao
