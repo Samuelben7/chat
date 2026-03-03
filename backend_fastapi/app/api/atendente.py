@@ -180,7 +180,7 @@ async def listar_fila_atendimento(
                 )
             )
         )
-    ).order_by(
+    ).distinct().order_by(
         Atendimento.iniciado_em.asc()
     ).all()
 
