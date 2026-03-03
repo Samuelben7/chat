@@ -2,6 +2,7 @@ import httpx
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from app.models.models import Empresa
+from app.core.config import settings
 
 
 class WhatsAppService:
@@ -16,8 +17,13 @@ class WhatsAppService:
         """
         self.empresa = empresa
         self.base_url = f"https://graph.facebook.com/v25.0/{empresa.phone_number_id}"
+        
+        # Prioriza o token da plataforma (Tech Provider) se disponível.
+        # Se não, usa o token específico da empresa (fallback).
+        token = settings.META_PLATFORM_TOKEN or empresa.whatsapp_token
+
         self.headers = {
-            "Authorization": f"Bearer {empresa.whatsapp_token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
 
