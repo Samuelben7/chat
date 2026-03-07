@@ -193,6 +193,17 @@ const EnvioMassaPage: React.FC = () => {
   // Mensagem mode
   const [mensagemTexto, setMensagemTexto] = useState('');
   const [contatosSelecionados, setContatosSelecionados] = useState<Set<string>>(new Set());
+  const [tipoMensagem, setTipoMensagem] = useState<'text' | 'image' | 'button' | 'list'>('text');
+  const [msgImgUrl, setMsgImgUrl] = useState('');
+  const [msgHeader, setMsgHeader] = useState('');
+  const [msgFooter, setMsgFooter] = useState('');
+  const [msgHeaderImgUrl, setMsgHeaderImgUrl] = useState('');
+  const [msgBotoes, setMsgBotoes] = useState([{ title: '' }, { title: '' }]);
+  const [msgListaBtnText, setMsgListaBtnText] = useState('Ver opções');
+  const [msgListaSecoes, setMsgListaSecoes] = useState([{
+    title: 'Opções',
+    rows: [{ id: 'row_1', title: '', description: '' }, { id: 'row_2', title: '', description: '' }],
+  }]);
 
   // Template mode
   const [templateSelecionado, setTemplateSelecionado] = useState<Template | null>(null);
@@ -208,6 +219,30 @@ const EnvioMassaPage: React.FC = () => {
   const [contatosSelecionadosTpl, setContatosSelecionadosTpl] = useState<Set<string>>(new Set());
   const [filtro24hTpl, setFiltro24hTpl] = useState(false);
   const [buscaContato, setBuscaContato] = useState('');
+
+  // Recarregar janela 24h separadamente (usuario pode ter mandado msg depois de abrir a pagina)
+  const recarregarJanela = useCallback(async () => {
+    try {
+      const [janela24h, contatosRes] = await Promise.all([
+        api.get('/mensagens/contatos-janela-24h').catch(() => ({ data: { contatos: [] } })),
+        api.get('/contatos?per_page=100').catch(() => ({ data: { contatos: [] } })),
+      ]);
+      const janela = janela24h.data.contatos || [];
+      setContatos24h(janela);
+      const janela24hNums = new Set(janela.map((c: Contato24h) => c.whatsapp_number));
+      const todosContatos: ContatoSistema[] = (contatosRes.data?.contatos || contatosRes.data || []).map((c: any) => ({
+        whatsapp_number: c.whatsapp_number,
+        nome: c.nome,
+        na_janela_24h: janela24hNums.has(c.whatsapp_number),
+      }));
+      janela.forEach((c: Contato24h) => {
+        if (!todosContatos.find((x: ContatoSistema) => x.whatsapp_number === c.whatsapp_number)) {
+          todosContatos.push({ whatsapp_number: c.whatsapp_number, nome: c.nome, na_janela_24h: true });
+        }
+      });
+      setContatosSistema(todosContatos);
+    } catch (e) { console.error(e); }
+  }, []);
 
   // Load data
   useEffect(() => {
@@ -303,12 +338,33 @@ const EnvioMassaPage: React.FC = () => {
     if (!mensagemTexto.trim() || contatosSelecionados.size === 0) return;
     setEnviando(true);
     try {
-      const res = await api.post('/mensagens/envio-massa', {
+      const payload: any = {
         mensagem: mensagemTexto,
-        tipo: 'text',
+        tipo: tipoMensagem,
         whatsapp_numbers: Array.from(contatosSelecionados),
         apenas_janela_24h: true,
-      });
+      };
+      if (tipoMensagem === 'image' && msgImgUrl) {
+        payload.media_url = msgImgUrl;
+      } else if (tipoMensagem === 'button') {
+        payload.buttons = msgBotoes
+          .filter(b => b.title.trim())
+          .map((b, i) => ({ id: `btn_${i + 1}`, title: b.title.trim() }));
+        if (msgHeader) payload.header = msgHeader;
+        if (msgFooter) payload.footer = msgFooter;
+        if (msgHeaderImgUrl) payload.header_image_url = msgHeaderImgUrl;
+      } else if (tipoMensagem === 'list') {
+        payload.button_text = msgListaBtnText || 'Ver opções';
+        payload.sections = msgListaSecoes.map(s => ({
+          title: s.title,
+          rows: s.rows
+            .filter(r => r.title.trim())
+            .map(r => ({ id: r.id, title: r.title, description: r.description || undefined })),
+        })).filter(s => s.rows.length > 0);
+        if (msgHeader) payload.header = msgHeader;
+        if (msgFooter) payload.footer = msgFooter;
+      }
+      const res = await api.post('/mensagens/envio-massa', payload);
       setResultado(res.data);
       setStep(99);
     } catch (e: any) {
@@ -453,11 +509,24 @@ const EnvioMassaPage: React.FC = () => {
       if (step === 1) return (
         <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-black text-xs uppercase tracking-widest opacity-50" style={{ color: colors.textPrimary }}>Contatos Ativos (24h)</h3>
-            <button onClick={() => setContatosSelecionados(contatosSelecionados.size === contatos24h.length ? new Set() : new Set(contatos24h.map(c => c.whatsapp_number)))} className="text-[9px] font-black uppercase bg-blue-600/10 text-blue-500 px-4 py-2 rounded-xl border border-blue-500/20">
-              {contatosSelecionados.size === contatos24h.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
-            </button>
+            <div className="flex items-center gap-3">
+              <h3 className="font-black text-xs uppercase tracking-widest opacity-50" style={{ color: colors.textPrimary }}>Contatos Ativos (24h)</h3>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-lg" style={{ background: `${colors.green}20`, color: colors.green }}>{contatos24h.length}</span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={recarregarJanela} className="text-[9px] font-black uppercase px-3 py-2 rounded-xl border" style={{ color: colors.textPrimary, borderColor: colors.border, background: colors.cardBg }}>↻ Atualizar</button>
+              <button onClick={() => setContatosSelecionados(contatosSelecionados.size === contatos24h.length && contatos24h.length > 0 ? new Set() : new Set(contatos24h.map(c => c.whatsapp_number)))} className="text-[9px] font-black uppercase bg-blue-600/10 text-blue-500 px-4 py-2 rounded-xl border border-blue-500/20">
+                {contatosSelecionados.size === contatos24h.length && contatos24h.length > 0 ? 'Desmarcar Todos' : 'Selecionar Todos'}
+              </button>
+            </div>
           </div>
+          {contatos24h.length === 0 && (
+            <div className="text-center py-12 opacity-40" style={{ color: colors.textPrimary }}>
+              <div className="text-4xl mb-3">⏳</div>
+              <p className="text-xs font-black uppercase tracking-widest">Nenhum contato na janela de 24h</p>
+              <p className="text-[10px] mt-1">Quando um cliente te mandar mensagem, ele aparece aqui</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto no-scrollbar p-1">
             {contatos24h.map(c => (
@@ -497,38 +566,154 @@ const EnvioMassaPage: React.FC = () => {
         </div>
       );
 
-      if (step === 2) return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-right-4 duration-500">
-          <div className="lg:col-span-7 space-y-8">
-            <section className="rounded-[2.5rem] shadow-2xl border p-8 space-y-6" style={{ background: colors.cardBg, borderColor: colors.border }}>
-              <div className="space-y-4">
-                <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Conteúdo da Mensagem</label>
-                <textarea 
-                  value={mensagemTexto} 
-                  onChange={e => setMensagemTexto(e.target.value)} 
-                  rows={8} 
-                  className="w-full p-6 rounded-[2rem] outline-none border transition-all leading-relaxed shadow-inner" 
-                  style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
-                  placeholder="Escreva sua mensagem aqui..."
-                />
-                <div className="flex justify-between items-center px-2">
-                  <span className="text-[9px] font-black uppercase opacity-30" style={{ color: colors.textPrimary }}>{mensagemTexto.length} caracteres</span>
-                  <p className="text-[9px] font-black uppercase text-blue-500 tracking-tighter">Janela de 24h ativa ✓</p>
-                </div>
+      if (step === 2) {
+        const tiposMsg = [
+          { id: 'text', icon: '💬', label: 'Texto' },
+          { id: 'image', icon: '🖼️', label: 'Imagem' },
+          { id: 'button', icon: '🔘', label: 'Botões' },
+          { id: 'list', icon: '📋', label: 'Lista' },
+        ] as const;
+
+        const botoesFiltrados = msgBotoes.filter(b => b.title.trim());
+        const podeEnviar = mensagemTexto.trim() &&
+          (tipoMensagem !== 'button' || botoesFiltrados.length > 0) &&
+          (tipoMensagem !== 'list' || msgListaSecoes.some(s => s.rows.some(r => r.title.trim())));
+
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-right-4 duration-500">
+            <div className="lg:col-span-7 space-y-6">
+
+              {/* Seletor de tipo */}
+              <div className="grid grid-cols-4 gap-2 p-1.5 rounded-2xl" style={{ background: theme === 'yoursystem' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.05)' }}>
+                {tiposMsg.map(t => (
+                  <button key={t.id} onClick={() => setTipoMensagem(t.id)} className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1 ${tipoMensagem === t.id ? 'shadow-xl text-white scale-105' : 'opacity-40'}`} style={{ background: tipoMensagem === t.id ? colors.primary : 'transparent' }}>
+                    <span className="text-base">{t.icon}</span>
+                    {t.label}
+                  </button>
+                ))}
               </div>
-            </section>
-            <div className="flex justify-between">
-              <button onClick={() => setStep(1)} className="px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest opacity-50 hover:bg-black/5 transition-all" style={{ color: colors.textPrimary }}>← Voltar</button>
-              <button onClick={enviarMensagem} disabled={enviando || !mensagemTexto.trim()} className="px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-30" style={{ background: colors.gradientButton }}>{enviando ? 'Enviando...' : `Disparar para ${contatosSelecionados.size} Contatos`}</button>
+
+              <section className="rounded-[2.5rem] shadow-2xl border p-8 space-y-5" style={{ background: colors.cardBg, borderColor: colors.border }}>
+
+                {/* Texto do body (todos os tipos) */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>
+                    {tipoMensagem === 'image' ? 'Legenda da Imagem' : 'Corpo da Mensagem'}
+                  </label>
+                  <textarea value={mensagemTexto} onChange={e => setMensagemTexto(e.target.value)} rows={tipoMensagem === 'text' ? 8 : 4}
+                    className="w-full p-5 rounded-[1.5rem] outline-none border transition-all leading-relaxed"
+                    style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
+                    placeholder={tipoMensagem === 'image' ? 'Legenda opcional da imagem...' : 'Texto principal da mensagem...'}
+                  />
+                </div>
+
+                {/* IMAGEM */}
+                {tipoMensagem === 'image' && (
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>URL da Imagem</label>
+                    <input value={msgImgUrl} onChange={e => setMsgImgUrl(e.target.value)} className="w-full px-5 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="https://..." />
+                  </div>
+                )}
+
+                {/* BOTÕES */}
+                {tipoMensagem === 'button' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Cabeçalho (opcional)</label>
+                        <input value={msgHeader} onChange={e => setMsgHeader(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Título acima..." />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Rodapé (opcional)</label>
+                        <input value={msgFooter} onChange={e => setMsgFooter(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Texto abaixo..." />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Imagem no cabeçalho (URL, opcional)</label>
+                      <input value={msgHeaderImgUrl} onChange={e => setMsgHeaderImgUrl(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="https://... (substitui texto do cabeçalho)" />
+                    </div>
+                    <div className="space-y-3">
+                      <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Botões (máx. 3)</label>
+                      {msgBotoes.slice(0, 3).map((btn, i) => (
+                        <div key={i} className="flex gap-2 items-center">
+                          <span className="text-[10px] font-black opacity-30 w-4" style={{ color: colors.textPrimary }}>{i + 1}</span>
+                          <input value={btn.title} onChange={e => { const nb = [...msgBotoes]; nb[i] = { title: e.target.value }; setMsgBotoes(nb); }} className="flex-1 px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder={`Texto do botão ${i + 1}...`} maxLength={20} />
+                          <span className="text-[9px] opacity-20" style={{ color: colors.textPrimary }}>{btn.title.length}/20</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* LISTA */}
+                {tipoMensagem === 'list' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Cabeçalho (opcional)</label>
+                        <input value={msgHeader} onChange={e => setMsgHeader(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Título acima..." />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Texto do botão lista</label>
+                        <input value={msgListaBtnText} onChange={e => setMsgListaBtnText(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Ver opções" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Rodapé (opcional)</label>
+                      <input value={msgFooter} onChange={e => setMsgFooter(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Texto abaixo..." />
+                    </div>
+                    {msgListaSecoes.map((secao, si) => (
+                      <div key={si} className="border rounded-2xl p-4 space-y-3" style={{ borderColor: colors.border }}>
+                        <input value={secao.title} onChange={e => { const ns = [...msgListaSecoes]; ns[si] = { ...ns[si], title: e.target.value }; setMsgListaSecoes(ns); }} className="w-full px-4 py-2 rounded-xl border outline-none text-xs font-bold" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Nome da seção..." />
+                        {secao.rows.map((row, ri) => (
+                          <div key={ri} className="flex gap-2">
+                            <input value={row.title} onChange={e => { const ns = [...msgListaSecoes]; ns[si].rows[ri] = { ...ns[si].rows[ri], title: e.target.value }; setMsgListaSecoes(ns); }} className="flex-1 px-3 py-2 rounded-xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder={`Item ${ri + 1}...`} />
+                            <input value={row.description} onChange={e => { const ns = [...msgListaSecoes]; ns[si].rows[ri] = { ...ns[si].rows[ri], description: e.target.value }; setMsgListaSecoes(ns); }} className="flex-1 px-3 py-2 rounded-xl border outline-none text-xs opacity-60" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="Descrição (opcional)..." />
+                          </div>
+                        ))}
+                        <button onClick={() => { const ns = [...msgListaSecoes]; ns[si].rows.push({ id: `row_${Date.now()}`, title: '', description: '' }); setMsgListaSecoes(ns); }} className="text-[9px] font-black uppercase opacity-40 hover:opacity-70 transition-opacity" style={{ color: colors.primary }}>+ Adicionar item</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              </section>
+
+              <div className="flex justify-between">
+                <button onClick={() => setStep(1)} className="px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest opacity-50 hover:bg-black/5 transition-all" style={{ color: colors.textPrimary }}>← Voltar</button>
+                <button onClick={enviarMensagem} disabled={enviando || !podeEnviar} className="px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-30" style={{ background: colors.gradientButton }}>
+                  {enviando ? 'Enviando...' : `Disparar para ${contatosSelecionados.size} Contatos`}
+                </button>
+              </div>
+            </div>
+
+            {/* Preview */}
+            <div className="lg:col-span-5">
+              <div className="sticky top-10">
+                {tipoMensagem === 'text' && <MessagePreview body={mensagemTexto} />}
+                {tipoMensagem === 'image' && <MessagePreview body={mensagemTexto} headerUrl={msgImgUrl} />}
+                {tipoMensagem === 'button' && (
+                  <MessagePreview
+                    body={mensagemTexto}
+                    header={msgHeaderImgUrl ? undefined : msgHeader}
+                    headerUrl={msgHeaderImgUrl || undefined}
+                    footer={msgFooter}
+                    buttons={msgBotoes.filter(b => b.title.trim()).map(b => b.title)}
+                  />
+                )}
+                {tipoMensagem === 'list' && (
+                  <MessagePreview
+                    body={mensagemTexto}
+                    header={msgHeader}
+                    footer={msgFooter}
+                    buttons={[msgListaBtnText || 'Ver opções']}
+                  />
+                )}
+              </div>
             </div>
           </div>
-          <div className="lg:col-span-5">
-            <div className="sticky top-10">
-              <MessagePreview body={mensagemTexto} />
-            </div>
-          </div>
-        </div>
-      );
+        );
+      }
     }
 
     if (modo === 'template') {
@@ -718,7 +903,7 @@ const EnvioMassaPage: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col transition-all duration-500" style={{ background: colors.dashboardBg, minHeight: '100vh' }}>
+    <div className="flex flex-col transition-all duration-500 overflow-hidden" style={{ background: colors.dashboardBg, height: '100vh' }}>
       {/* Background Orbs para Tema Dark */}
       {theme === 'yoursystem' && (
         <>
@@ -745,7 +930,7 @@ const EnvioMassaPage: React.FC = () => {
       </header>
 
       {/* Main Container */}
-      <div className="flex-1 no-scrollbar relative z-10" style={{ background: colors.dashboardBg }}>
+      <div className="flex-1 overflow-y-auto no-scrollbar relative z-10" style={{ background: colors.dashboardBg }}>
         <div className="max-w-5xl mx-auto p-8 lg:p-12">
           {step !== 99 && renderSteps()}
           {step !== 99 && renderModeTabs()}

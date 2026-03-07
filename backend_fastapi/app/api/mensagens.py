@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 import uuid
@@ -303,11 +303,19 @@ async def marcar_todas_lidas(
 
 class EnvioMassaRequest(BaseModel):
     mensagem: str
-    tipo: str = "text"  # text, image, video, document
+    tipo: str = "text"  # text, image, video, document, button, list
     media_url: Optional[str] = None
-    whatsapp_numbers: Optional[List[str]] = None  # Lista manual de números
-    lista_id: Optional[int] = None  # ID de lista de contatos
-    apenas_janela_24h: bool = True  # Filtrar apenas contatos dentro da janela
+    whatsapp_numbers: Optional[List[str]] = None
+    lista_id: Optional[int] = None
+    apenas_janela_24h: bool = True
+    # Para tipo "button" e "image_button"
+    header: Optional[str] = None
+    footer: Optional[str] = None
+    header_image_url: Optional[str] = None
+    buttons: Optional[List[Dict[str, str]]] = None  # [{"id": "btn_1", "title": "Texto"}]
+    # Para tipo "list"
+    button_text: Optional[str] = None  # Texto do botão que abre a lista
+    sections: Optional[List[Dict]] = None  # [{"title": "Seção", "rows": [{"id":"1","title":"Item"}]}]
 
 
 class ContatoJanela24h(BaseModel):
@@ -384,6 +392,7 @@ async def enviar_mensagem_massa(
         try:
             if dados.tipo == "text":
                 msg_id = await whatsapp.send_text_message(number, dados.mensagem)
+
             elif dados.tipo in ("image", "video", "document") and dados.media_url:
                 msg_id = await whatsapp.send_media_message(
                     to=number,
@@ -391,6 +400,30 @@ async def enviar_mensagem_massa(
                     media_url=dados.media_url,
                     caption=dados.mensagem if dados.mensagem else None,
                 )
+
+            elif dados.tipo == "image" and not dados.media_url:
+                msg_id = await whatsapp.send_text_message(number, dados.mensagem)
+
+            elif dados.tipo == "button" and dados.buttons:
+                msg_id = await whatsapp.send_button_message(
+                    to=number,
+                    body_text=dados.mensagem,
+                    buttons=dados.buttons,
+                    header=dados.header,
+                    footer=dados.footer,
+                    header_image_url=dados.header_image_url,
+                )
+
+            elif dados.tipo == "list" and dados.sections:
+                msg_id = await whatsapp.send_list_message(
+                    to=number,
+                    body_text=dados.mensagem,
+                    button_text=dados.button_text or "Ver opções",
+                    sections=dados.sections,
+                    header=dados.header,
+                    footer=dados.footer,
+                )
+
             else:
                 msg_id = await whatsapp.send_text_message(number, dados.mensagem)
 
