@@ -126,6 +126,80 @@ async def enviar_mensagem(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/mensagens/contatos-janela-24h")
+async def listar_contatos_janela_24h(
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """
+    Lista contatos dentro da janela de 24h (Meta policy).
+    A janela se renova a cada mensagem RECEBIDA do cliente.
+    Usa Redis como fonte primaria (fast path); fallback para DB.
+    """
+    from app.core.redis_client import redis_cache
+
+    # --- Fast path: Redis ---
+    contatos = redis_cache.get_janela_24h(empresa_id)
+
+    if contatos:
+        phones_sem_nome = [c["whatsapp_number"] for c in contatos if not c.get("nome")]
+        if phones_sem_nome:
+            clientes_map = {
+                c.whatsapp_number: c.nome_completo
+                for c in db.query(Cliente).filter(
+                    Cliente.empresa_id == empresa_id,
+                    Cliente.whatsapp_number.in_(phones_sem_nome)
+                ).all()
+            }
+            for c in contatos:
+                if not c.get("nome") and c["whatsapp_number"] in clientes_map:
+                    c["nome"] = clientes_map[c["whatsapp_number"]]
+        return {"total": len(contatos), "contatos": contatos}
+
+    # --- Fallback: DB (Redis indisponivel ou sem dados) ---
+    limite_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    subq = db.query(
+        MensagemLog.whatsapp_number,
+        func.max(MensagemLog.timestamp).label('ultima_recebida')
+    ).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.direcao == 'recebida',
+    ).group_by(MensagemLog.whatsapp_number).subquery()
+
+    resultados = db.query(
+        subq.c.whatsapp_number,
+        subq.c.ultima_recebida,
+    ).filter(
+        subq.c.ultima_recebida >= limite_24h,
+    ).order_by(subq.c.ultima_recebida.desc()).all()
+
+    phones = [r.whatsapp_number for r in resultados]
+    clientes_map = {
+        c.whatsapp_number: c.nome_completo
+        for c in db.query(Cliente).filter(
+            Cliente.empresa_id == empresa_id,
+            Cliente.whatsapp_number.in_(phones)
+        ).all()
+    } if phones else {}
+
+    contatos = []
+    for row in resultados:
+        minutos = max(0, int(
+            (row.ultima_recebida + timedelta(hours=24) - datetime.now(timezone.utc)).total_seconds() / 60
+        )) if row.ultima_recebida else 0
+        contatos.append({
+            "whatsapp_number": row.whatsapp_number,
+            "nome": clientes_map.get(row.whatsapp_number),
+            "ultima_mensagem_recebida": row.ultima_recebida.isoformat() if row.ultima_recebida else None,
+            "dentro_janela": True,
+            "minutos_restantes": minutos,
+        })
+
+    return {"total": len(contatos), "contatos": contatos}
+
+
 @router.get("/mensagens/{whatsapp_number}", response_model=List[MensagemResponse])
 async def listar_mensagens(
     whatsapp_number: str,
@@ -241,82 +315,6 @@ class ContatoJanela24h(BaseModel):
     nome: Optional[str] = None
     ultima_mensagem_recebida: Optional[str] = None
     dentro_janela: bool = True
-
-
-@router.get("/mensagens/contatos-janela-24h")
-async def listar_contatos_janela_24h(
-    user: CurrentUser,
-    empresa_id: EmpresaIdFromToken,
-    db: Session = Depends(get_db),
-):
-    """
-    Lista contatos dentro da janela de 24h (Meta policy).
-    A janela se renova a cada mensagem RECEBIDA do cliente.
-    Usa Redis como fonte primaria (fast path); fallback para DB.
-    """
-    from app.core.redis_client import redis_cache
-
-    # --- Fast path: Redis ---
-    contatos = redis_cache.get_janela_24h(empresa_id)
-
-    if contatos:
-        # Enriquecer com nome do DB caso Redis nao tenha (contatos antigos antes do Redis)
-        phones_sem_nome = [c["whatsapp_number"] for c in contatos if not c.get("nome")]
-        if phones_sem_nome:
-            clientes_map = {
-                c.whatsapp_number: c.nome_completo
-                for c in db.query(Cliente).filter(
-                    Cliente.empresa_id == empresa_id,
-                    Cliente.whatsapp_number.in_(phones_sem_nome)
-                ).all()
-            }
-            for c in contatos:
-                if not c.get("nome") and c["whatsapp_number"] in clientes_map:
-                    c["nome"] = clientes_map[c["whatsapp_number"]]
-        return {"total": len(contatos), "contatos": contatos}
-
-    # --- Fallback: DB (Redis indisponivel ou sem dados) ---
-    limite_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-
-    subq = db.query(
-        MensagemLog.whatsapp_number,
-        func.max(MensagemLog.timestamp).label('ultima_recebida')
-    ).filter(
-        MensagemLog.empresa_id == empresa_id,
-        MensagemLog.direcao == 'recebida',
-    ).group_by(MensagemLog.whatsapp_number).subquery()
-
-    resultados = db.query(
-        subq.c.whatsapp_number,
-        subq.c.ultima_recebida,
-    ).filter(
-        subq.c.ultima_recebida >= limite_24h,
-    ).order_by(subq.c.ultima_recebida.desc()).all()
-
-    # Buscar todos os nomes de uma vez
-    phones = [r.whatsapp_number for r in resultados]
-    clientes_map = {
-        c.whatsapp_number: c.nome_completo
-        for c in db.query(Cliente).filter(
-            Cliente.empresa_id == empresa_id,
-            Cliente.whatsapp_number.in_(phones)
-        ).all()
-    } if phones else {}
-
-    contatos = []
-    for row in resultados:
-        minutos = max(0, int(
-            (row.ultima_recebida + timedelta(hours=24) - datetime.now(timezone.utc)).total_seconds() / 60
-        )) if row.ultima_recebida else 0
-        contatos.append({
-            "whatsapp_number": row.whatsapp_number,
-            "nome": clientes_map.get(row.whatsapp_number),
-            "ultima_mensagem_recebida": row.ultima_recebida.isoformat() if row.ultima_recebida else None,
-            "dentro_janela": True,
-            "minutos_restantes": minutos,
-        })
-
-    return {"total": len(contatos), "contatos": contatos}
 
 
 @router.post("/mensagens/envio-massa")
