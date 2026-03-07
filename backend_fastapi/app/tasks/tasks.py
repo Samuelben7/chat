@@ -1476,14 +1476,21 @@ def enviar_template_massa_task(
                 if coupon_code and "coupon_code" not in pv:
                     pv["coupon_code"] = coupon_code
 
-                # Build components
+                # Auto-derive media_url from template header_image_path if not explicitly provided
+                effective_media_url = media_url
+                if not effective_media_url and template.header_image_path:
+                    from app.core.config import settings
+                    effective_media_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{template.header_image_path}"
+
+                # Build components (always, not just when pv is non-empty)
                 send_components = None
-                if pv and template.components:
-                    send_components = TemplateService.build_send_components(
+                if template.components:
+                    built = TemplateService.build_send_components(
                         template_components=template.components,
                         parameter_values=pv,
-                        media_url=media_url,
+                        media_url=effective_media_url,
                     )
+                    send_components = built if built else None
 
                 # Enviar (async → sync para Celery)
                 message_id = asyncio.run(service.send_template_message(

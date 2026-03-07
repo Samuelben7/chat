@@ -197,6 +197,10 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     root.style.setProperty('--text-primary', colors.textPrimary);
     root.style.setProperty('--text-secondary', colors.textSecondary);
     root.style.setProperty('--gradient-2', colors.gradient);
+
+    // Garantir que body/html nunca mostrem fundo branco ao scrollar
+    document.body.style.backgroundColor = colors.dashboardBg;
+    document.documentElement.style.backgroundColor = colors.dashboardBg;
   }, [theme, colors]);
 
   const toggleTheme = () => {
