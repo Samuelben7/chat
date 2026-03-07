@@ -1,0 +1,127 @@
+.aniversarios-container {
+  background: var(--theme-card-bg);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--theme-card-shadow);
+  border: 1px solid var(--theme-border);
+}
+
+.aniversarios-title {
+  margin: 0 0 20px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+
+.aniversarios-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--theme-text-secondary);
+  font-size: 14px;
+}
+
+.aniversarios-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aniversariante-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border-radius: 10px;
+  transition: background-color 0.2s;
+  border: 1px solid var(--theme-border);
+}
+
+.aniversariante-card:hover {
+  background: var(--theme-hover-bg);
+}
+
+.aniversariante-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  border-radius: 12px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.data-dia {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.data-mes {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.aniversariante-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.aniversariante-nome {
+  font-weight: 600;
+  color: var(--theme-text-primary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aniversariante-tipo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--theme-text-secondary);
+}
+
+.tipo-icon {
+  font-size: 14px;
+}
+
+.btn-whatsapp {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--theme-primary);
+  border-radius: 50%;
+  font-size: 18px;
+  text-decoration: none;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.btn-whatsapp:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 640px) {
+  .aniversariante-nome {
+    font-size: 14px;
+  }
+
+  .aniversariante-data {
+    width: 48px;
+    height: 48px;
+  }
+
+  .data-dia {
+    font-size: 18px;
+  }
+}

@@ -1,0 +1,161 @@
+.equipe-container {
+  background: var(--theme-card-bg);
+  border-radius: 12px;
+  box-shadow: var(--theme-card-shadow);
+  margin-top: 24px;
+}
+
+.equipe-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.equipe-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+
+.equipe-count {
+  background: var(--theme-hover-bg);
+  color: var(--theme-primary);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.equipe-loading {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--theme-text-secondary);
+  font-size: 14px;
+}
+
+.equipe-lista {
+  padding: 12px 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.membro-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.membro-item:hover {
+  background-color: var(--theme-hover-bg);
+}
+
+.membro-avatar {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.membro-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--theme-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--theme-card-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  box-shadow: 0 0 0 2px var(--theme-card-bg);
+}
+
+.membro-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.membro-nome {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.membro-status {
+  font-size: 13px;
+  color: var(--theme-text-secondary);
+}
+
+.membro-status.status-online {
+  color: var(--theme-status-online);
+}
+
+.chats-count {
+  color: var(--theme-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .equipe-container {
+    margin-top: 16px;
+  }
+
+  .equipe-lista {
+    max-height: 250px;
+  }
+
+  .membro-avatar {
+    width: 38px;
+    height: 38px;
+  }
+
+  .avatar-placeholder {
+    font-size: 14px;
+  }
+
+  .status-indicator {
+    width: 12px;
+    height: 12px;
+    font-size: 8px;
+  }
+
+  .membro-nome {
+    font-size: 14px;
+  }
+
+  .membro-status {
+    font-size: 12px;
+  }
+}

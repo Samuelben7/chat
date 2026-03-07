@@ -1,0 +1,208 @@
+/* Estilos das bolhas de mensagem - Themeable */
+
+.message-bubble {
+  width: 100%;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: flex-end;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-bubble.received {
+  justify-content: flex-start;
+}
+
+.message-bubble.sent {
+  justify-content: flex-end;
+}
+
+/* Avatar ao lado da mensagem */
+.message-avatar {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  margin-right: 6px;
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+
+.message-avatar-right {
+  margin-right: 0;
+  margin-left: 10px;
+}
+
+/* Wrapper para pontinha + conteudo */
+.message-content-wrapper {
+  position: relative;
+  max-width: 70%;
+  min-width: 80px;
+}
+
+.message-content {
+  position: relative;
+  padding: 8px 9px 8px 9px;
+  border-radius: 12px;
+  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+  word-wrap: break-word;
+  word-break: break-word;
+  background-color: var(--theme-message-received);
+  overflow: hidden;
+}
+
+.message-content.dark-bubble {
+  border-radius: 14px;
+}
+
+.message-bubble.received .message-content {
+  background-color: var(--theme-message-received);
+}
+
+.message-bubble.received .message-content.dark-bubble {
+  border-bottom-left-radius: 4px;
+}
+
+.message-bubble.sent .message-content {
+  background-color: var(--theme-message-sent);
+}
+
+.message-bubble.sent .message-content.dark-bubble {
+  border-bottom-right-radius: 4px;
+}
+
+/* Pontinha do balao - esquerda (recebido) */
+.bubble-tail-left {
+  position: absolute;
+  bottom: 0;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-top: 0 solid transparent;
+  border-bottom: 8px solid transparent;
+  border-right: 8px solid;
+  z-index: 1;
+}
+
+/* Pontinha do balao - direita (enviado) */
+.bubble-tail-right {
+  position: absolute;
+  bottom: 0;
+  right: -6px;
+  width: 0;
+  height: 0;
+  border-top: 0 solid transparent;
+  border-bottom: 8px solid transparent;
+  border-left: 8px solid;
+  z-index: 1;
+}
+
+.message-text {
+  font-size: 14.2px;
+  line-height: 19px;
+  color: var(--theme-text-primary);
+  margin: 0;
+  white-space: pre-wrap;
+  padding-right: 50px;
+}
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  position: absolute;
+  bottom: 4px;
+  right: 7px;
+  min-width: 55px;
+}
+
+.message-time {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--theme-text-secondary);
+  opacity: 0.7;
+}
+
+.message-bubble.sent .message-content.dark-bubble .message-text {
+  color: #ffffff;
+}
+
+.message-bubble.sent .message-content.dark-bubble .message-time {
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 1;
+}
+
+.message-status {
+  display: flex;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.message-status svg {
+  width: 16px;
+  height: 16px;
+  color: #53BDEB;
+}
+
+.message-status.unread svg {
+  color: var(--theme-text-secondary);
+  opacity: 0.6;
+}
+
+/* Audio message */
+.audio-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 200px;
+}
+
+.audio-play-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.audio-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  height: 32px;
+}
+
+.audio-bar {
+  width: 3px;
+  border-radius: 2px;
+  transition: height 0.1s ease, background-color 0.2s ease;
+}
+
+.audio-duration {
+  font-size: 11px;
+  flex-shrink: 0;
+  min-width: 32px;
+  text-align: right;
+}

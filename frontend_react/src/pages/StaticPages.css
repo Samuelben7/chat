@@ -1,0 +1,156 @@
+.static-page {
+  min-height: 100vh;
+  background-color: #0a0e27;
+  padding: 60px 20px;
+}
+
+.static-page .container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #00d4ff;
+  text-decoration: none;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 30px;
+  transition: all 0.3s ease;
+}
+
+.back-link:hover {
+  transform: translateX(-5px);
+  gap: 15px;
+  color: #7b2cbf;
+}
+
+.page-header {
+  text-align: center;
+  margin-bottom: 50px;
+}
+
+.page-header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.page-content {
+  max-width: 800px;
+  margin: 0 auto;
+  background: #1a1f3a;
+  padding: 40px;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  line-height: 1.8;
+}
+
+.page-content p {
+  color: #b8c1ec;
+  margin-bottom: 15px;
+  font-size: 16px;
+}
+
+.page-content strong {
+  color: #ffffff;
+}
+
+.page-content h2 {
+  color: #00d4ff;
+  margin-top: 30px;
+  margin-bottom: 15px;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.page-content ul {
+  list-style: none;
+  margin: 20px 0;
+  padding-left: 20px;
+}
+
+.page-content ul li {
+  color: #b8c1ec;
+  margin-bottom: 10px;
+  padding-left: 20px;
+  position: relative;
+  font-size: 16px;
+}
+
+.page-content ul li::before {
+  content: "\2192";
+  position: absolute;
+  left: 0;
+  color: #00d4ff;
+}
+
+.page-content a {
+  color: #00d4ff;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.3s ease;
+}
+
+.page-content a:hover {
+  color: #7b2cbf;
+  text-decoration: underline;
+}
+
+.email-highlight {
+  background: linear-gradient(135deg, #00d4ff 0%, #7b2cbf 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 30px 0;
+}
+
+.email-highlight a {
+  color: #ffffff !important;
+}
+
+.warning-box {
+  background: rgba(255, 107, 107, 0.1);
+  border: 2px solid #ff6b6b;
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 30px;
+}
+
+.warning-box p {
+  color: #ff6b6b !important;
+  margin: 0;
+  font-size: 15px;
+}
+
+.warning-box strong {
+  color: #ff6b6b;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .static-page {
+    padding: 40px 15px;
+  }
+
+  .page-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .page-content {
+    padding: 25px 20px;
+  }
+
+  .page-content h2 {
+    font-size: 1.2rem;
+  }
+}
