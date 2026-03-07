@@ -127,32 +127,12 @@ const MessagePreview: React.FC<{
                 </div>
 
                 {buttons && buttons.length > 0 && (
-                  <div className="border-t" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                    {/* 2 botões lado a lado quando <=2, senão empilhar */}
-                    {buttons.length <= 2 ? (
-                      <div className="flex divide-x" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                        {buttons.map((btn, i) => (
-                          <button key={i} className="flex-1 py-2.5 text-[11px] font-black flex items-center justify-center gap-1 hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
-                            {btn}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col divide-y" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                        {/* Primeiros 2 lado a lado */}
-                        <div className="flex divide-x" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                          {buttons.slice(0, 2).map((btn, i) => (
-                            <button key={i} className="flex-1 py-2.5 text-[11px] font-black flex items-center justify-center hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
-                              {btn}
-                            </button>
-                          ))}
-                        </div>
-                        {/* Terceiro sozinho */}
-                        <button className="w-full py-2.5 text-[11px] font-black flex items-center justify-center hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
-                          {buttons[2]}
-                        </button>
-                      </div>
-                    )}
+                  <div className="flex flex-col border-t divide-y" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                    {buttons.map((btn, i) => (
+                      <button key={i} className="w-full py-2.5 text-[11px] font-black uppercase tracking-tight flex items-center justify-center gap-2 hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
+                        {btn}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>

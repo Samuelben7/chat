@@ -373,6 +373,8 @@ async def deletar_opcao(
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+# WhatsApp API só aceita jpeg e png — converter os demais
+_WA_INCOMPATIBLE_TYPES = {"image/webp", "image/gif"}
 
 
 @router.post("/upload-imagem")
@@ -380,11 +382,12 @@ async def upload_imagem_bot(
     empresa_id: CurrentEmpresa,
     file: UploadFile = File(...),
 ):
-    """Upload de imagem para uso nos nós do Bot Builder."""
+    """Upload de imagem para uso nos nós do Bot Builder.
+    WebP e GIF são automaticamente convertidos para JPEG (exigência da Meta API)."""
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tipo de arquivo não permitido. Use JPEG, PNG, WebP ou GIF."
+            detail="Tipo de arquivo não permitido. Use JPEG ou PNG."
         )
 
     content = await file.read()
@@ -394,10 +397,20 @@ async def upload_imagem_bot(
             detail="Arquivo muito grande. Máximo 5MB."
         )
 
-    # Gerar nome único
-    ext = Path(file.filename).suffix if file.filename else ".jpg"
-    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+    # Converter webp/gif para JPEG (Meta API não aceita esses formatos)
+    if file.content_type in _WA_INCOMPATIBLE_TYPES:
+        import io
+        from PIL import Image as _PILImage
+        img = _PILImage.open(io.BytesIO(content)).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        content = buf.getvalue()
         ext = ".jpg"
+    else:
+        ext = Path(file.filename).suffix if file.filename else ".jpg"
+        if ext not in {".jpg", ".jpeg", ".png"}:
+            ext = ".jpg"
+
     filename = f"{uuid.uuid4().hex}{ext}"
 
     upload_dir = Path("uploads/bot-builder")
