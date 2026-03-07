@@ -5,6 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import ThemeToggle from '../components/ThemeToggle/ThemeToggle';
 import api from '../services/api';
 import whatsappBg from '../images/PLANO-DE-FUNDO-WHATS-APP.png';
+import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -126,12 +127,32 @@ const MessagePreview: React.FC<{
                 </div>
 
                 {buttons && buttons.length > 0 && (
-                  <div className="flex flex-col border-t divide-y" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                    {buttons.map((btn, i) => (
-                      <button key={i} className="w-full py-2.5 text-[11px] font-black uppercase tracking-tight flex items-center justify-center gap-2 hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
-                        {btn}
-                      </button>
-                    ))}
+                  <div className="border-t" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                    {/* 2 botões lado a lado quando <=2, senão empilhar */}
+                    {buttons.length <= 2 ? (
+                      <div className="flex divide-x" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                        {buttons.map((btn, i) => (
+                          <button key={i} className="flex-1 py-2.5 text-[11px] font-black flex items-center justify-center gap-1 hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
+                            {btn}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col divide-y" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                        {/* Primeiros 2 lado a lado */}
+                        <div className="flex divide-x" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                          {buttons.slice(0, 2).map((btn, i) => (
+                            <button key={i} className="flex-1 py-2.5 text-[11px] font-black flex items-center justify-center hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
+                              {btn}
+                            </button>
+                          ))}
+                        </div>
+                        {/* Terceiro sozinho */}
+                        <button className="w-full py-2.5 text-[11px] font-black flex items-center justify-center hover:bg-black/5 transition-colors" style={{ color: colors.primary }}>
+                          {buttons[2]}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -204,6 +225,31 @@ const EnvioMassaPage: React.FC = () => {
     title: 'Opções',
     rows: [{ id: 'row_1', title: '', description: '' }, { id: 'row_2', title: '', description: '' }],
   }]);
+  const [uploadingImg, setUploadingImg] = useState<'main' | 'header' | null>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const imgInputRef = useRef<HTMLInputElement>(null);
+  const headerImgInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const SERVER_BASE = (process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1').replace('/api/v1', '');
+
+  const uploadImagem = async (file: File, tipo: 'main' | 'header') => {
+    setUploadingImg(tipo);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await api.post('/bot-builder/upload-imagem', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const fullUrl = `${SERVER_BASE}${res.data.url}`;
+      if (tipo === 'main') setMsgImgUrl(fullUrl);
+      else setMsgHeaderImgUrl(fullUrl);
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Erro no upload da imagem');
+    } finally {
+      setUploadingImg(null);
+    }
+  };
 
   // Template mode
   const [templateSelecionado, setTemplateSelecionado] = useState<Template | null>(null);
@@ -597,21 +643,67 @@ const EnvioMassaPage: React.FC = () => {
 
                 {/* Texto do body (todos os tipos) */}
                 <div className="space-y-2">
-                  <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>
-                    {tipoMensagem === 'image' ? 'Legenda da Imagem' : 'Corpo da Mensagem'}
-                  </label>
-                  <textarea value={mensagemTexto} onChange={e => setMensagemTexto(e.target.value)} rows={tipoMensagem === 'text' ? 8 : 4}
-                    className="w-full p-5 rounded-[1.5rem] outline-none border transition-all leading-relaxed"
-                    style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
-                    placeholder={tipoMensagem === 'image' ? 'Legenda opcional da imagem...' : 'Texto principal da mensagem...'}
-                  />
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>
+                      {tipoMensagem === 'image' ? 'Legenda da Imagem' : 'Corpo da Mensagem'}
+                    </label>
+                    <button onClick={() => setShowEmoji(v => !v)} className="text-lg hover:scale-110 transition-transform" title="Emojis">😊</button>
+                  </div>
+                  <div className="relative">
+                    <textarea
+                      ref={textareaRef}
+                      value={mensagemTexto}
+                      onChange={e => setMensagemTexto(e.target.value)}
+                      rows={tipoMensagem === 'text' ? 8 : 4}
+                      className="w-full p-5 rounded-[1.5rem] outline-none border transition-all leading-relaxed"
+                      style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
+                      placeholder={tipoMensagem === 'image' ? 'Legenda opcional da imagem...' : 'Texto principal da mensagem...'}
+                    />
+                    {showEmoji && (
+                      <div className="absolute right-0 top-full mt-2 z-50 shadow-2xl rounded-2xl overflow-hidden">
+                        <EmojiPicker
+                          theme={theme === 'yoursystem' ? Theme.DARK : Theme.LIGHT}
+                          onEmojiClick={(emojiData: EmojiClickData) => {
+                            const ta = textareaRef.current;
+                            if (ta) {
+                              const start = ta.selectionStart ?? mensagemTexto.length;
+                              const end = ta.selectionEnd ?? mensagemTexto.length;
+                              const next = mensagemTexto.slice(0, start) + emojiData.emoji + mensagemTexto.slice(end);
+                              setMensagemTexto(next);
+                              setTimeout(() => { ta.focus(); ta.setSelectionRange(start + emojiData.emoji.length, start + emojiData.emoji.length); }, 10);
+                            } else {
+                              setMensagemTexto(v => v + emojiData.emoji);
+                            }
+                            setShowEmoji(false);
+                          }}
+                          lazyLoadEmojis
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[9px] font-black uppercase opacity-30" style={{ color: colors.textPrimary }}>{mensagemTexto.length} caracteres</span>
+                    <p className="text-[9px] font-black uppercase text-blue-500 tracking-tighter">Janela de 24h ativa ✓</p>
+                  </div>
                 </div>
 
                 {/* IMAGEM */}
                 {tipoMensagem === 'image' && (
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>URL da Imagem</label>
-                    <input value={msgImgUrl} onChange={e => setMsgImgUrl(e.target.value)} className="w-full px-5 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="https://..." />
+                  <div className="space-y-3">
+                    <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Imagem</label>
+                    <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && uploadImagem(e.target.files[0], 'main')} />
+                    {msgImgUrl ? (
+                      <div className="relative rounded-2xl overflow-hidden border" style={{ borderColor: colors.border }}>
+                        <img src={msgImgUrl} alt="preview" className="w-full h-36 object-cover" />
+                        <button onClick={() => { setMsgImgUrl(''); if (imgInputRef.current) imgInputRef.current.value = ''; }} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white text-xs flex items-center justify-center hover:bg-red-500 transition-colors">✕</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => imgInputRef.current?.click()} disabled={uploadingImg === 'main'} className="w-full py-8 rounded-2xl border-2 border-dashed flex flex-col items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-40" style={{ borderColor: `${colors.primary}44` }}>
+                        <span className="text-3xl">{uploadingImg === 'main' ? '⏳' : '📷'}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: colors.primary }}>{uploadingImg === 'main' ? 'Enviando...' : 'Clique para selecionar imagem'}</span>
+                        <span className="text-[9px] opacity-40" style={{ color: colors.textPrimary }}>JPG, PNG, WebP — máx. 5MB</span>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -629,8 +721,19 @@ const EnvioMassaPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Imagem no cabeçalho (URL, opcional)</label>
-                      <input value={msgHeaderImgUrl} onChange={e => setMsgHeaderImgUrl(e.target.value)} className="w-full px-4 py-3 rounded-2xl border outline-none text-xs" style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }} placeholder="https://... (substitui texto do cabeçalho)" />
+                      <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Imagem no cabeçalho (opcional, substitui texto)</label>
+                      <input ref={headerImgInputRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && uploadImagem(e.target.files[0], 'header')} />
+                      {msgHeaderImgUrl ? (
+                        <div className="relative rounded-2xl overflow-hidden border" style={{ borderColor: colors.border }}>
+                          <img src={msgHeaderImgUrl} alt="header" className="w-full h-24 object-cover" />
+                          <button onClick={() => { setMsgHeaderImgUrl(''); if (headerImgInputRef.current) headerImgInputRef.current.value = ''; }} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center hover:bg-red-500 transition-colors">✕</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => headerImgInputRef.current?.click()} disabled={uploadingImg === 'header'} className="w-full py-4 rounded-2xl border-2 border-dashed flex items-center justify-center gap-3 hover:opacity-80 transition-opacity disabled:opacity-40" style={{ borderColor: `${colors.primary}44` }}>
+                          <span className="text-xl">{uploadingImg === 'header' ? '⏳' : '🖼️'}</span>
+                          <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: colors.primary }}>{uploadingImg === 'header' ? 'Enviando...' : 'Upload de imagem para o cabeçalho'}</span>
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-3">
                       <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Botões (máx. 3)</label>

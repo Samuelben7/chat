@@ -407,6 +407,13 @@ async def enviar_template(
 
 def _numeros_na_janela_24h(db: Session, empresa_id: int, numbers: list) -> set:
     """Retorna conjunto de números que enviaram mensagem nas últimas 24h."""
+    from app.core.redis_client import redis_cache
+    # Fast path: Redis
+    redis_contatos = redis_cache.get_janela_24h(empresa_id)
+    if redis_contatos:
+        redis_set = {c["whatsapp_number"] for c in redis_contatos}
+        return {n for n in numbers if n in redis_set}
+    # Fallback: DB
     limite = datetime.now(timezone.utc) - timedelta(hours=24)
     rows = db.query(MensagemLog.whatsapp_number).filter(
         MensagemLog.empresa_id == empresa_id,
@@ -415,6 +422,94 @@ def _numeros_na_janela_24h(db: Session, empresa_id: int, numbers: list) -> set:
         MensagemLog.whatsapp_number.in_(numbers),
     ).distinct().all()
     return {r[0] for r in rows}
+
+
+async def _send_template_as_interactive(
+    whatsapp_svc,
+    number: str,
+    template,
+    pv: dict,
+    media_url: Optional[str],
+    public_base_url: str,
+):
+    """
+    Envia o equivalente interativo de um template para contatos na janela 24h.
+    Monta botões, imagem e texto a partir dos componentes do template.
+    Retorna (message_id, tipo_mensagem, conteudo).
+    """
+    import re as _re
+
+    header_text = None
+    header_image_url = None
+    body_text = ""
+    footer_text = None
+    buttons = []
+
+    for comp in (template.components or []):
+        ctype = comp.get("type", "").upper()
+
+        if ctype == "HEADER":
+            fmt = comp.get("format", "TEXT").upper()
+            if fmt == "IMAGE":
+                # Usar media_url fornecido, ou header_image_path do template, ou exemplo do comp
+                if media_url:
+                    header_image_url = media_url
+                elif template.header_image_path:
+                    header_image_url = f"{public_base_url.rstrip('/')}{template.header_image_path}"
+                else:
+                    handle = comp.get("example", {}).get("header_handle", [])
+                    header_image_url = handle[0] if handle else None
+            elif fmt == "TEXT":
+                header_text = comp.get("text", "")
+                # Substituir params no header
+                for k, v in pv.items():
+                    header_text = header_text.replace("{{" + str(k) + "}}", str(v))
+
+        elif ctype == "BODY":
+            body_text = comp.get("text", "")
+            for k, v in pv.items():
+                body_text = body_text.replace("{{" + str(k) + "}}", str(v))
+
+        elif ctype == "FOOTER":
+            footer_text = comp.get("text", "")
+
+        elif ctype == "BUTTONS":
+            for i, btn in enumerate(comp.get("buttons", [])):
+                btn_type = btn.get("type", "").upper()
+                if btn_type == "QUICK_REPLY":
+                    buttons.append({"id": f"btn_{i+1}", "title": btn.get("text", "")[:20]})
+                elif btn_type == "PHONE_NUMBER":
+                    buttons.append({"id": f"btn_{i+1}", "title": btn.get("text", "Ligar")[:20]})
+                # URL buttons: append as quick reply with same text (no URL behavior in free msgs)
+                elif btn_type == "URL":
+                    buttons.append({"id": f"btn_{i+1}", "title": btn.get("text", "Ver mais")[:20]})
+                if len(buttons) >= 3:
+                    break
+
+    to_normalized = f"+{number}" if not number.startswith("+") else number
+
+    if buttons:
+        message_id = await whatsapp_svc.send_button_message(
+            to=to_normalized,
+            body_text=body_text or "Mensagem da empresa",
+            buttons=buttons,
+            header=header_text,
+            footer=footer_text,
+            header_image_url=header_image_url,
+        )
+        return message_id, "button", body_text
+
+    if header_image_url:
+        caption = body_text or None
+        message_id = await whatsapp_svc.send_image_message(
+            to=to_normalized,
+            image_url=header_image_url,
+            caption=caption,
+        )
+        return message_id, "image", body_text
+
+    message_id = await whatsapp_svc.send_text_message(to_normalized, body_text or "Mensagem da empresa")
+    return message_id, "text", body_text
 
 
 # ========== SEND BULK ==========
@@ -575,30 +670,28 @@ async def enviar_template_massa(
             if dados.coupon_code and "coupon_code" not in pv:
                 pv["coupon_code"] = dados.coupon_code
 
-            # Contato na janela 24h: enviar como mensagem normal (grátis, sem template)
+            # Contato na janela 24h: enviar como mensagem interativa grátis (idêntica ao template)
             if number in numeros_janela_24h:
-                # Substituir variáveis no body text
-                msg_text = body_template_text
-                for param_key, param_val in pv.items():
-                    msg_text = msg_text.replace("{{" + str(param_key) + "}}", str(param_val))
-                if not msg_text:
-                    msg_text = body_template_text or "Mensagem da empresa"
-
-                to_normalized = f"+{number}" if not number.startswith("+") else number
-                message_id = await whatsapp_svc.send_text_message(to_normalized, msg_text)
-                # Log
+                from app.core.config import settings as _settings
+                message_id, tipo_msg, conteudo_msg = await _send_template_as_interactive(
+                    whatsapp_svc=whatsapp_svc,
+                    number=number,
+                    template=template,
+                    pv=pv,
+                    media_url=dados.media_url,
+                    public_base_url=_settings.PUBLIC_BASE_URL,
+                )
                 from app.models.models import MensagemLog as _MsgLog
-                log = _MsgLog(
+                db.add(_MsgLog(
                     empresa_id=empresa_id,
                     whatsapp_number=number,
                     message_id=message_id,
                     direcao="enviada",
-                    tipo_mensagem="text",
-                    conteudo=msg_text,
+                    tipo_mensagem=tipo_msg,
+                    conteudo=conteudo_msg,
                     dados_extras={"envio_massa": True, "template_name": template.name, "via_janela_24h": True},
                     timestamp=datetime.now(timezone.utc),
-                )
-                db.add(log)
+                ))
                 resultados.append(TemplateSendResponse(
                     success=True, message_id=message_id, whatsapp_number=number
                 ))

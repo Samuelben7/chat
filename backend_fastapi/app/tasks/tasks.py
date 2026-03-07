@@ -1464,6 +1464,13 @@ def enviar_template_massa_task(
         total = len(numbers)
         rate_limit_interval = 1.0 / 80.0  # ~12.5ms entre mensagens
 
+        # Checar janela 24h via Redis (contatos que recebem mensagem interativa grátis)
+        janela_contatos = redis_cache.get_janela_24h(empresa_id)
+        janela_set = {c["whatsapp_number"] for c in janela_contatos} if janela_contatos else set()
+
+        from app.core.config import settings as _cfg
+        whatsapp_svc_for_free = None
+
         for idx, number in enumerate(numbers):
             try:
                 # Construir parameter_values personalizado
@@ -1479,9 +1486,41 @@ def enviar_template_massa_task(
                 # Auto-derive media_url from template header_image_path if not explicitly provided
                 effective_media_url = media_url
                 if not effective_media_url and template.header_image_path:
-                    from app.core.config import settings
-                    effective_media_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}{template.header_image_path}"
+                    effective_media_url = f"{_cfg.PUBLIC_BASE_URL.rstrip('/')}{template.header_image_path}"
 
+                # Contato na janela 24h → enviar como mensagem interativa grátis
+                if number in janela_set:
+                    from app.api.templates import _send_template_as_interactive
+                    from app.services.whatsapp import WhatsAppService as _WA
+                    if whatsapp_svc_for_free is None:
+                        whatsapp_svc_for_free = _WA(empresa)
+                    message_id, tipo_msg, conteudo_msg = asyncio.run(
+                        _send_template_as_interactive(
+                            whatsapp_svc=whatsapp_svc_for_free,
+                            number=number,
+                            template=template,
+                            pv=pv,
+                            media_url=effective_media_url,
+                            public_base_url=_cfg.PUBLIC_BASE_URL,
+                        )
+                    )
+                    log = MensagemLog(
+                        empresa_id=empresa_id,
+                        whatsapp_number=number,
+                        message_id=message_id,
+                        direcao="enviada",
+                        tipo_mensagem=tipo_msg,
+                        conteudo=conteudo_msg,
+                        dados_extras={"envio_massa": True, "template_name": template.name, "via_janela_24h": True},
+                    )
+                    db.add(log)
+                    db.commit()
+                    enviados += 1
+                    resultados.append({"success": True, "number": number, "message_id": message_id})
+                    time.sleep(rate_limit_interval)
+                    continue
+
+                # Fora da janela → enviar como template (cobrado)
                 # Build components (always, not just when pv is non-empty)
                 send_components = None
                 if template.components:
