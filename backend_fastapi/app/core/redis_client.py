@@ -347,6 +347,72 @@ class RedisClient:
         """Invalida cache de atendentes"""
         self.delete(f"atendentes:empresa:{empresa_id}")
 
+    # ========== JANELA 24H (WhatsApp Conversation Window) ==========
+
+    def update_janela_24h(self, empresa_id: int, whatsapp_number: str, nome: str = ""):
+        """
+        Registra/renova contato na janela de 24h.
+        Chamado a cada mensagem RECEBIDA do cliente.
+        TTL = 86400s (24h) — expira automaticamente ao fim da janela.
+        """
+        if not self.is_available:
+            return False
+        try:
+            import time
+            now = time.time()
+            zset_key = f"janela24h:emp:{empresa_id}"
+            info_key = f"janela24h:info:emp:{empresa_id}:{whatsapp_number}"
+            # Sorted set: score = timestamp da ultima mensagem
+            self.client.zadd(zset_key, {whatsapp_number: now})
+            # Info do contato com TTL de 24h
+            self.client.setex(
+                info_key,
+                86400,
+                json.dumps({"nome": nome or "", "ts": now}, default=str)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Erro update_janela_24h emp={empresa_id} num={whatsapp_number}: {e}")
+            return False
+
+    def get_janela_24h(self, empresa_id: int) -> list:
+        """
+        Retorna todos os contatos ativos na janela de 24h para uma empresa.
+        Usa ZSET com score=timestamp — contatos com score < (now-86400) sao removidos.
+        """
+        if not self.is_available:
+            return []
+        try:
+            import time
+            now = time.time()
+            limite = now - 86400
+            zset_key = f"janela24h:emp:{empresa_id}"
+            # Limpar entradas expiradas do ZSET
+            self.client.zremrangebyscore(zset_key, '-inf', limite)
+            # Buscar todos dentro da janela com scores
+            members = self.client.zrangebyscore(zset_key, limite, '+inf', withscores=True)
+            contatos = []
+            for member, score in members:
+                phone = member.decode() if isinstance(member, bytes) else member
+                info_key = f"janela24h:info:emp:{empresa_id}:{phone}"
+                info_raw = self.client.get(info_key)
+                info = json.loads(info_raw) if info_raw else {}
+                minutos_restantes = max(0, int((score + 86400 - now) / 60))
+                ultima = datetime.utcfromtimestamp(score).isoformat()
+                contatos.append({
+                    "whatsapp_number": phone,
+                    "nome": info.get("nome") or None,
+                    "ultima_mensagem_recebida": ultima,
+                    "minutos_restantes": minutos_restantes,
+                    "dentro_janela": True,
+                })
+            # Mais recentes primeiro
+            contatos.sort(key=lambda x: x["minutos_restantes"], reverse=True)
+            return contatos
+        except Exception as e:
+            logger.error(f"Erro get_janela_24h emp={empresa_id}: {e}")
+            return []
+
 
 # Singleton global
 redis_cache = RedisClient()

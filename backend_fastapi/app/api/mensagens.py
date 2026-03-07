@@ -250,12 +250,34 @@ async def listar_contatos_janela_24h(
     db: Session = Depends(get_db),
 ):
     """
-    Lista contatos que enviaram mensagem nas últimas 24h (dentro da janela da Meta).
-    Esses contatos podem receber mensagens livres (não-template).
+    Lista contatos dentro da janela de 24h (Meta policy).
+    A janela se renova a cada mensagem RECEBIDA do cliente.
+    Usa Redis como fonte primaria (fast path); fallback para DB.
     """
+    from app.core.redis_client import redis_cache
+
+    # --- Fast path: Redis ---
+    contatos = redis_cache.get_janela_24h(empresa_id)
+
+    if contatos:
+        # Enriquecer com nome do DB caso Redis nao tenha (contatos antigos antes do Redis)
+        phones_sem_nome = [c["whatsapp_number"] for c in contatos if not c.get("nome")]
+        if phones_sem_nome:
+            clientes_map = {
+                c.whatsapp_number: c.nome_completo
+                for c in db.query(Cliente).filter(
+                    Cliente.empresa_id == empresa_id,
+                    Cliente.whatsapp_number.in_(phones_sem_nome)
+                ).all()
+            }
+            for c in contatos:
+                if not c.get("nome") and c["whatsapp_number"] in clientes_map:
+                    c["nome"] = clientes_map[c["whatsapp_number"]]
+        return {"total": len(contatos), "contatos": contatos}
+
+    # --- Fallback: DB (Redis indisponivel ou sem dados) ---
     limite_24h = datetime.now(timezone.utc) - timedelta(hours=24)
 
-    # Subquery: última mensagem RECEBIDA por número
     subq = db.query(
         MensagemLog.whatsapp_number,
         func.max(MensagemLog.timestamp).label('ultima_recebida')
@@ -264,7 +286,6 @@ async def listar_contatos_janela_24h(
         MensagemLog.direcao == 'recebida',
     ).group_by(MensagemLog.whatsapp_number).subquery()
 
-    # Filtrar apenas os que a última mensagem recebida foi < 24h atrás
     resultados = db.query(
         subq.c.whatsapp_number,
         subq.c.ultima_recebida,
@@ -272,26 +293,30 @@ async def listar_contatos_janela_24h(
         subq.c.ultima_recebida >= limite_24h,
     ).order_by(subq.c.ultima_recebida.desc()).all()
 
+    # Buscar todos os nomes de uma vez
+    phones = [r.whatsapp_number for r in resultados]
+    clientes_map = {
+        c.whatsapp_number: c.nome_completo
+        for c in db.query(Cliente).filter(
+            Cliente.empresa_id == empresa_id,
+            Cliente.whatsapp_number.in_(phones)
+        ).all()
+    } if phones else {}
+
     contatos = []
     for row in resultados:
-        # Buscar nome do cliente
-        cliente = db.query(Cliente).filter(
-            Cliente.empresa_id == empresa_id,
-            Cliente.whatsapp_number == row.whatsapp_number
-        ).first()
-
+        minutos = max(0, int(
+            (row.ultima_recebida + timedelta(hours=24) - datetime.now(timezone.utc)).total_seconds() / 60
+        )) if row.ultima_recebida else 0
         contatos.append({
             "whatsapp_number": row.whatsapp_number,
-            "nome": cliente.nome_completo if cliente else None,
+            "nome": clientes_map.get(row.whatsapp_number),
             "ultima_mensagem_recebida": row.ultima_recebida.isoformat() if row.ultima_recebida else None,
             "dentro_janela": True,
-            "minutos_restantes": max(0, int((row.ultima_recebida + timedelta(hours=24) - datetime.now(timezone.utc)).total_seconds() / 60)) if row.ultima_recebida else 0,
+            "minutos_restantes": minutos,
         })
 
-    return {
-        "total": len(contatos),
-        "contatos": contatos,
-    }
+    return {"total": len(contatos), "contatos": contatos}
 
 
 @router.post("/mensagens/envio-massa")

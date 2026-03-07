@@ -361,35 +361,90 @@ class TemplateService:
             data = response.json()
             return data["messages"][0]["id"]
 
+    @staticmethod
+    def _normalize_carousel_card(card: Dict, public_base_url: str = "") -> Dict:
+        """
+        Normaliza um card de carrossel do formato salvo no DB para o formato
+        esperado por send_carousel_message.
+
+        DB format: {card_index, header: {type, image: {link}}, body: {text}, action: {buttons}}
+        Send format: {card_index, header_type, header_url, body_text, button_type, ...}
+        """
+        # Já está no formato send (tem chaves planas)
+        if "header_url" in card or "header_type" in card:
+            header_url = card.get("header_url", "")
+            if header_url and not header_url.startswith("http") and public_base_url:
+                header_url = f"{public_base_url.rstrip('/')}{header_url}"
+            return {**card, "header_url": header_url}
+
+        # Formato DB: extrair campos aninhados
+        header = card.get("header", {})
+        header_type = header.get("type", "image").lower()
+        header_media = header.get(header_type, header.get("image", {}))
+        header_url = header_media.get("link", "")
+
+        # Converter URL local em URL pública
+        if header_url and not header_url.startswith("http") and public_base_url:
+            header_url = f"{public_base_url.rstrip('/')}{header_url}"
+
+        body_text_card = card.get("body", {}).get("text", "")
+        action_buttons = card.get("action", {}).get("buttons", [])
+
+        button_type = "quick_reply"
+        button_display_text = "Saiba mais"
+        button_url = ""
+        quick_replies = []
+
+        if action_buttons:
+            btn = action_buttons[0]
+            btn_type = btn.get("type", "").lower()
+            if btn_type == "url":
+                button_type = "url"
+                button_display_text = btn.get("text", "Saiba mais")
+                button_url = btn.get("url", "")
+            else:
+                button_type = "quick_reply"
+                button_display_text = btn.get("text", "Responder")
+                quick_replies = [
+                    {"id": f"qr_{i}", "title": b.get("text", "Responder")}
+                    for i, b in enumerate(action_buttons)
+                ]
+
+        return {
+            "card_index": card.get("card_index", 0),
+            "header_type": header_type,
+            "header_url": header_url,
+            "body_text": body_text_card,
+            "button_type": button_type,
+            "button_display_text": button_display_text,
+            "button_url": button_url,
+            "quick_replies": quick_replies,
+        }
+
     async def send_carousel_message(self, to: str, body_text: str,
-                                    cards: List[Dict]) -> str:
+                                    cards: List[Dict],
+                                    public_base_url: str = "") -> str:
         """
         Envia mensagem interativa de carrossel (tipo 'interactive/carousel').
         Usado para templates INTERACTIVE_CAROUSEL salvos localmente.
-
-        Cada card deve ter a estrutura:
-        {
-            "card_index": int,
-            "header_type": "image" | "video",
-            "header_url": str,          # URL pública da mídia
-            "body_text": str,           # opcional
-            "button_type": "url" | "quick_reply",
-            "button_display_text": str, # para URL
-            "button_url": str,          # para URL
-            "quick_replies": [{"id": str, "title": str}]  # para quick_reply
-        }
+        Aceita cards no formato DB (aninhado) ou no formato send (plano).
         """
         if to and not to.startswith("+"):
             to = f"+{to}"
 
+        # Normalizar cards (converter de formato DB para API se necessário)
+        normalized_cards = [
+            self._normalize_carousel_card(c, public_base_url) for c in cards
+        ]
+
         # Montar cards no formato da Meta API
         api_cards = []
-        for card in cards:
+        for card in normalized_cards:
             card_index = card.get("card_index", 0)
             header_type = card.get("header_type", "image")
             header_url = card.get("header_url", "")
             body_text_card = card.get("body_text", "")
-            button_type = card.get("button_type", "url")
+            button_type = card.get("button_type", "quick_reply")
 
             api_card: Dict = {
                 "card_index": card_index,

@@ -290,6 +290,14 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
         redis_cache.client.setex(dedup_key, 86400, "1")
         print(f"✅ Mensagem {message_id} marcada como processada")
 
+        # ========== JANELA 24H — ATUALIZAR REDIS ==========
+        # A cada mensagem RECEBIDA do cliente, renova a janela de 24h no Redis
+        try:
+            nome_contato = (contacts_info or {}).get(from_number, "")
+            redis_cache.update_janela_24h(empresa.id, from_number, nome_contato)
+        except Exception as _je:
+            logger.warning(f"Erro ao atualizar janela 24h Redis: {_je}")
+
         # ========== AUTO-SALVAR CONTATO ==========
         # Cria Cliente automaticamente se nao existe para esta empresa
         try:

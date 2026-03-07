@@ -2,6 +2,38 @@
 Endpoints para gerenciamento de Templates de Mensagem WhatsApp
 """
 
+# ─── Mapa de erros da Meta API → Mensagens em Português ──────────────────────
+_META_ERROS_PT = {
+    "2388040": "Campo do template excedeu o limite de caracteres permitido.",
+    "2388047": "O cabeçalho da mensagem contém formatação inválida.",
+    "2388072": "O corpo da mensagem contém formatação inválida.",
+    "2388073": "O rodapé da mensagem contém formatação inválida.",
+    "2388293": "O template tem variáveis demais para seu tamanho. Reduza as variáveis ou aumente o texto.",
+    "2388299": "Variáveis não podem ficar no início nem no fim do template.",
+    "2388019": "Limite de templates atingido para esta conta WhatsApp Business.",
+    "200005": "Métricas de template ainda não estão disponíveis para esta conta.",
+    "200006": "Não é possível desativar métricas de template após habilitadas.",
+    "200007": "Métricas de template não foram habilitadas para esta conta.",
+    "100": "Parâmetro inválido — a mensagem deve ser do tipo template.",
+    "131009": "Um ou mais valores de parâmetro são inválidos.",
+    "131055": "Apenas mensagens de template de marketing são suportadas.",
+    "134100": "Apenas templates de marketing são permitidos nesta API.",
+    "134101": "Seu template ainda está sincronizando (pode levar até 10 min). Aguarde e tente novamente.",
+    "134102": "Template indisponível. Verifique seu status de elegibilidade ou contate o suporte Meta.",
+    "132018": "Erro de validação do template. Verifique os parâmetros e tente novamente.",
+    "1752041": "Requisição duplicada — este cliente já foi convidado por outro parceiro.",
+}
+
+
+def _traduzir_erro_meta(error: Exception) -> str:
+    """Traduz erros da Meta API para português."""
+    error_str = str(error)
+    for code, msg in _META_ERROS_PT.items():
+        if code in error_str:
+            return msg
+    return f"Erro da Meta API: {error_str}"
+
+
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -11,10 +43,12 @@ import re
 import os
 import logging
 
+from datetime import datetime, timezone, timedelta
 from app.database.database import get_db
 from app.models.models import Empresa, MessageTemplate, ListaContatosMembro, Cliente, MensagemLog
 from app.core.dependencies import CurrentEmpresa
 from app.services.template_service import TemplateService
+from app.services.whatsapp import WhatsAppService
 from app.schemas.templates import (
     TemplateCreate, TemplateUpdate, TemplateResponse, TemplateListResponse,
     TemplateSend, TemplateSendBulk, TemplateSendResponse, TemplateBulkSendResponse,
@@ -127,7 +161,7 @@ async def criar_template(
             parameter_format=dados.parameter_format,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
+        raise HTTPException(status_code=400, detail=_traduzir_erro_meta(e))
 
     # Detectar image path do header (se houver)
     header_image_path = None
@@ -209,7 +243,7 @@ async def editar_template(
             category=dados.category,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
+        raise HTTPException(status_code=400, detail=_traduzir_erro_meta(e))
 
     template.components = components_dict
     if dados.category:
@@ -248,7 +282,7 @@ async def deletar_template(
         try:
             await service.delete_template(name=template.name)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Erro na Meta API: {str(e)}")
+            raise HTTPException(status_code=400, detail=_traduzir_erro_meta(e))
 
     # Limpar imagem de header associada
     if template.header_image_path:
@@ -289,12 +323,15 @@ async def enviar_template(
 
     # ---- CARROSSEL INTERATIVO (salvo localmente, não precisa APPROVED) ----
     if template.category.upper() == "INTERACTIVE_CAROUSEL":
-        # Extrair estrutura dos cards do campo example do componente CAROUSEL
+        # Extrair cards do componente CAROUSEL
         carousel_comp = None
+        body_comp = None
         for comp in (template.components or []):
-            if comp.get("type", "").upper() == "CAROUSEL":
+            t = comp.get("type", "").upper()
+            if t == "CAROUSEL":
                 carousel_comp = comp
-                break
+            elif t == "BODY":
+                body_comp = comp
 
         if not carousel_comp:
             return TemplateSendResponse(
@@ -305,16 +342,21 @@ async def enviar_template(
 
         example = carousel_comp.get("example", {})
         cards = example.get("cards", [])
-        # Body text: usa o texto do componente CAROUSEL, com fallback no parameter_values["body"]
-        body_text = carousel_comp.get("text", "")
+
+        # Body text: lê do componente BODY (não do CAROUSEL)
+        body_text = (body_comp.get("text", "") if body_comp else "") or ""
         if not body_text and dados.parameter_values:
             body_text = dados.parameter_values.get("body", "")
+
+        from app.core.config import settings
+        public_base = settings.PUBLIC_BASE_URL.rstrip("/")
 
         try:
             message_id = await service.send_carousel_message(
                 to=dados.whatsapp_number,
                 body_text=body_text or "Confira nossas opções:",
                 cards=cards,
+                public_base_url=public_base,
             )
             service.log_template_send(db, dados.whatsapp_number, template.name, message_id)
             return TemplateSendResponse(
@@ -361,6 +403,18 @@ async def enviar_template(
             whatsapp_number=dados.whatsapp_number,
             error=str(e)
         )
+
+
+def _numeros_na_janela_24h(db: Session, empresa_id: int, numbers: list) -> set:
+    """Retorna conjunto de números que enviaram mensagem nas últimas 24h."""
+    limite = datetime.now(timezone.utc) - timedelta(hours=24)
+    rows = db.query(MensagemLog.whatsapp_number).filter(
+        MensagemLog.empresa_id == empresa_id,
+        MensagemLog.direcao == "recebida",
+        MensagemLog.timestamp >= limite,
+        MensagemLog.whatsapp_number.in_(numbers),
+    ).distinct().all()
+    return {r[0] for r in rows}
 
 
 # ========== SEND BULK ==========
@@ -442,17 +496,24 @@ async def enviar_template_massa(
     # ---- CAROUSEL BULK SEND ----
     if is_carousel:
         carousel_comp = None
+        body_comp_c = None
         for comp in (template.components or []):
-            if comp.get("type", "").upper() == "CAROUSEL":
+            t = comp.get("type", "").upper()
+            if t == "CAROUSEL":
                 carousel_comp = comp
-                break
+            elif t == "BODY":
+                body_comp_c = comp
 
         if not carousel_comp:
             raise HTTPException(status_code=400, detail="Componente CAROUSEL não encontrado no template")
 
         example = carousel_comp.get("example", {})
         cards = example.get("cards", [])
-        body_text = carousel_comp.get("text", "") or "Confira nossas opções:"
+        # Body text: lê do componente BODY (não do CAROUSEL)
+        body_text = (body_comp_c.get("text", "") if body_comp_c else "") or "Confira nossas opções:"
+
+        from app.core.config import settings as _settings
+        _public_base = _settings.PUBLIC_BASE_URL.rstrip("/")
 
         resultados = []
         enviados = 0
@@ -464,6 +525,7 @@ async def enviar_template_massa(
                     to=number,
                     body_text=body_text,
                     cards=cards,
+                    public_base_url=_public_base,
                 )
                 service.log_template_send(db, number, template.name, message_id)
                 resultados.append(TemplateSendResponse(
@@ -488,6 +550,17 @@ async def enviar_template_massa(
     enviados = 0
     erros = 0
 
+    # Detectar quais números estão na janela de 24h (receberão mensagem grátis)
+    numeros_janela_24h = _numeros_na_janela_24h(db, empresa_id, numbers)
+    whatsapp_svc = WhatsAppService(empresa)
+
+    # Extrair body text do template para envio como mensagem livre na janela 24h
+    body_template_text = ""
+    for comp in (template.components or []):
+        if comp.get("type", "").upper() == "BODY":
+            body_template_text = comp.get("text", "")
+            break
+
     for number in numbers:
         try:
             # Construir parameter_values personalizado por contato
@@ -502,6 +575,37 @@ async def enviar_template_massa(
             if dados.coupon_code and "coupon_code" not in pv:
                 pv["coupon_code"] = dados.coupon_code
 
+            # Contato na janela 24h: enviar como mensagem normal (grátis, sem template)
+            if number in numeros_janela_24h:
+                # Substituir variáveis no body text
+                msg_text = body_template_text
+                for param_key, param_val in pv.items():
+                    msg_text = msg_text.replace("{{" + str(param_key) + "}}", str(param_val))
+                if not msg_text:
+                    msg_text = body_template_text or "Mensagem da empresa"
+
+                to_normalized = f"+{number}" if not number.startswith("+") else number
+                message_id = await whatsapp_svc.send_text_message(to_normalized, msg_text)
+                # Log
+                from app.models.models import MensagemLog as _MsgLog
+                log = _MsgLog(
+                    empresa_id=empresa_id,
+                    whatsapp_number=number,
+                    message_id=message_id,
+                    direcao="enviada",
+                    tipo_mensagem="text",
+                    conteudo=msg_text,
+                    dados_extras={"envio_massa": True, "template_name": template.name, "via_janela_24h": True},
+                    timestamp=datetime.now(timezone.utc),
+                )
+                db.add(log)
+                resultados.append(TemplateSendResponse(
+                    success=True, message_id=message_id, whatsapp_number=number
+                ))
+                enviados += 1
+                continue
+
+            # Fora da janela 24h: enviar como template (cobrado)
             # Build components personalizados para este contato
             send_components = dados.components
             if pv and template.components:
