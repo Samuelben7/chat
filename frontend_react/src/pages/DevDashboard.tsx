@@ -1247,6 +1247,204 @@ if (sig !== req.headers['x-webhook-signature'].replace('sha256=','')) {
               </div>
             </div>
 
+            {/* ── Exemplo completo Node.js ── */}
+            <div style={cardStyle}>
+              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo completo — Node.js / Express</h4>
+              <p style={{ color: '#888', fontSize: '12px', marginBottom: '10px' }}>Fluxo inteiro: gerar link → detectar conexão → enviar mensagem → receber mensagem</p>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`const express = require('express');
+const axios = require('axios');
+const crypto = require('crypto');
+
+const app = express();
+app.use(express.json());
+
+const API_BASE = 'https://api.yoursystem.dev.br/api/v1';
+const DEV_JWT  = 'SEU_JWT_DE_DEV';       // token do painel
+const API_KEY  = 'SUA_API_KEY';          // chave do gateway
+const WH_SECRET = 'SEU_WEBHOOK_SECRET';  // da aba Webhook
+
+// ─── 1. Gerar link para o cliente conectar o WhatsApp ───────────────────────
+app.get('/conectar-whatsapp/:clienteId', async (req, res) => {
+  const redirectUrl = \`https://seucrm.com/whatsapp/sucesso?cliente=\${req.params.clienteId}\`;
+
+  const { data } = await axios.post(
+    \`\${API_BASE}/dev/numeros/signup-link\`,
+    { redirect_back_url: redirectUrl },
+    { headers: { Authorization: \`Bearer \${DEV_JWT}\` } }
+  );
+  // Redireciona o cliente para o Facebook (ele nunca vê seu domínio)
+  res.redirect(data.signup_url);
+});
+
+// ─── 2. Página de retorno após cliente autorizar ─────────────────────────────
+app.get('/whatsapp/sucesso', (req, res) => {
+  const { success, numeros, cliente } = req.query;
+  if (success === 'true') {
+    // Buscar números novos e salvar no seu banco
+    res.send(\`Cliente \${cliente}: \${numeros} número(s) conectado(s)!\`);
+  } else {
+    res.send('Falha na autorização. Tente novamente.');
+  }
+});
+
+// ─── 3. Webhook: receber eventos da plataforma ───────────────────────────────
+app.post('/webhook/whatsapp', (req, res) => {
+  // Validar assinatura HMAC
+  const sig = req.headers['x-webhook-signature']?.replace('sha256=', '');
+  const expected = crypto
+    .createHmac('sha256', WH_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+  if (sig !== expected) return res.status(403).send('Unauthorized');
+
+  const { event, data } = req.body;
+
+  // Número novo conectado (via Embedded Signup)
+  if (event === 'number_connected') {
+    console.log('Novo número:', data.phone_number_id, data.display_phone_number);
+    // Salve phone_number_id no seu banco associado ao cliente
+    return res.json({ ok: true });
+  }
+
+  // Mensagem recebida
+  const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
+  if (entry?.messages) {
+    const msg = entry.messages[0];
+    const phoneNumberId = entry.metadata.phone_number_id; // qual número recebeu
+    console.log(\`[\${phoneNumberId}] Mensagem de \${msg.from}: \${msg.text?.body}\`);
+  }
+
+  res.json({ ok: true });
+});
+
+// ─── 4. Enviar mensagem de texto ─────────────────────────────────────────────
+async function enviarTexto(phoneNumberId, para, texto) {
+  const { data } = await axios.post(
+    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    {
+      messaging_product: 'whatsapp',
+      to: para,          // ex: '5511999999999'
+      type: 'text',
+      text: { body: texto, preview_url: false }
+    },
+    { headers: { 'X-Api-Key': API_KEY, 'Content-Type': 'application/json' } }
+  );
+  return data;
+}
+
+// ─── 5. Enviar imagem ────────────────────────────────────────────────────────
+async function enviarImagem(phoneNumberId, para, imageUrl, legenda) {
+  const { data } = await axios.post(
+    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    {
+      messaging_product: 'whatsapp',
+      to: para,
+      type: 'image',
+      image: { link: imageUrl, caption: legenda }
+    },
+    { headers: { 'X-Api-Key': API_KEY } }
+  );
+  return data;
+}
+
+// ─── 6. Enviar template aprovado ─────────────────────────────────────────────
+async function enviarTemplate(phoneNumberId, para, nomeTemplate, params) {
+  const { data } = await axios.post(
+    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    {
+      messaging_product: 'whatsapp',
+      to: para,
+      type: 'template',
+      template: {
+        name: nomeTemplate,
+        language: { code: 'pt_BR' },
+        components: [{
+          type: 'body',
+          parameters: params.map(p => ({ type: 'text', text: p }))
+        }]
+      }
+    },
+    { headers: { 'X-Api-Key': API_KEY } }
+  );
+  return data;
+}
+
+app.listen(3000);`}</pre>
+            </div>
+
+            {/* ── Exemplo Python ── */}
+            <div style={cardStyle}>
+              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo — Python / FastAPI</h4>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`import httpx, hashlib, hmac, json
+from fastapi import FastAPI, Request, Response
+
+app = FastAPI()
+
+API_BASE   = "https://api.yoursystem.dev.br/api/v1"
+GATEWAY    = "https://api.yoursystem.dev.br/gateway"
+DEV_JWT    = "SEU_JWT_DE_DEV"
+API_KEY    = "SUA_API_KEY"
+WH_SECRET  = "SEU_WEBHOOK_SECRET"
+
+HEADERS_JWT = {"Authorization": f"Bearer {DEV_JWT}"}
+HEADERS_GW  = {"X-Api-Key": API_KEY, "Content-Type": "application/json"}
+
+# ─── Gerar link de signup para cliente ───────────────────────────────────────
+async def gerar_link(cliente_id: str) -> str:
+    redirect = f"https://seucrm.com/sucesso?cliente={cliente_id}"
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{API_BASE}/dev/numeros/signup-link",
+            json={"redirect_back_url": redirect},
+            headers=HEADERS_JWT,
+        )
+    return r.json()["signup_url"]
+
+# ─── Enviar mensagem de texto ─────────────────────────────────────────────────
+async def enviar_texto(phone_number_id: str, para: str, texto: str):
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{GATEWAY}/v20.0/{phone_number_id}/messages",
+            json={
+                "messaging_product": "whatsapp",
+                "to": para,
+                "type": "text",
+                "text": {"body": texto}
+            },
+            headers=HEADERS_GW,
+        )
+    return r.json()
+
+# ─── Receber webhook ──────────────────────────────────────────────────────────
+@app.post("/webhook/whatsapp")
+async def webhook(request: Request):
+    body = await request.body()
+
+    # Validar assinatura
+    sig = request.headers.get("x-webhook-signature", "").replace("sha256=", "")
+    expected = hmac.new(WH_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return Response(status_code=403)
+
+    payload = json.loads(body)
+    event = payload.get("event")
+
+    if event == "number_connected":
+        phone_id = payload.get("phone_number_id")
+        print(f"Novo número conectado: {phone_id}")
+        return {"ok": True}
+
+    # Mensagem recebida (formato padrão Meta)
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            phone_id = value.get("metadata", {}).get("phone_number_id")
+            for msg in value.get("messages", []):
+                print(f"[{phone_id}] De {msg['from']}: {msg.get('text',{}).get('body')}")
+
+    return {"ok": True}`}</pre>
+            </div>
+
             {/* ── Limites e codigos ── */}
             <div style={cardStyle}>
               <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '12px' }}>Limites e codigos de resposta</h4>
