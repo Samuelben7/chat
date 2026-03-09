@@ -10,11 +10,14 @@ import whatsappBg from '../images/PLANO-DE-FUNDO-WHATS-APP.png';
 const getFullUrl = (url?: string) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  
-  // Pega a URL base do .env e remove o sufixo da API para chegar na raiz de arquivos estáticos
-  let baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-  baseUrl = baseUrl.split('/api')[0]; // Remove /api/v1 ou similar
-  
+
+  // Usa URL.origin para extrair apenas o domínio base (evita split incorreto em subdomínios como api.xxx)
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+  let baseUrl = 'http://localhost:8000';
+  try {
+    baseUrl = new URL(apiUrl).origin;
+  } catch { /* fallback ao default */ }
+
   const cleanPath = url.startsWith('/') ? url : `/${url}`;
   return `${baseUrl}${cleanPath}`;
 };
@@ -176,11 +179,17 @@ const TemplateChatPreview: React.FC<{
               <div className="flex gap-3 overflow-x-auto w-full no-scrollbar px-1 py-4 snap-x pl-1">
                 {carouselCards.map((card, idx) => (
                   <div key={idx} className="snap-start flex-shrink-0 w-48 rounded-[1.5rem] overflow-hidden shadow-2xl border border-black/5 transition-transform duration-500 hover:scale-[1.02]" style={{ background: bubbleBg }}>
-                    <div className="h-32 bg-black/10 flex items-center justify-center overflow-hidden relative group">
-                      {card.headerUrl ? (
-                        <img src={getFullUrl(card.headerUrl)} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt={`card-${idx}`} />
-                      ) : (
-                        <div className="flex flex-col items-center opacity-20 group-hover:opacity-40 transition-opacity">
+                    <div
+                      className="h-32 overflow-hidden relative flex items-center justify-center"
+                      style={{
+                        backgroundImage: card.headerUrl ? `url(${getFullUrl(card.headerUrl)})` : 'none',
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        backgroundColor: card.headerUrl ? 'transparent' : 'rgba(0,0,0,0.1)',
+                      }}
+                    >
+                      {!card.headerUrl && (
+                        <div className="flex flex-col items-center opacity-70">
                           <span className="text-4xl">🖼️</span>
                           <span className="text-[8px] font-black uppercase mt-1">Card {idx + 1}</span>
                         </div>
@@ -289,7 +298,7 @@ const TemplateManager: React.FC = () => {
   });
   const [carouselCards, setCarouselCards] = useState<CarouselCard[]>([defaultCard(0), defaultCard(1)]);
   const [uploadingCardIndex, setUploadingCardIndex] = useState<number | null>(null);
-  const [pendingCardUploadIndex, setPendingCardUploadIndex] = useState<number | null>(null);
+  const pendingCardUploadIndexRef = useRef<number | null>(null);
   const cardFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -351,7 +360,9 @@ const TemplateManager: React.FC = () => {
     setFormHeaderType(h?.format?.toLowerCase() || 'none'); 
     setFormHeaderText(h?.text || '');
     if (h?.format === 'IMAGE') {
-      setHeaderImageUrl(tmpl.header_image_path || '');
+      // Preferir imagem local salva; fallback para CDN handle da Meta
+      const localOrCdn = tmpl.header_image_path || h.example?.header_handle?.[0] || '';
+      setHeaderImageUrl(localOrCdn);
       if (h.example?.header_handle?.[0]) setHeaderHandle(h.example.header_handle[0]);
     }
     
@@ -523,35 +534,31 @@ const TemplateManager: React.FC = () => {
     }
   };
 
-  const triggerCardUpload = (idx: number) => { 
-    setPendingCardUploadIndex(idx); 
-    cardFileInputRef.current?.click(); 
+  const triggerCardUpload = (idx: number) => {
+    pendingCardUploadIndexRef.current = idx;
+    cardFileInputRef.current?.click();
   };
 
   const handleCardMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; 
-    if (!file || pendingCardUploadIndex === null) return;
-    
-    setUploadingCardIndex(pendingCardUploadIndex);
+    const file = e.target.files?.[0];
+    const idx = pendingCardUploadIndexRef.current;
+    if (!file || idx === null) return;
+
+    const inputEl = e.target;
+    setUploadingCardIndex(idx);
     try {
       const res = await templatesApi.uploadMedia(file);
-      // Garantir que a URL salva seja compatível com getFullUrl
-      const relativeUrl = res.url; 
-      
-      setCarouselCards(prev => prev.map((c, i) => 
-        i === pendingCardUploadIndex ? { 
-          ...c, 
-          headerUrl: relativeUrl, 
-          headerHandle: res.header_handle || res.handle || '' 
-        } : c
+      if (!res.url) throw new Error('URL de upload vazia');
+      setCarouselCards(prev => prev.map((c, i) =>
+        i === idx ? { ...c, headerUrl: res.url, headerHandle: res.header_handle || '' } : c
       ));
-    } catch (e) { 
-      console.error('Erro no upload de mídia do card:', e);
-      alert('Erro no upload da imagem do card.'); 
-    } finally { 
-      setUploadingCardIndex(null); 
-      setPendingCardUploadIndex(null); 
-      if (e.target) e.target.value = ''; 
+    } catch (err) {
+      console.error('Erro no upload de mídia do card:', err);
+      alert('Erro no upload da imagem do card.');
+    } finally {
+      setUploadingCardIndex(null);
+      pendingCardUploadIndexRef.current = null;
+      inputEl.value = '';
     }
   };
 
@@ -743,9 +750,10 @@ const TemplateManager: React.FC = () => {
                              ✕
                            </button>
                            
-                           <div 
-                             onClick={() => triggerCardUpload(idx)} 
-                             className="aspect-video border-2 border-dashed rounded-3xl flex flex-col items-center justify-center cursor-pointer overflow-hidden bg-black/5 relative hover:border-blue-500/50 transition-all shadow-inner group-card"
+                           <div
+                             onClick={() => triggerCardUpload(idx)}
+                             className="border-2 border-dashed rounded-3xl cursor-pointer overflow-hidden relative hover:border-blue-500/50 transition-all shadow-inner bg-black/5"
+                             style={{ height: '160px' }}
                            >
                              {uploadingCardIndex === idx ? (
                                <div className="absolute inset-0 bg-blue-500/20 flex flex-col items-center justify-center animate-pulse z-20">
@@ -753,9 +761,15 @@ const TemplateManager: React.FC = () => {
                                  <span className="text-[10px] font-black mt-3 tracking-widest">SUBINDO MÍDIA...</span>
                                </div>
                              ) : card.headerUrl ? (
-                               <img src={getFullUrl(card.headerUrl)} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt="card preview" />
+                               <img
+                                 src={getFullUrl(card.headerUrl)}
+                                 alt={`Card ${idx + 1}`}
+                                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                 onLoad={() => console.log('✅ Card image loaded:', getFullUrl(card.headerUrl))}
+                                 onError={() => console.error('❌ Card image failed:', getFullUrl(card.headerUrl))}
+                               />
                              ) : (
-                               <div className="flex flex-col items-center gap-3 opacity-30 group-hover:opacity-100 transition-opacity font-bold">
+                               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 font-bold" style={{ opacity: 0.7 }}>
                                  <span className="text-4xl">🖼️</span>
                                  <div className="flex flex-col items-center">
                                    <span className="text-[10px] font-black uppercase tracking-widest">Imagem do Card {idx + 1}</span>

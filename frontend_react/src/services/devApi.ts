@@ -97,6 +97,45 @@ export const devWebhookApi = {
   },
 };
 
+// ==================== NUMEROS (MULTI-NUMERO) ====================
+
+export const devNumerosApi = {
+  listar: async () => {
+    const response = await api.get('/dev/numeros');
+    return response.data;
+  },
+
+  conectar: async (dados: { code: string; phone_number_id: string; waba_id: string }) => {
+    const response = await api.post('/dev/numeros/connect', dados);
+    return response.data;
+  },
+
+  cancelar: async (id: number) => {
+    const response = await api.delete(`/dev/numeros/${id}`);
+    return response.data;
+  },
+
+  salvarCartao: async (dados: { card_token: string; payment_method_id: string; last4: string }) => {
+    const response = await api.post('/dev/numeros/pagamento/salvar-cartao', dados);
+    return response.data;
+  },
+
+  statusCartao: async () => {
+    const response = await api.get('/dev/numeros/pagamento/status-cartao');
+    return response.data;
+  },
+
+  gerarSignupLink: async (redirect_back_url?: string) => {
+    const response = await api.post('/dev/numeros/signup-link', { redirect_back_url });
+    return response.data as { signup_url: string; expires_in: number; session_id: string };
+  },
+
+  getStatus: async (numero_id: number) => {
+    const response = await api.get(`/dev/numeros/${numero_id}/status`);
+    return response.data;
+  },
+};
+
 // ==================== PLANOS & ASSINATURAS ====================
 
 export const planosApi = {

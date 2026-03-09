@@ -11,9 +11,11 @@ import logging
 import time
 
 from app.database.database import get_db
-from app.models.models import ApiKey, DevUsuario, Assinatura, GatewayLog
+from app.models.models import ApiKey, DevUsuario, DevNumero, Assinatura, GatewayLog
 from app.core.config import settings
 from app.core.redis_client import redis_cache
+
+import re
 
 logger = logging.getLogger("gateway")
 
@@ -21,6 +23,42 @@ router = APIRouter(prefix="/internal", tags=["dev-gateway-internal"])
 
 # Cache TTL para validacao de API key (evita bcrypt em cada request)
 CACHE_TTL = 60  # 60 segundos
+
+# Regex para extrair phone_number_id de URIs Meta API
+# Ex: /v20.0/123456789012345/messages -> 123456789012345
+_PHONE_ID_RE = re.compile(r"/v\d+\.\d+/(\d+)/")
+
+
+def _extract_phone_number_id(uri: str) -> str | None:
+    """Extrai o phone_number_id da URI da Meta API."""
+    if not uri:
+        return None
+    m = _PHONE_ID_RE.search(uri)
+    return m.group(1) if m else None
+
+
+async def _registrar_primeiro_uso(dev_id: int, numero: DevNumero, db: Session):
+    """
+    Detecta primeiro uso real de um numero no gateway via Redis.
+    Ativa o numero e dispara cobranca MP se ainda nao foi ativado.
+    """
+    redis_key = f"dev:numero:first_use:{dev_id}:{numero.phone_number_id}"
+    ja_registrado = redis_cache.client.get(redis_key)
+    if ja_registrado:
+        return
+
+    # Primeiro uso detectado
+    redis_cache.client.setex(redis_key, 86400 * 365, "1")
+    logger.info(f"[GATEWAY] Primeiro uso detectado: dev={dev_id} numero={numero.phone_number_id}")
+
+    if numero.primeiro_uso_em is None:
+        numero.primeiro_uso_em = datetime.now(timezone.utc)
+
+    # Ativar numero se ainda pending (sem assinatura MP autorizada)
+    if numero.status == "pending":
+        numero.status = "active"
+        db.commit()
+        logger.info(f"[GATEWAY] Numero {numero.phone_number_id} ativado no primeiro uso")
 
 
 @router.get("/validar-token")
@@ -156,9 +194,59 @@ async def validar_token(
     if monthly_count >= msg_limit:
         raise HTTPException(status_code=429, detail="Monthly message limit exceeded")
 
-    # 8. Verificar que dev tem WhatsApp conectado
-    if not dev.whatsapp_token or not dev.phone_number_id:
-        raise HTTPException(status_code=403, detail="WhatsApp not connected")
+    # 8. Resolver credenciais WhatsApp (multi-numero ou legado)
+    meta_token = None
+    phone_number_id_out = None
+
+    # Tentar extrair phone_number_id da URI da requisicao original
+    requested_phone_id = _extract_phone_number_id(x_original_uri or "")
+
+    if requested_phone_id:
+        # Buscar numero especifico deste dev
+        numero = db.query(DevNumero).filter(
+            DevNumero.phone_number_id == requested_phone_id,
+            DevNumero.dev_id == dev_id,
+            DevNumero.ativo == True,
+        ).first()
+
+        if numero:
+            if numero.status == "suspended":
+                raise HTTPException(status_code=403, detail="Number suspended. Please check your subscription.")
+            if numero.status == "cancelled":
+                raise HTTPException(status_code=403, detail="Number cancelled.")
+
+            meta_token = numero.whatsapp_token
+            phone_number_id_out = numero.phone_number_id
+
+            # Detectar e registrar primeiro uso
+            await _registrar_primeiro_uso(dev_id, numero, db)
+        else:
+            # Numero nao registrado como DevNumero — verificar fallback legado
+            if dev.phone_number_id == requested_phone_id and dev.whatsapp_token:
+                meta_token = dev.whatsapp_token
+                phone_number_id_out = dev.phone_number_id
+            else:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Phone number {requested_phone_id} not registered for this account"
+                )
+    else:
+        # URI sem phone_number_id — usar numero padrao (legado ou primeiro ativo)
+        numero_padrao = db.query(DevNumero).filter(
+            DevNumero.dev_id == dev_id,
+            DevNumero.ativo == True,
+            DevNumero.status != "cancelled",
+        ).order_by(DevNumero.criado_em.asc()).first()
+
+        if numero_padrao:
+            meta_token = numero_padrao.whatsapp_token
+            phone_number_id_out = numero_padrao.phone_number_id
+            await _registrar_primeiro_uso(dev_id, numero_padrao, db)
+        elif dev.whatsapp_token and dev.phone_number_id:
+            meta_token = dev.whatsapp_token
+            phone_number_id_out = dev.phone_number_id
+        else:
+            raise HTTPException(status_code=403, detail="WhatsApp not connected")
 
     # 9. Incrementar contador mensal
     pipe = redis_cache.client.pipeline()
@@ -182,8 +270,8 @@ async def validar_token(
         logger.warning(f"Failed to log gateway request: {e}")
 
     # 11. Retornar headers para Nginx
-    response.headers["X-Meta-Token"] = dev.whatsapp_token
-    response.headers["X-Phone-Number-Id"] = dev.phone_number_id
+    response.headers["X-Meta-Token"] = meta_token
+    response.headers["X-Phone-Number-Id"] = phone_number_id_out
     response.headers["X-Dev-Id"] = str(dev_id)
 
     return {"status": "ok"}

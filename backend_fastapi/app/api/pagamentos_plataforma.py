@@ -8,7 +8,7 @@ from typing import List
 import logging
 
 from app.database.database import get_db
-from app.models.models import Assinatura, Pagamento, Plano, DevUsuario, Empresa
+from app.models.models import Assinatura, Pagamento, Plano, DevUsuario, Empresa, DevNumero
 from app.schemas.planos import (
     PagamentoPixRequest, PagamentoPixResponse,
     PagamentoCartaoRequest, PagamentoCartaoResponse,
@@ -272,4 +272,56 @@ async def webhook_mercadopago(request: Request, db: Session = Depends(get_db)):
 
     db.commit()
 
+    return {"status": "ok"}
+
+
+@router.post("/webhook/mp/preapproval")
+async def webhook_mercadopago_preapproval(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook de assinaturas recorrentes (preapproval) do Mercado Pago.
+    Ativado quando dev autoriza ou cancela assinatura de numero WhatsApp.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "ok"}
+
+    tipo = data.get("type")
+    preapproval_id = str(data.get("data", {}).get("id", ""))
+
+    if tipo not in ("preapproval", "subscription_preapproval") or not preapproval_id:
+        return {"status": "ok"}
+
+    # Buscar numero pelo preapproval_id
+    numero = db.query(DevNumero).filter(
+        DevNumero.mp_preapproval_id == preapproval_id
+    ).first()
+
+    if not numero:
+        logger.warning(f"Webhook preapproval {preapproval_id} sem DevNumero correspondente")
+        return {"status": "ok"}
+
+    # Verificar status atual na API MP
+    try:
+        mp = MercadoPagoPlatformService()
+        info = await mp.get_preapproval_status(preapproval_id)
+    except Exception as e:
+        logger.error(f"Erro verificando preapproval no webhook: {e}")
+        return {"status": "ok"}
+
+    if not info:
+        return {"status": "ok"}
+
+    old_status = numero.mp_subscription_status
+    numero.mp_subscription_status = info["status"]
+
+    if info["status"] == "authorized" and old_status != "authorized":
+        numero.status = "active"
+        logger.info(f"Numero {numero.phone_number_id} ativado via preapproval autorizado (dev {numero.dev_id})")
+
+    elif info["status"] == "cancelled":
+        numero.status = "suspended"
+        logger.info(f"Numero {numero.phone_number_id} suspenso: preapproval cancelado (dev {numero.dev_id})")
+
+    db.commit()
     return {"status": "ok"}

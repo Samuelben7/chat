@@ -40,6 +40,19 @@ interface Contato24h {
   minutos_restantes: number;
 }
 
+interface ModeloMensagem {
+  id: number;
+  nome: string;
+  tipo: 'text' | 'image' | 'button' | 'list';
+  mensagem: string;
+  header?: string;
+  footer?: string;
+  media_url?: string;
+  buttons?: { id: string; title: string }[];
+  button_text?: string;
+  sections?: any[];
+}
+
 interface ResultadoEnvio {
   total: number;
   enviados: number;
@@ -53,10 +66,11 @@ interface ResultadoEnvio {
 const getFullUrl = (url?: string) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  
-  let baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-  baseUrl = baseUrl.split('/api')[0];
-  
+
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+  let baseUrl = 'http://localhost:8000';
+  try { baseUrl = new URL(apiUrl).origin; } catch { /* fallback */ }
+
   const cleanPath = url.startsWith('/') ? url : `/${url}`;
   return `${baseUrl}${cleanPath}`;
 };
@@ -194,7 +208,8 @@ const EnvioMassaPage: React.FC = () => {
   // Mensagem mode
   const [mensagemTexto, setMensagemTexto] = useState('');
   const [contatosSelecionados, setContatosSelecionados] = useState<Set<string>>(new Set());
-  const [tipoMensagem, setTipoMensagem] = useState<'text' | 'image' | 'button' | 'list'>('text');
+  const [tipoMensagem, setTipoMensagem] = useState<'text' | 'image' | 'button' | 'list' | 'carousel'>('text');
+  const [carouselTemplateSelecionado, setCarouselTemplateSelecionado] = useState<Template | null>(null);
   const [msgImgUrl, setMsgImgUrl] = useState('');
   const [msgHeader, setMsgHeader] = useState('');
   const [msgFooter, setMsgFooter] = useState('');
@@ -211,7 +226,83 @@ const EnvioMassaPage: React.FC = () => {
   const headerImgInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const SERVER_BASE = (process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1').replace('/api/v1', '');
+  // Modelos salvos
+  const [modelos, setModelos] = useState<ModeloMensagem[]>([]);
+  const [showModelos, setShowModelos] = useState(false);
+  const [salvandoModelo, setSalvandoModelo] = useState(false);
+  const [nomeModelo, setNomeModelo] = useState('');
+  const [showSalvarModelo, setShowSalvarModelo] = useState(false);
+
+  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+  let SERVER_BASE = 'http://localhost:8000';
+  try { SERVER_BASE = new URL(apiUrl).origin; } catch { /* fallback */ }
+
+  const carregarModelos = useCallback(async () => {
+    try {
+      const res = await api.get('/modelos-mensagem');
+      setModelos(res.data || []);
+    } catch (e) { /* silencioso */ }
+  }, []);
+
+  const aplicarModelo = (modelo: ModeloMensagem) => {
+    setTipoMensagem(modelo.tipo);
+    setMensagemTexto(modelo.mensagem);
+    setMsgHeader(modelo.header || '');
+    setMsgFooter(modelo.footer || '');
+    setMsgHeaderImgUrl('');
+    setMsgImgUrl('');
+    if (modelo.tipo === 'image' && modelo.media_url) setMsgImgUrl(modelo.media_url);
+    if (modelo.tipo === 'button') {
+      if (modelo.media_url) setMsgHeaderImgUrl(modelo.media_url);
+      setMsgBotoes(modelo.buttons?.length ? modelo.buttons.map(b => ({ title: b.title })) : [{ title: '' }, { title: '' }]);
+    }
+    if (modelo.tipo === 'list') {
+      setMsgListaBtnText(modelo.button_text || 'Ver opções');
+      setMsgListaSecoes(modelo.sections?.length ? modelo.sections : [{ title: 'Opções', rows: [{ id: 'row_1', title: '', description: '' }] }]);
+    }
+    setShowModelos(false);
+  };
+
+  const salvarModelo = async () => {
+    if (!nomeModelo.trim() || !mensagemTexto.trim()) return;
+    setSalvandoModelo(true);
+    try {
+      const payload: any = {
+        nome: nomeModelo.trim(),
+        tipo: tipoMensagem,
+        mensagem: mensagemTexto,
+        header: msgHeader || null,
+        footer: msgFooter || null,
+      };
+      if (tipoMensagem === 'image' && msgImgUrl) payload.media_url = msgImgUrl;
+      if (tipoMensagem === 'button') {
+        payload.buttons = msgBotoes.filter(b => b.title.trim()).map((b, i) => ({ id: `btn_${i + 1}`, title: b.title }));
+        if (msgHeaderImgUrl) payload.media_url = msgHeaderImgUrl;
+      }
+      if (tipoMensagem === 'list') {
+        payload.button_text = msgListaBtnText;
+        payload.sections = msgListaSecoes;
+      }
+      await api.post('/modelos-mensagem', payload);
+      await carregarModelos();
+      setShowSalvarModelo(false);
+      setNomeModelo('');
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Erro ao salvar modelo');
+    } finally {
+      setSalvandoModelo(false);
+    }
+  };
+
+  const deletarModelo = async (id: number) => {
+    if (!window.confirm('Excluir este modelo?')) return;
+    try {
+      await api.delete(`/modelos-mensagem/${id}`);
+      setModelos(prev => prev.filter(m => m.id !== id));
+    } catch (e: any) {
+      alert('Erro ao excluir modelo');
+    }
+  };
 
   const uploadImagem = async (file: File, tipo: 'main' | 'header') => {
     setUploadingImg(tipo);
@@ -269,6 +360,9 @@ const EnvioMassaPage: React.FC = () => {
       setContatosSistema(todosContatos);
     } catch (e) { console.error(e); }
   }, []);
+
+  // Load models on mount
+  useEffect(() => { carregarModelos(); }, [carregarModelos]);
 
   // Load data
   useEffect(() => {
@@ -361,7 +455,25 @@ const EnvioMassaPage: React.FC = () => {
   };
 
   const enviarMensagem = async () => {
-    if (!mensagemTexto.trim() || contatosSelecionados.size === 0) return;
+    if (contatosSelecionados.size === 0) return;
+    if (tipoMensagem === 'carousel') {
+      if (!carouselTemplateSelecionado) return;
+      setEnviando(true);
+      try {
+        const res = await api.post('/templates/send-bulk', {
+          template_id: carouselTemplateSelecionado.id,
+          whatsapp_numbers: Array.from(contatosSelecionados),
+        });
+        setResultado(res.data);
+        setStep(99);
+      } catch (e: any) {
+        alert(e.response?.data?.detail || 'Erro ao enviar');
+      } finally {
+        setEnviando(false);
+      }
+      return;
+    }
+    if (!mensagemTexto.trim()) return;
     setEnviando(true);
     try {
       const payload: any = {
@@ -598,19 +710,59 @@ const EnvioMassaPage: React.FC = () => {
           { id: 'image', icon: '🖼️', label: 'Imagem' },
           { id: 'button', icon: '🔘', label: 'Botões' },
           { id: 'list', icon: '📋', label: 'Lista' },
+          { id: 'carousel', icon: '🎠', label: 'Carrossel' },
         ] as const;
 
         const botoesFiltrados = msgBotoes.filter(b => b.title.trim());
-        const podeEnviar = mensagemTexto.trim() &&
-          (tipoMensagem !== 'button' || botoesFiltrados.length > 0) &&
-          (tipoMensagem !== 'list' || msgListaSecoes.some(s => s.rows.some(r => r.title.trim())));
+        const podeEnviar = tipoMensagem === 'carousel'
+          ? !!carouselTemplateSelecionado
+          : mensagemTexto.trim() &&
+            (tipoMensagem !== 'button' || botoesFiltrados.length > 0) &&
+            (tipoMensagem !== 'list' || msgListaSecoes.some(s => s.rows.some(r => r.title.trim())));
 
         return (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-right-4 duration-500">
             <div className="lg:col-span-7 space-y-6">
 
+              {/* Meus Modelos */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setShowModelos(v => !v)}
+                    className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-xl border transition-all hover:scale-105"
+                    style={{ borderColor: colors.border, color: colors.textPrimary, background: colors.cardBg }}
+                  >
+                    <span>📁</span> Meus Modelos
+                    {modelos.length > 0 && <span className="px-2 py-0.5 rounded-lg text-[9px]" style={{ background: `${colors.primary}20`, color: colors.primary }}>{modelos.length}</span>}
+                    <span className="opacity-40">{showModelos ? '▲' : '▼'}</span>
+                  </button>
+                </div>
+
+                {showModelos && (
+                  <div className="rounded-2xl border overflow-hidden" style={{ borderColor: colors.border, background: colors.cardBg }}>
+                    {modelos.length === 0 ? (
+                      <p className="text-center py-6 text-[10px] font-black uppercase opacity-30" style={{ color: colors.textPrimary }}>Nenhum modelo salvo ainda</p>
+                    ) : (
+                      <div className="divide-y" style={{ borderColor: colors.border }}>
+                        {modelos.map(m => (
+                          <div key={m.id} className="flex items-center gap-3 px-4 py-3 hover:bg-black/5 transition-colors">
+                            <span className="text-lg">{m.tipo === 'text' ? '💬' : m.tipo === 'image' ? '🖼️' : m.tipo === 'button' ? '🔘' : '📋'}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-black text-xs truncate" style={{ color: colors.textPrimary }}>{m.nome}</div>
+                              <div className="text-[10px] opacity-40 truncate" style={{ color: colors.textPrimary }}>{m.mensagem}</div>
+                            </div>
+                            <button onClick={() => aplicarModelo(m)} className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase text-white transition-all hover:scale-105" style={{ background: colors.primary }}>Usar</button>
+                            <button onClick={() => deletarModelo(m.id)} className="px-2 py-1.5 rounded-lg text-[9px] font-black uppercase text-red-400 hover:bg-red-500/10 transition-colors">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Seletor de tipo */}
-              <div className="grid grid-cols-4 gap-2 p-1.5 rounded-2xl" style={{ background: theme === 'yoursystem' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.05)' }}>
+              <div className="grid grid-cols-5 gap-2 p-1.5 rounded-2xl" style={{ background: theme === 'yoursystem' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.05)' }}>
                 {tiposMsg.map(t => (
                   <button key={t.id} onClick={() => setTipoMensagem(t.id)} className={`py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1 ${tipoMensagem === t.id ? 'shadow-xl text-white scale-105' : 'opacity-40'}`} style={{ background: tipoMensagem === t.id ? colors.primary : 'transparent' }}>
                     <span className="text-base">{t.icon}</span>
@@ -621,8 +773,8 @@ const EnvioMassaPage: React.FC = () => {
 
               <section className="rounded-[2.5rem] shadow-2xl border p-8 space-y-5" style={{ background: colors.cardBg, borderColor: colors.border }}>
 
-                {/* Texto do body (todos os tipos) */}
-                <div className="space-y-2">
+                {/* Texto do body (exceto carrossel) */}
+                {tipoMensagem !== 'carousel' && <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>
                       {tipoMensagem === 'image' ? 'Legenda da Imagem' : 'Corpo da Mensagem'}
@@ -665,7 +817,7 @@ const EnvioMassaPage: React.FC = () => {
                     <span className="text-[9px] font-black uppercase opacity-30" style={{ color: colors.textPrimary }}>{mensagemTexto.length} caracteres</span>
                     <p className="text-[9px] font-black uppercase text-blue-500 tracking-tighter">Janela de 24h ativa ✓</p>
                   </div>
-                </div>
+                </div>}
 
                 {/* IMAGEM */}
                 {tipoMensagem === 'image' && (
@@ -729,6 +881,54 @@ const EnvioMassaPage: React.FC = () => {
                 )}
 
                 {/* LISTA */}
+                {/* CARROSSEL */}
+                {tipoMensagem === 'carousel' && (
+                  <div className="space-y-4">
+                    <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>Selecione um carrossel salvo</label>
+                    {templates.filter(t => t.category === 'INTERACTIVE_CAROUSEL').length === 0 ? (
+                      <div className="py-10 text-center text-[11px] opacity-40 font-black uppercase tracking-widest" style={{ color: colors.textPrimary }}>
+                        Nenhum carrossel criado ainda. Crie um em Templates.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {templates.filter(t => t.category === 'INTERACTIVE_CAROUSEL').map(tpl => {
+                          const carouselComp = tpl.components?.find((c: any) => c.type?.toUpperCase() === 'CAROUSEL');
+                          const cards = carouselComp?.example?.cards || [];
+                          const isSelected = carouselTemplateSelecionado?.id === tpl.id;
+                          return (
+                            <div
+                              key={tpl.id}
+                              onClick={() => setCarouselTemplateSelecionado(isSelected ? null : tpl)}
+                              className={`p-4 rounded-2xl border cursor-pointer transition-all ${isSelected ? 'ring-2' : 'opacity-60 hover:opacity-100'}`}
+                              style={{
+                                background: isSelected ? `${colors.primary}10` : colors.inputBg,
+                                borderColor: isSelected ? colors.primary : colors.border,
+                              }}
+                            >
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: colors.textPrimary }}>{tpl.name}</span>
+                                {isSelected && <span className="text-[9px] font-black text-green-500 uppercase">Selecionado ✓</span>}
+                              </div>
+                              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                                {cards.slice(0, 4).map((card: any, ci: number) => (
+                                  <div key={ci} className="flex-shrink-0 w-20 h-14 rounded-xl overflow-hidden bg-black/10 flex items-center justify-center">
+                                    {card.components?.find((c: any) => c.type === 'HEADER')?.example?.header_handle?.[0] ? (
+                                      <img src={card.components.find((c: any) => c.type === 'HEADER').example.header_handle[0]} className="w-full h-full object-cover" alt="" />
+                                    ) : (
+                                      <span className="text-2xl">🖼️</span>
+                                    )}
+                                  </div>
+                                ))}
+                                {cards.length > 4 && <div className="flex-shrink-0 w-20 h-14 rounded-xl bg-black/5 flex items-center justify-center text-[9px] font-black opacity-40" style={{ color: colors.textPrimary }}>+{cards.length - 4}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {tipoMensagem === 'list' && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-3">
@@ -762,11 +962,34 @@ const EnvioMassaPage: React.FC = () => {
 
               </section>
 
-              <div className="flex justify-between">
+              {/* Salvar modelo */}
+              {showSalvarModelo && (
+                <div className="flex gap-3 items-center p-4 rounded-2xl border" style={{ borderColor: `${colors.primary}44`, background: `${colors.primary}08` }}>
+                  <input
+                    value={nomeModelo}
+                    onChange={e => setNomeModelo(e.target.value)}
+                    placeholder="Nome do modelo..."
+                    className="flex-1 px-4 py-2.5 rounded-xl border outline-none text-xs font-medium"
+                    style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
+                    onKeyDown={e => e.key === 'Enter' && salvarModelo()}
+                  />
+                  <button onClick={salvarModelo} disabled={salvandoModelo || !nomeModelo.trim()} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase text-white disabled:opacity-40 transition-all" style={{ background: colors.primary }}>
+                    {salvandoModelo ? '...' : 'Salvar'}
+                  </button>
+                  <button onClick={() => { setShowSalvarModelo(false); setNomeModelo(''); }} className="px-3 py-2.5 rounded-xl text-[10px] opacity-40 hover:opacity-70 transition-opacity" style={{ color: colors.textPrimary }}>✕</button>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center">
                 <button onClick={() => setStep(1)} className="px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest opacity-50 hover:bg-black/5 transition-all" style={{ color: colors.textPrimary }}>← Voltar</button>
-                <button onClick={enviarMensagem} disabled={enviando || !podeEnviar} className="px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-30" style={{ background: colors.gradientButton }}>
-                  {enviando ? 'Enviando...' : `Disparar para ${contatosSelecionados.size} Contatos`}
-                </button>
+                <div className="flex gap-3">
+                  {tipoMensagem !== 'carousel' && <button onClick={() => { setShowSalvarModelo(v => !v); setNomeModelo(''); }} className="px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest border transition-all hover:scale-105" style={{ borderColor: `${colors.primary}44`, color: colors.primary }}>
+                    💾 Salvar
+                  </button>}
+                  <button onClick={enviarMensagem} disabled={enviando || !podeEnviar} className="px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-30" style={{ background: colors.gradientButton }}>
+                    {enviando ? 'Enviando...' : `Disparar para ${contatosSelecionados.size} Contatos`}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -792,6 +1015,22 @@ const EnvioMassaPage: React.FC = () => {
                     buttons={[msgListaBtnText || 'Ver opções']}
                   />
                 )}
+                {tipoMensagem === 'carousel' && carouselTemplateSelecionado && (() => {
+                  const cc = carouselTemplateSelecionado.components?.find((c: any) => c.type?.toUpperCase() === 'CAROUSEL');
+                  const cards = (cc?.example?.cards || []).map((card: any) => ({
+                    headerUrl: card.components?.find((c: any) => c.type === 'HEADER')?.example?.header_handle?.[0] || '',
+                    bodyText: card.components?.find((c: any) => c.type === 'BODY')?.text || '',
+                    buttonDisplayText: card.components?.find((c: any) => c.type === 'BUTTONS')?.buttons?.[0]?.text || 'Ver Mais',
+                    buttonUrl: card.components?.find((c: any) => c.type === 'BUTTONS')?.buttons?.[0]?.url || '',
+                  }));
+                  return (
+                    <MessagePreview
+                      body={carouselTemplateSelecionado.components?.find((c: any) => c.type === 'BODY')?.text || 'Confira nossas ofertas:'}
+                      isCarousel
+                      carouselCards={cards}
+                    />
+                  );
+                })()}
               </div>
             </div>
           </div>

@@ -616,6 +616,13 @@ class DevUsuario(Base):
     webhook_url = Column(Text)
     webhook_secret = Column(String(255))
 
+    # Cartao salvo para cobrança automatica (Customer + Card MP)
+    mp_customer_id = Column(String(100), index=True)   # ID do Customer no MP
+    mp_card_id = Column(String(100))                   # ID do cartao salvo no MP
+    mp_card_last4 = Column(String(4))                  # Ultimos 4 digitos (display)
+    mp_card_method = Column(String(30))                # visa/master/etc
+    proximo_cobr_numeros = Column(DateTime(timezone=True))  # Proxima cobrança de numeros
+
     # Status e trial
     status = Column(String(20), default='trial')  # trial/active/overdue/blocked
     trial_inicio = Column(DateTime(timezone=True), server_default=func.now())
@@ -627,6 +634,7 @@ class DevUsuario(Base):
     # Relationships
     auth = relationship("DevAuth", back_populates="dev", uselist=False)
     api_keys = relationship("ApiKey", back_populates="dev", cascade="all, delete-orphan")
+    numeros = relationship("DevNumero", back_populates="dev", cascade="all, delete-orphan")
     assinaturas = relationship("Assinatura", back_populates="dev")
     gateway_logs = relationship("GatewayLog", back_populates="dev")
 
@@ -663,6 +671,33 @@ class ApiKey(Base):
     # Relationships
     dev = relationship("DevUsuario", back_populates="api_keys")
     gateway_logs = relationship("GatewayLog", back_populates="api_key")
+
+
+class DevNumero(Base):
+    """Numero WhatsApp vinculado a um desenvolvedor (suporte multi-numero)."""
+    __tablename__ = "dev_numero"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dev_id = Column(Integer, ForeignKey("dev_usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    phone_number_id = Column(String(50), unique=True, nullable=False, index=True)
+    waba_id = Column(String(50), nullable=False)
+    whatsapp_token = Column(Text, nullable=False)
+    display_phone_number = Column(String(30))
+    verified_name = Column(String(255))
+
+    # Billing Mercado Pago
+    mp_preapproval_id = Column(String(100), index=True)   # ID da assinatura MP
+    mp_subscription_status = Column(String(30))            # authorized/pending/cancelled
+    mp_init_point = Column(Text)                           # link de pagamento para o dev autorizar
+
+    # Status do numero na plataforma
+    status = Column(String(20), default='pending')  # pending/active/suspended/cancelled
+    primeiro_uso_em = Column(DateTime(timezone=True))
+    ativo = Column(Boolean, default=True)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    dev = relationship("DevUsuario", back_populates="numeros")
 
 
 # ==================== PLANOS & ASSINATURAS ====================
@@ -757,6 +792,30 @@ class GatewayLog(Base):
 
 
 # ==================== RECUPERAÇÃO DE SENHA ====================
+
+class ModeloMensagem(Base):
+    """
+    Modelos de mensagem customizados para envio em massa (texto, imagem, botões, lista).
+    Independentes dos templates Meta — criados e gerenciados pelo próprio usuário.
+    """
+    __tablename__ = "modelo_mensagem"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(255), nullable=False)
+    tipo = Column(String(20), nullable=False, default="text")  # text, image, button, list
+    mensagem = Column(Text, nullable=False)
+    header = Column(String(500), nullable=True)
+    footer = Column(String(500), nullable=True)
+    media_url = Column(String(1000), nullable=True)  # URL completa da imagem
+    buttons = Column(JSON, nullable=True)   # [{id, title}]
+    button_text = Column(String(100), nullable=True)  # texto do botão de lista
+    sections = Column(JSON, nullable=True)  # [{title, rows: [{id, title, description}]}]
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    empresa = relationship("Empresa")
+
 
 class TokenResetSenha(Base):
     """Tokens para recuperação de senha (empresa, atendente ou dev)."""

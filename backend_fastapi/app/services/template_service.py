@@ -611,6 +611,8 @@ class TemplateService:
         template_components: List[Dict],
         parameter_values: Optional[Dict[str, str]] = None,
         media_url: Optional[str] = None,
+        header_image_path: Optional[str] = None,
+        public_base_url: Optional[str] = None,
     ) -> List[Dict]:
         """
         Monta os components para envio baseado nos parâmetros do template.
@@ -624,17 +626,21 @@ class TemplateService:
             # Header com mídia
             if comp_type == "HEADER":
                 fmt = comp.get("format", "TEXT")
-                if fmt in ("IMAGE", "VIDEO", "DOCUMENT") and media_url:
-                    media_type = fmt.lower()
-                    if media_type == "document":
+                if fmt in ("IMAGE", "VIDEO", "DOCUMENT"):
+                    # Prioridade: media_url explícito → header_image_path local → CDN handle
+                    effective_url = media_url
+                    if not effective_url and header_image_path and public_base_url:
+                        effective_url = f"{public_base_url.rstrip('/')}{header_image_path}"
+                    if not effective_url:
+                        handle = comp.get("example", {}).get("header_handle", [])
+                        if handle:
+                            effective_url = handle[0]
+
+                    if effective_url:
+                        media_type = fmt.lower()
                         send_components.append({
                             "type": "header",
-                            "parameters": [{"type": media_type, media_type: {"link": media_url}}]
-                        })
-                    else:
-                        send_components.append({
-                            "type": "header",
-                            "parameters": [{"type": media_type, media_type: {"link": media_url}}]
+                            "parameters": [{"type": media_type, media_type: {"link": effective_url}}]
                         })
                 elif fmt == "TEXT" and parameter_values:
                     # Check for header params like {{1}}

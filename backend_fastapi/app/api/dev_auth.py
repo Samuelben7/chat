@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import secrets
 
 from app.database.database import get_db
-from app.models.models import DevUsuario, DevAuth, TokenResetSenha, TokenConfirmacaoEmailDev
+from app.models.models import DevUsuario, DevAuth, DevNumero, TokenResetSenha, TokenConfirmacaoEmailDev
 from app.schemas.dev import (
     DevRegistroRequest, DevRegistroResponse, DevLoginRequest, DevTokenResponse,
     DevConnectWhatsAppRequest, DevPerfilResponse,
@@ -156,10 +156,29 @@ async def connect_whatsapp_dev(
     # Registrar numero
     await register_phone_number(dados.phone_number_id, access_token)
 
-    # Salvar credenciais
+    # Salvar credenciais legadas no DevUsuario
     dev.whatsapp_token = access_token
     dev.phone_number_id = dados.phone_number_id
     dev.waba_id = dados.waba_id
+
+    # Criar/atualizar DevNumero (multi-numero)
+    numero = db.query(DevNumero).filter(
+        DevNumero.phone_number_id == dados.phone_number_id
+    ).first()
+    if not numero:
+        numero = DevNumero(
+            dev_id=dev.id,
+            phone_number_id=dados.phone_number_id,
+            waba_id=dados.waba_id,
+            whatsapp_token=access_token,
+            status="pending",
+            ativo=True,
+        )
+        db.add(numero)
+    else:
+        numero.whatsapp_token = access_token
+        numero.waba_id = dados.waba_id
+
     db.commit()
 
     return {

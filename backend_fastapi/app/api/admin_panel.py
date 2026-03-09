@@ -10,7 +10,7 @@ from typing import Optional, List
 from app.database.database import get_db
 from app.models.models import (
     DevUsuario, Assinatura, Pagamento, Plano, GatewayLog,
-    Empresa, ApiKey
+    Empresa, ApiKey, DevNumero
 )
 from app.core.dependencies import CurrentUser
 from app.services.mercadopago_platform import MercadoPagoPlatformService
@@ -62,13 +62,20 @@ async def listar_devs(
             ApiKey.ativa == True
         ).scalar()
 
+        # Total de numeros ativos
+        numeros_count = db.query(func.count(DevNumero.id)).filter(
+            DevNumero.dev_id == dev.id,
+            DevNumero.ativo == True,
+        ).scalar()
+
         result.append({
             "id": dev.id,
             "nome": dev.nome,
             "email": dev.email,
             "empresa_nome": dev.empresa_nome,
             "status": dev.status,
-            "whatsapp_conectado": bool(dev.phone_number_id),
+            "whatsapp_conectado": bool(dev.phone_number_id) or numeros_count > 0,
+            "numeros_count": numeros_count,
             "trial_fim": dev.trial_fim.isoformat() if dev.trial_fim else None,
             "criado_em": dev.criado_em.isoformat() if dev.criado_em else None,
             "plano": assinatura.plano.nome if assinatura and assinatura.plano else "Sem plano",
@@ -94,6 +101,7 @@ async def detalhe_dev(
     keys = db.query(ApiKey).filter(ApiKey.dev_id == dev_id).order_by(ApiKey.criada_em.desc()).all()
     assinaturas = db.query(Assinatura).filter(Assinatura.dev_id == dev_id).order_by(Assinatura.data_inicio.desc()).all()
     pagamentos = db.query(Pagamento).filter(Pagamento.dev_id == dev_id).order_by(Pagamento.criado_em.desc()).limit(20).all()
+    numeros = db.query(DevNumero).filter(DevNumero.dev_id == dev_id).order_by(DevNumero.criado_em.desc()).all()
 
     # Uso do mes
     from app.services.usage_tracker import usage_tracker
@@ -147,6 +155,22 @@ async def detalhe_dev(
             for p in pagamentos
         ],
         "usage": usage,
+        "numeros": [
+            {
+                "id": n.id,
+                "phone_number_id": n.phone_number_id,
+                "display_phone_number": n.display_phone_number,
+                "verified_name": n.verified_name,
+                "waba_id": n.waba_id,
+                "status": n.status,
+                "mp_subscription_status": n.mp_subscription_status,
+                "mp_preapproval_id": n.mp_preapproval_id,
+                "primeiro_uso_em": n.primeiro_uso_em,
+                "ativo": n.ativo,
+                "criado_em": n.criado_em,
+            }
+            for n in numeros
+        ],
     }
 
 

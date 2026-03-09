@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle/ThemeToggle';
 import api from '../services/api';
@@ -83,7 +83,7 @@ const NODE_TYPE_CONFIG: Record<string, { icon: string; color: string; label: str
   gerar_pagamento: { icon: '💰', color: '#16A34A', label: 'PIX/Pagamento' },
 };
 
-// ==================== INTERACTIVE CHAT PREVIEW ====================
+// ==================== INTERACTIVE CHAT PREVIEW (IPHONE STYLE PREMIUM) ====================
 
 interface ChatMessage {
   type: 'bot' | 'user' | 'system';
@@ -98,9 +98,8 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [showListModal, setShowListModal] = useState(false);
   const [currentListItems, setCurrentListItems] = useState<BotFluxoOpcao[]>([]);
-  const [waitingInput, setWaitingInput] = useState(false);
   const [inputText, setInputText] = useState('');
-  const chatEndRef = React.useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const nodesById: Record<number, BotFluxoNo> = {};
   const nodesByIdent: Record<string, BotFluxoNo> = {};
@@ -109,10 +108,10 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
     nodesByIdent[n.identificador] = n;
   });
 
-  const botBubbleBg = theme === 'whatsapp' ? '#FFFFFF' : '#1a1f3a';
-  const botBubbleText = theme === 'whatsapp' ? '#111B21' : '#ffffff';
-  const userBubbleBg = theme === 'whatsapp' ? '#D9FDD3' : '#1e3a5f';
-  const timeSColor = theme === 'whatsapp' ? '#667781' : '#8899aa';
+  const bubbleBgBot = theme === 'whatsapp' ? (theme === 'dark' ? '#1B272E' : '#FFFFFF') : colors.cardBg;
+  const bubbleBgUser = theme === 'whatsapp' ? (theme === 'dark' ? '#005C4B' : '#D9FDD3') : colors.primary;
+  const bubbleText = theme === 'whatsapp' ? (theme === 'dark' ? '#E9EDEF' : '#111B21') : colors.textPrimary;
+  const secondaryText = theme === 'whatsapp' ? (theme === 'dark' ? '#8696A0' : '#667781') : colors.textSecondary;
 
   const scrollToBottom = () => {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -124,16 +123,15 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
 
     if (node.tipo === 'mensagem') {
       newHistory.push({ type: 'bot', content: node.conteudo || '', node });
-      // Auto advance to next node
       if (node.proximo_no_id && nodesById[node.proximo_no_id]) {
         return simulateNode(nodesById[node.proximo_no_id], newHistory);
       }
     } else if (node.tipo === 'botoes') {
       const sortedOpts = [...(node.opcoes || [])].sort((a, b) => a.ordem - b.ordem).slice(0, 3);
-      newHistory.push({ type: 'bot', content: node.conteudo || 'Escolha uma opcao:', node, buttons: sortedOpts });
+      newHistory.push({ type: 'bot', content: node.conteudo || 'Escolha uma opção:', node, buttons: sortedOpts });
     } else if (node.tipo === 'lista') {
       const sortedOpts = [...(node.opcoes || [])].sort((a, b) => a.ordem - b.ordem).slice(0, 10);
-      newHistory.push({ type: 'bot', content: node.conteudo || 'Selecione uma opcao:', node, listItems: sortedOpts });
+      newHistory.push({ type: 'bot', content: node.conteudo || 'Selecione uma opção:', node, listItems: sortedOpts });
     } else if (node.tipo === 'coletar_dado') {
       const dadoKey = node.dados_extras?.variavel || '';
       const dadoConfig = DADOS_COLETAVEIS[dadoKey];
@@ -150,24 +148,21 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
         return simulateNode(nodesById[node.proximo_no_id], newHistory);
       }
     } else if (node.tipo === 'webhook_externo') {
-      newHistory.push({ type: 'system', content: `${config.icon} Chamando webhook: ${node.dados_extras?.method || 'POST'} ...` });
+      newHistory.push({ type: 'system', content: `${config.icon} Chamando webhook...` });
       if (node.proximo_no_id && nodesById[node.proximo_no_id]) {
         return simulateNode(nodesById[node.proximo_no_id], newHistory);
       }
     } else if (node.tipo === 'condicional') {
-      newHistory.push({ type: 'system', content: `${config.icon} Condicao: ${node.dados_extras?.condicao || node.conteudo || '...'}` });
-      // Go true path by default in preview
+      newHistory.push({ type: 'system', content: `${config.icon} Condição: ${node.dados_extras?.condicao || node.conteudo || '...'}` });
       const opts = [...(node.opcoes || [])].sort((a, b) => a.ordem - b.ordem);
       if (opts.length > 0 && opts[0].proximo_no_id && nodesById[opts[0].proximo_no_id]) {
-        newHistory.push({ type: 'system', content: `-> ${opts[0].titulo || 'Verdadeiro'}` });
         return simulateNode(nodesById[opts[0].proximo_no_id], newHistory);
       }
     } else if (node.tipo === 'gerar_pagamento') {
       const valor = node.dados_extras?.valor || '0.00';
-      const desc = node.dados_extras?.descricao || 'Pagamento';
       newHistory.push({
         type: 'bot',
-        content: `💰 Pagamento PIX gerado!\n\nValor: R$ ${parseFloat(valor).toFixed(2)}\nDescricao: ${desc}\n\nCodigo PIX:\n00020126360014BR.GOV.BCB.PIX... (simulado)`,
+        content: `💰 Pagamento PIX gerado!\n\nValor: R$ ${parseFloat(valor).toFixed(2)}\n\nCódigo PIX:\n00020126360014BR.GOV.BCB.PIX...`,
         node
       });
       if (node.proximo_no_id && nodesById[node.proximo_no_id]) {
@@ -179,7 +174,6 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
   };
 
   const startSimulation = () => {
-    // Find start node
     const startNode = nodesByIdent['inicio'] || (nos.length > 0 ? [...nos].sort((a, b) => a.ordem - b.ordem)[0] : null);
     if (!startNode) {
       setChatHistory([]);
@@ -187,11 +181,9 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
     }
     const history = simulateNode(startNode, []);
     setChatHistory(history);
-    setWaitingInput(false);
     scrollToBottom();
   };
 
-  // Reset simulation when nodes change
   useEffect(() => {
     startSimulation();
   }, [nos]);
@@ -202,7 +194,7 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
       const result = simulateNode(nodesById[opcao.proximo_no_id], newHistory);
       setChatHistory(result);
     } else {
-      setChatHistory([...newHistory, { type: 'system' as const, content: '(Sem proximo no configurado)' }]);
+      setChatHistory([...newHistory, { type: 'system' as const, content: '(Fim do fluxo)' }]);
     }
     setShowListModal(false);
     scrollToBottom();
@@ -213,7 +205,6 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
     const lastBotMsg = [...chatHistory].reverse().find(m => m.type === 'bot' && m.node);
     const newHistory = [...chatHistory, { type: 'user' as const, content: inputText }];
     setInputText('');
-    setWaitingInput(false);
 
     if (lastBotMsg?.node?.proximo_no_id && nodesById[lastBotMsg.node.proximo_no_id]) {
       const result = simulateNode(nodesById[lastBotMsg.node.proximo_no_id], newHistory);
@@ -224,292 +215,175 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
     scrollToBottom();
   };
 
-  // Check if last message needs input
   const lastMsg = chatHistory[chatHistory.length - 1];
   const needsInput = lastMsg?.type === 'bot' && lastMsg.node?.tipo === 'coletar_dado';
-  const hasButtons = lastMsg?.type === 'bot' && lastMsg.buttons && lastMsg.buttons.length > 0;
-  const hasList = lastMsg?.type === 'bot' && lastMsg.listItems && lastMsg.listItems.length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400, maxHeight: 650, position: 'relative' }}>
-      {/* Chat area */}
-      <div style={{
-        background: theme === 'whatsapp' ? '#E5DDD5' : '#0d1229',
-        ...(theme === 'whatsapp' && {
-          backgroundImage: `url(${whatsappBg})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-        }),
-        borderRadius: 12,
-        padding: 16,
-        flex: 1,
-        overflowY: 'auto',
-        position: 'relative',
-      }}>
-        {chatHistory.length === 0 ? (
-          <div style={{ textAlign: 'center', color: colors.textSecondary, paddingTop: 80 }}>
-            <p style={{ fontSize: 40, marginBottom: 8 }}>💬</p>
-            <p>Adicione etapas para ver a preview</p>
+    <div className="flex justify-center items-center py-6 rounded-[3rem] border transition-all duration-700 shadow-[0_20px_50px_rgba(0,0,0,0.2)]" style={{ background: theme === 'yoursystem' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.02)', borderColor: colors.border }}>
+      {/* FRAME DO IPHONE REALISTA PREMIUM */}
+      <div className="relative w-[300px] h-[610px] bg-[#000] rounded-[3.5rem] border-[10px] border-[#1a1a1a] shadow-2xl overflow-hidden scale-95 origin-top ring-2 ring-white/5">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-36 h-7 bg-[#1a1a1a] rounded-b-3xl z-50 flex items-center justify-center gap-2">
+           <div className="w-12 h-1.5 bg-white/10 rounded-full" />
+           <div className="w-2 h-2 rounded-full bg-white/10" />
+        </div>
+        
+        {/* WhatsApp Header Mockup Premium */}
+        <div className="absolute top-0 w-full h-24 flex items-end p-4 z-30 shadow-md" style={{ background: theme === 'whatsapp' ? (theme === 'dark' ? '#202C33' : '#075E54') : colors.sidebarBg }}>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-green-500 to-emerald-700 flex items-center justify-center text-white text-[10px] border border-white/20 font-black shadow-lg">🤖</div>
+            <div className="flex flex-col">
+              <span className="text-white text-[12px] font-black uppercase tracking-tight">Bot Simulator</span>
+              <span className="text-white/60 text-[9px] font-bold flex items-center gap-1">online <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /></span>
+            </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {chatHistory.map((msg, i) => {
-              if (msg.type === 'system') {
-                return (
-                  <div key={i} style={{ textAlign: 'center', padding: '4px 12px' }}>
-                    <span style={{
-                      background: theme === 'whatsapp' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                      padding: '3px 10px',
-                      borderRadius: 6,
-                    }}>
-                      {msg.content}
-                    </span>
-                  </div>
-                );
-              }
+          <button onClick={startSimulation} className="ml-auto mb-1 text-[12px] text-white/50 hover:text-white transition-colors">↻</button>
+        </div>
 
-              if (msg.type === 'user') {
-                return (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <div style={{
-                      background: userBubbleBg,
-                      borderRadius: '12px 12px 0 12px',
-                      padding: '8px 12px',
-                      maxWidth: '75%',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
-                    }}>
-                      <p style={{ color: botBubbleText, fontSize: 13, margin: 0 }}>{msg.content}</p>
-                      <div style={{ textAlign: 'right', marginTop: 2 }}>
-                        <span style={{ fontSize: 10, color: timeSColor }}>12:01</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
-
-              // Bot message
-              const hasInteractive = (msg.buttons && msg.buttons.length > 0) || (msg.listItems && msg.listItems.length > 0);
-              const headerImg = msg.node?.dados_extras?.header_image_url;
-
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                  <div style={{
-                    maxWidth: '80%',
-                    background: botBubbleBg,
-                    borderRadius: '12px 12px 12px 0',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
-                    overflow: 'hidden',
-                  }}>
-                    {/* Header image */}
-                    {headerImg && (
-                      <div style={{
-                        width: '100%',
-                        height: 140,
-                        background: `url(${resolveImageUrl(headerImg)}) center/cover no-repeat`,
-                        backgroundColor: theme === 'whatsapp' ? '#e0e0e0' : '#1e2340',
-                      }} />
-                    )}
-
-                    <div style={{ padding: '8px 12px' }}>
-                      {msg.node?.titulo && (
-                        <p style={{ fontWeight: 600, color: botBubbleText, fontSize: 13, margin: '0 0 4px' }}>
-                          {msg.node.titulo}
-                        </p>
-                      )}
-                      <p style={{ color: botBubbleText, fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }}>
+        <div className="w-full h-full pt-24 pb-12 px-3 flex flex-col justify-start overflow-hidden relative" style={{ backgroundImage: `url(${whatsappBg})`, backgroundSize: 'cover', backgroundBlendMode: theme === 'dark' ? 'multiply' : 'normal', backgroundColor: theme === 'dark' ? '#0B141A' : 'transparent' }}>
+          
+          <div className="flex flex-col items-start w-full mt-2 space-y-3 relative z-10 no-scrollbar overflow-y-auto max-h-full pb-10">
+            {chatHistory.length === 0 ? (
+              <div className="w-full text-center py-24 opacity-30">
+                <span className="text-5xl block mb-4">🤖</span>
+                <span className="text-[11px] font-black uppercase tracking-[0.2em]" style={{ color: colors.textPrimary }}>Inicie o fluxo</span>
+              </div>
+            ) : (
+              chatHistory.map((msg, i) => {
+                if (msg.type === 'system') {
+                  return (
+                    <div key={i} className="w-full flex justify-center py-1">
+                      <span className="text-[9px] font-black uppercase px-3 py-1.5 rounded-full bg-black/20 text-white/50 backdrop-blur-md border border-white/5">
                         {msg.content}
-                      </p>
-                      <div style={{ textAlign: 'right', marginTop: 2 }}>
-                        <span style={{ fontSize: 10, color: timeSColor }}>12:00</span>
+                      </span>
+                    </div>
+                  );
+                }
+
+                if (msg.type === 'user') {
+                  return (
+                    <div key={i} className="w-full flex justify-end">
+                      <div className="max-w-[85%] relative p-2.5 shadow-xl" style={{ background: bubbleBgUser, borderRadius: '15px 0 15px 15px' }}>
+                        <p className="text-[12px] leading-tight font-medium" style={{ color: theme === 'dark' ? '#fff' : '#111' }}>{msg.content}</p>
+                        <div className="flex justify-end mt-1 items-center gap-1">
+                          <span className="text-[9px] opacity-50" style={{ color: theme === 'dark' ? '#fff' : '#111' }}>12:01</span>
+                          <span className="text-[12px] leading-none text-blue-400">✓✓</span>
+                        </div>
+                        <div className="absolute top-0 -right-1.5 w-3 h-3" style={{ backgroundColor: bubbleBgUser, clipPath: 'polygon(0 0, 0 100%, 100% 0)' }} />
                       </div>
                     </div>
+                  );
+                }
 
-                    {/* Interactive buttons */}
-                    {msg.buttons && msg.buttons.length > 0 && i === chatHistory.length - 1 &&
-                      msg.buttons.map((opt, oi) => (
-                        <div
-                          key={opt.id || oi}
-                          onClick={() => handleOptionClick(opt)}
-                          style={{
-                            borderTop: `1px solid ${theme === 'whatsapp' ? '#e5e7eb' : '#2a3050'}`,
-                            padding: '10px 12px',
-                            textAlign: 'center',
-                            color: '#0088cc',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            transition: 'background 0.15s',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = theme === 'whatsapp' ? '#f0f0f0' : '#252a4a')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          {opt.titulo}
+                const headerImg = msg.node?.dados_extras?.header_image_url;
+                return (
+                  <div key={i} className="w-full flex justify-start">
+                    <div className="max-w-[85%] relative shadow-xl overflow-hidden border border-black/5" style={{ background: bubbleBgBot, borderRadius: '0 15px 15px 15px' }}>
+                      {headerImg && (
+                        <div className="w-full aspect-video bg-black/5">
+                          <img src={resolveImageUrl(headerImg)} alt="header" className="w-full h-full object-cover" />
                         </div>
-                      ))
-                    }
-
-                    {/* Non-interactive buttons (history) */}
-                    {msg.buttons && msg.buttons.length > 0 && i !== chatHistory.length - 1 &&
-                      msg.buttons.map((opt, oi) => (
-                        <div
-                          key={opt.id || oi}
-                          style={{
-                            borderTop: `1px solid ${theme === 'whatsapp' ? '#e5e7eb' : '#2a3050'}`,
-                            padding: '8px 12px',
-                            textAlign: 'center',
-                            color: `${colors.primary}66`,
-                            fontSize: 13,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {opt.titulo}
+                      )}
+                      <div className="p-3.5">
+                        {msg.node?.titulo && <p className="text-[11px] font-black uppercase mb-1 tracking-tight" style={{ color: colors.primary }}>{msg.node.titulo}</p>}
+                        <p className="text-[12px] leading-relaxed font-medium whitespace-pre-wrap" style={{ color: bubbleText }}>{msg.content}</p>
+                        <div className="flex justify-end mt-1">
+                          <span className="text-[9px] opacity-50" style={{ color: secondaryText }}>12:00</span>
                         </div>
-                      ))
-                    }
-
-                    {/* List button */}
-                    {msg.listItems && msg.listItems.length > 0 && i === chatHistory.length - 1 && (
-                      <div
-                        onClick={() => { setCurrentListItems(msg.listItems!); setShowListModal(true); }}
-                        style={{
-                          borderTop: `1px solid ${theme === 'whatsapp' ? '#e5e7eb' : '#2a3050'}`,
-                          padding: '10px 12px',
-                          textAlign: 'center',
-                          color: '#0088cc',
-                          fontSize: 13,
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Ver opcoes ({msg.listItems.length})
                       </div>
-                    )}
+
+                      {/* Botões Interativos */}
+                      {msg.buttons && msg.buttons.length > 0 && i === chatHistory.length - 1 && (
+                        <div className="flex flex-col border-t divide-y" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
+                          {msg.buttons.map((opt, oi) => (
+                            <button
+                              key={oi}
+                              onClick={() => handleOptionClick(opt)}
+                              className="w-full py-3 text-[11px] font-black uppercase tracking-tight text-blue-500 hover:bg-black/5 transition-colors"
+                            >
+                              {opt.titulo}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Lista */}
+                      {msg.listItems && msg.listItems.length > 0 && i === chatHistory.length - 1 && (
+                        <button
+                          onClick={() => { setCurrentListItems(msg.listItems!); setShowListModal(true); }}
+                          className="w-full py-3 border-t text-[11px] font-black uppercase tracking-tight text-blue-500 hover:bg-black/5 transition-colors flex items-center justify-center gap-2"
+                          style={{ borderColor: 'rgba(0,0,0,0.05)' }}
+                        >
+                          📋 Ver opções
+                        </button>
+                      )}
+                    </div>
+                    {/* Tail do Balão */}
+                    <div className="absolute top-0 -left-1.5 w-3 h-3" style={{ backgroundColor: bubbleBgBot, clipPath: 'polygon(100% 0, 0 0, 100% 100%)' }} />
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
             <div ref={chatEndRef} />
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Input area for coletar_dado */}
-      {needsInput && (
-        <div style={{
-          display: 'flex',
-          gap: 8,
-          padding: '8px 0',
-          marginTop: 4,
-        }}>
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleUserInput()}
-            placeholder={`Digite ${DADOS_COLETAVEIS[lastMsg?.node?.dados_extras?.variavel]?.label || 'resposta'}...`}
-            style={{
-              flex: 1,
-              padding: '8px 12px',
-              borderRadius: 20,
-              border: `1px solid ${colors.inputBorder}`,
-              background: colors.inputBg,
-              color: colors.textPrimary,
-              fontSize: 13,
-              outline: 'none',
-            }}
-          />
-          <button
-            onClick={handleUserInput}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 20,
-              background: colors.gradientButton,
-              color: '#fff',
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Enviar
+        {/* Input area mockup premium */}
+        <div className="absolute bottom-0 w-full p-3 bg-black/20 backdrop-blur-xl border-t border-white/5 flex gap-2 items-center z-40">
+          <div className="flex-1 bg-white/10 rounded-2xl px-4 py-2 flex items-center">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleUserInput()}
+              placeholder={needsInput ? "Responda aqui..." : "Simulação ativa"}
+              disabled={!needsInput}
+              className="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/30 font-medium"
+            />
+          </div>
+          <button onClick={handleUserInput} className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white shadow-lg active:scale-95 transition-all">
+             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+             </svg>
           </button>
         </div>
-      )}
 
-      {/* Reset button */}
-      {chatHistory.length > 0 && (
-        <button
-          onClick={startSimulation}
-          style={{
-            marginTop: 6,
-            padding: '6px 12px',
-            borderRadius: 8,
-            background: 'rgba(239, 68, 68, 0.15)',
-            color: '#ef4444',
-            border: 'none',
-            fontSize: 12,
-            cursor: 'pointer',
-            width: '100%',
-          }}
-        >
-          Reiniciar simulacao
-        </button>
-      )}
+        {/* List Modal Premium (Corrigido) */}
+        {showListModal && (
+          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end animate-in fade-in slide-in-from-bottom-10 duration-300">
+            <div 
+              className="bg-white rounded-t-[2rem] p-5 flex flex-col shadow-2xl border-t border-white/20 transition-all duration-500"
+              style={{ maxHeight: '55%' }}
+            >
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4 flex-shrink-0" />
 
-      {/* List selection modal - contained inside preview */}
-      {showListModal && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(0,0,0,0.4)',
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'center',
-          zIndex: 10,
-          borderRadius: 12,
-        }}
-          onClick={() => setShowListModal(false)}
-        >
-          <div
-            style={{
-              background: colors.cardBg,
-              borderRadius: '12px 12px 0 0',
-              padding: 12,
-              width: '100%',
-              maxHeight: '60%',
-              overflowY: 'auto',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <div style={{ width: 32, height: 3, borderRadius: 2, background: colors.border, margin: '0 auto 6px' }} />
-              <p style={{ color: colors.textPrimary, fontWeight: 600, fontSize: 14, margin: 0 }}>Opcoes</p>
-            </div>
-            {currentListItems.map((item, i) => (
-              <div
-                key={item.id || i}
-                onClick={() => handleOptionClick(item)}
-                style={{
-                  padding: '10px 12px',
-                  borderBottom: `1px solid ${colors.border}`,
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = colors.hoverBg)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                <p style={{ color: colors.textPrimary, fontWeight: 500, fontSize: 13, margin: 0 }}>{item.titulo}</p>
-                {item.descricao && (
-                  <p style={{ color: colors.textSecondary, fontSize: 11, margin: '2px 0 0' }}>{item.descricao}</p>
-                )}
+              <div className="text-center mb-4 flex-shrink-0">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-400 mb-1">Opções Disponíveis</p>
+                <h3 className="text-sm font-black text-gray-900 uppercase tracking-tighter">Selecione uma opção</h3>
               </div>
-            ))}
+
+              <div className="overflow-y-auto space-y-2 pr-1 custom-scrollbar pb-4 flex-1">
+                {currentListItems.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleOptionClick(item)}
+                    className="w-full p-4 rounded-2xl border border-gray-100 text-left hover:bg-blue-50 active:scale-[0.98] transition-all flex flex-col gap-1 shadow-sm group"
+                  >
+                    <span className="text-[13px] font-black text-gray-800 group-hover:text-blue-600 transition-colors">{item.titulo}</span>
+                    {item.descricao && <span className="text-[11px] text-gray-400 font-medium leading-tight">{item.descricao}</span>}
+                  </button>
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setShowListModal(false)} 
+                className="w-full py-4 mt-2 text-[11px] font-black uppercase tracking-[0.2em] text-rose-500 hover:bg-rose-50 rounded-2xl transition-all flex-shrink-0 border border-transparent hover:border-rose-100"
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}      </div>
     </div>
   );
 };
@@ -803,425 +677,371 @@ const BotBuilder: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen p-6" style={{ background: colors.dashboardBg }}>
-      <div className="max-w-[1600px] mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex justify-between items-start">
+    <div className="flex flex-col transition-all duration-500 overflow-hidden" style={{ background: colors.dashboardBg, height: '100vh' }}>
+      {/* Background Orbs */}
+      {theme === 'yoursystem' && (
+        <>
+          <div className="fixed top-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full opacity-20 blur-[120px] pointer-events-none" style={{ background: colors.primary }} />
+          <div className="fixed bottom-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full opacity-10 blur-[100px] pointer-events-none" style={{ background: '#8b5cf6' }} />
+        </>
+      )}
+
+      {/* Header Premium */}
+      <header className="h-24 border-b px-8 flex items-center justify-between sticky top-0 z-50 backdrop-blur-2xl" style={{ background: `${colors.cardBg}88`, borderColor: colors.border }}>
+        <div className="flex items-center gap-8">
+          <button onClick={() => window.location.href = '/empresa/dashboard'} className="p-4 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all text-2xl shadow-lg active:scale-90" style={{ color: colors.textPrimary }}>←</button>
+          <div className="h-10 w-[1px] opacity-10" style={{ background: colors.textPrimary }} />
           <div>
-            <h1 className="text-3xl font-bold mb-1" style={{
-              backgroundImage: colors.gradient,
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              color: 'transparent',
-              display: 'inline-block',
-            }}>
-              🤖 Bot Builder
-            </h1>
-            <p style={{ color: colors.textSecondary }}>
-              Crie e configure o fluxo do seu bot de atendimento
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => window.location.href = '/empresa/dashboard'}
-              className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: colors.hoverBg, color: colors.textSecondary, border: `1px solid ${colors.border}` }}
-            >
-              ← Dashboard
-            </button>
-            <ThemeToggle />
+            <h1 className="text-xl font-black uppercase tracking-[0.25em]" style={{ color: colors.textPrimary }}>Bot <span style={{ color: colors.primary }}>Builder</span></h1>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-40 mt-0.5" style={{ color: colors.textPrimary }}>Architecting Intelligence</p>
           </div>
         </div>
 
-        {/* 3-Column Grid: Fluxos | Editor | Chat Preview */}
-        <div className="grid grid-cols-12 gap-6">
-
-          {/* LEFT: Lista de Fluxos (col-span-3) */}
-          <div className="col-span-3">
-            <div className="rounded-2xl p-4" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold" style={{ color: colors.textPrimary }}>
-                  Meus Fluxos
-                </h2>
-                <button
-                  onClick={() => setModalNovoFluxo(true)}
-                  className="px-3 py-1.5 rounded-full font-semibold transition-all text-white text-sm"
-                  style={{ background: colors.gradientButton }}
-                >
-                  + Novo
-                </button>
-              </div>
-
-              <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                {fluxos.map((fluxo) => (
-                  <div
-                    key={fluxo.id}
-                    className="p-3 rounded-lg cursor-pointer transition-all"
-                    style={{
-                      background: fluxoSelecionado?.id === fluxo.id ? `${colors.primary}15` : colors.hoverBg,
-                      border: `1px solid ${fluxoSelecionado?.id === fluxo.id ? colors.primary : 'transparent'}`
-                    }}
-                    onClick={() => carregarFluxoDetalhado(fluxo.id)}
-                  >
-                    <div className="flex justify-between items-start mb-1">
-                      <h3 className="font-semibold text-sm" style={{ color: colors.textPrimary }}>
-                        {fluxo.nome}
-                      </h3>
-                      {fluxo.ativo && (
-                        <span className="text-xs px-2 py-0.5 rounded-full" style={{
-                          background: 'rgba(34, 197, 94, 0.2)',
-                          color: '#22c55e'
-                        }}>
-                          Ativo
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs mb-2" style={{ color: colors.textSecondary }}>
-                      {fluxo.descricao || 'Sem descrição'}
-                    </p>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          ativarFluxo(fluxo.id, !fluxo.ativo);
-                        }}
-                        className="text-xs px-2 py-0.5 rounded-full transition-all"
-                        style={{
-                          background: fluxo.ativo ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
-                          color: fluxo.ativo ? '#ef4444' : '#22c55e'
-                        }}
-                      >
-                        {fluxo.ativo ? 'Desativar' : 'Ativar'}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deletarFluxo(fluxo.id);
-                        }}
-                        className="text-xs px-2 py-0.5 rounded-full transition-all"
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.2)',
-                          color: '#ef4444'
-                        }}
-                      >
-                        Deletar
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {fluxos.length === 0 && (
-                  <div className="text-center py-8" style={{ color: colors.textSecondary }}>
-                    Nenhum fluxo criado ainda
-                  </div>
-                )}
-              </div>
-            </div>
+        <div className="flex items-center gap-6">
+          <div className="hidden md:flex flex-col items-end mr-2">
+            <span className="text-[10px] font-black uppercase tracking-widest opacity-30" style={{ color: colors.textPrimary }}>Workspace</span>
+            <span className="text-xs font-bold" style={{ color: colors.primary }}>Production Env</span>
           </div>
+          <ThemeToggle />
+          <button onClick={() => window.location.href = '/empresa/dashboard'} className="px-8 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] border border-blue-500/40 text-blue-500 bg-blue-500/5 hover:bg-blue-500 hover:text-white transition-all shadow-xl active:scale-95">Dashboard</button>
+        </div>
+      </header>
 
-          {/* CENTER: Editor de Fluxo (col-span-5) */}
-          <div className="col-span-5">
-            {loading ? (
-              <div className="text-center py-12" style={{ color: colors.textSecondary }}>
-                Carregando...
-              </div>
-            ) : fluxoSelecionado ? (
-              <div className="rounded-2xl p-5" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <h2 className="text-xl font-bold" style={{ color: colors.textPrimary }}>
-                      {fluxoSelecionado.nome}
-                    </h2>
-                    <p className="text-xs" style={{ color: colors.textSecondary }}>
-                      {fluxoSelecionado.descricao}
-                    </p>
-                  </div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* SIDEBAR: Lista de Fluxos Premium */}
+        <aside className="w-85 border-r flex flex-col transition-all duration-500 shadow-2xl z-40 backdrop-blur-xl" style={{ background: `${colors.sidebarBg}aa`, borderColor: colors.border }}>
+          <div className="p-8 border-b flex items-center justify-between" style={{ borderColor: colors.border }}>
+            <div className="flex flex-col">
+               <h2 className="font-black text-[11px] uppercase tracking-[0.2em]" style={{ color: colors.textPrimary }}>Meus Fluxos</h2>
+               <span className="text-[9px] font-black uppercase opacity-30 tracking-widest mt-0.5" style={{ color: colors.textPrimary }}>Total: {fluxos.length}</span>
+            </div>
+            <button 
+              onClick={() => setModalNovoFluxo(true)} 
+              className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center font-black hover:scale-110 active:scale-90 transition-all shadow-xl shadow-blue-500/20"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar">
+            {fluxos.map((fluxo) => (
+              <div
+                key={fluxo.id}
+                onClick={() => carregarFluxoDetalhado(fluxo.id)}
+                className={`p-6 rounded-[2rem] border cursor-pointer transition-all duration-500 group relative overflow-hidden ${fluxoSelecionado?.id === fluxo.id ? 'shadow-2xl scale-[1.02]' : 'hover:shadow-xl hover:border-white/20'}`}
+                style={{ 
+                  background: fluxoSelecionado?.id === fluxo.id ? `${colors.primary}25` : colors.cardBg, 
+                  borderColor: fluxoSelecionado?.id === fluxo.id ? colors.primary : colors.border 
+                }}
+              >
+                {fluxoSelecionado?.id === fluxo.id && <div className="absolute left-0 top-0 bottom-0 w-2" style={{ background: colors.primary, boxShadow: `0 0 20px ${colors.primary}` }} />}
+                
+                <div className="flex justify-between items-start mb-4">
+                  <span className="font-black text-[14px] uppercase tracking-tighter line-clamp-1 flex-1 pr-3" style={{ color: fluxoSelecionado?.id === fluxo.id ? colors.primary : colors.textPrimary }}>{fluxo.nome}</span>
+                  <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-[0.1em] border shadow-sm ${fluxo.ativo ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border-rose-500/30'}`}>
+                    {fluxo.ativo ? '● Publicado' : 'Pausado'}
+                  </span>
+                </div>
+                <p className="text-[13px] font-medium leading-relaxed mb-5" style={{ color: colors.textPrimary, opacity: 0.8 }}>
+                  {fluxo.descricao || 'Fluxo inteligente sem descrição definida.'}
+                </p>
+                <div className="flex gap-5 pt-5 border-t border-black/5" style={{ borderColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }}>
                   <button
-                    onClick={() => setModalNovoNo(true)}
-                    className="px-3 py-1.5 rounded-full font-semibold transition-all text-white text-sm"
-                    style={{ background: colors.gradientButton }}
+                    onClick={(e) => { e.stopPropagation(); ativarFluxo(fluxo.id, !fluxo.ativo); }}
+                    className="text-[10px] font-black uppercase tracking-[0.2em] hover:opacity-70 transition-all active:scale-95"
+                    style={{ color: fluxo.ativo ? '#fb7185' : '#34d399' }}
                   >
-                    + Etapa
+                    {fluxo.ativo ? 'Interromper' : 'Publicar'}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deletarFluxo(fluxo.id); }}
+                    className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 hover:opacity-100 hover:text-red-500 transition-all ml-auto"
+                    style={{ color: colors.textPrimary }}
+                  >
+                    Remover
                   </button>
                 </div>
-
-                {/* Node List with Connection Lines */}
-                <div className="space-y-1">
-                  {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map((no, index) => {
-                    const config = NODE_TYPE_CONFIG[no.tipo] || NODE_TYPE_CONFIG.mensagem;
-                    const isExpanded = expandedNodeId === no.id;
-
-                    return (
-                      <React.Fragment key={no.id}>
-                        {/* Connection line */}
-                        {index > 0 && (
-                          <div style={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            padding: '2px 0',
-                          }}>
-                            <div style={{
-                              width: 2,
-                              height: 20,
-                              background: `${colors.primary}44`,
-                            }} />
-                          </div>
-                        )}
-
-                        <div
-                          className="rounded-lg cursor-pointer transition-all"
-                          style={{
-                            background: colors.inputBg,
-                            borderLeft: `3px solid ${config.color}`,
-                            border: `1px solid ${isExpanded ? config.color : colors.inputBorder}`,
-                            borderLeftWidth: 3,
-                            borderLeftColor: config.color,
-                          }}
-                          onClick={() => setExpandedNodeId(isExpanded ? null : (no.id || null))}
-                        >
-                          {/* Compact header */}
-                          <div className="p-3 flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg">{config.icon}</span>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm" style={{ color: colors.textPrimary }}>
-                                    {no.titulo || no.identificador}
-                                  </span>
-                                  <span className="text-xs px-1.5 py-0.5 rounded" style={{
-                                    background: `${config.color}22`,
-                                    color: config.color,
-                                    fontSize: 10,
-                                  }}>
-                                    {config.label}
-                                  </span>
-                                </div>
-                                {!isExpanded && no.conteudo && (
-                                  <p className="text-xs truncate max-w-[200px]" style={{ color: colors.textSecondary }}>
-                                    {no.conteudo.substring(0, 60)}{no.conteudo.length > 60 ? '...' : ''}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {no.opcoes.length > 0 && (
-                                <span className="text-xs" style={{ color: colors.textSecondary }}>
-                                  {no.opcoes.length} opções
-                                </span>
-                              )}
-                              <span style={{ color: colors.textSecondary, fontSize: 12 }}>
-                                {isExpanded ? '▲' : '▼'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Expanded content */}
-                          {isExpanded && (
-                            <div className="px-3 pb-3">
-                              <p className="text-xs mb-1" style={{ color: colors.textSecondary }}>
-                                ID: {no.identificador}
-                              </p>
-
-                              {no.conteudo && (
-                                <div className="mb-2 p-2 rounded" style={{ background: colors.hoverBg }}>
-                                  <p className="text-sm whitespace-pre-wrap" style={{ color: colors.textSecondary }}>
-                                    {no.conteudo}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Extra data for new types */}
-                              {no.dados_extras && Object.keys(no.dados_extras).length > 0 && (
-                                <div className="mb-2 p-2 rounded" style={{ background: `${config.color}0d` }}>
-                                  {no.tipo === 'coletar_dado' && no.dados_extras.variavel ? (
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs px-2 py-0.5 rounded" style={{
-                                        background: `${config.color}22`,
-                                        color: config.color,
-                                        fontWeight: 600,
-                                      }}>
-                                        {DADOS_COLETAVEIS[no.dados_extras.variavel]?.label || no.dados_extras.variavel}
-                                      </span>
-                                      <span className="text-xs" style={{ color: colors.textSecondary }}>
-                                        Validacao: {DADOS_COLETAVEIS[no.dados_extras.variavel]?.validacao || '?'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    Object.entries(no.dados_extras).map(([key, val]) => (
-                                      <p key={key} className="text-xs" style={{ color: colors.textSecondary }}>
-                                        <span style={{ color: config.color, fontWeight: 600 }}>{key}:</span> {String(val)}
-                                      </p>
-                                    ))
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Next node reference */}
-                              {no.proximo_no_id && (() => {
-                                const nextNode = fluxoSelecionado?.nos.find(n => n.id === no.proximo_no_id);
-                                const label = nextNode ? `${NODE_TYPE_CONFIG[nextNode.tipo]?.icon || '?'} ${nextNode.titulo || nextNode.identificador}` : `ID ${no.proximo_no_id}`;
-                                return (
-                                  <div className="mb-2 p-1.5 rounded flex items-center gap-1" style={{ background: `${colors.primary}0d` }}>
-                                    <span className="text-xs" style={{ color: colors.primary }}>
-                                      {'\u2192 ' + label}
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-
-                              {/* Options */}
-                              {no.opcoes.length > 0 && (
-                                <div className="space-y-1">
-                                  <p className="text-xs font-semibold" style={{ color: config.color }}>Opcoes:</p>
-                                  {no.opcoes.sort((a, b) => a.ordem - b.ordem).map((opcao, oi) => (
-                                    <div
-                                      key={opcao.id || oi}
-                                      className="p-1.5 rounded"
-                                      style={{ background: `${config.color}0d` }}
-                                    >
-                                      <div className="flex justify-between items-center">
-                                        <span className="text-xs font-medium" style={{ color: colors.textPrimary }}>
-                                          {opcao.titulo}
-                                        </span>
-                                        <span className="text-xs" style={{ color: colors.textSecondary }}>
-                                          {opcao.tipo}
-                                        </span>
-                                      </div>
-                                      {opcao.proximo_no_id && (() => {
-                                        const nextNode = fluxoSelecionado?.nos.find(n => n.id === opcao.proximo_no_id);
-                                        const label = nextNode ? `${NODE_TYPE_CONFIG[nextNode.tipo]?.icon || '?'} ${nextNode.titulo || nextNode.identificador}` : `ID ${opcao.proximo_no_id}`;
-                                        return (
-                                          <span className="text-xs" style={{ color: colors.primary }}>
-                                            {'\u2192 ' + label}
-                                          </span>
-                                        );
-                                      })()}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              <div className="mt-2 flex gap-2">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); abrirEdicaoNo(no); }}
-                                  className="text-xs px-3 py-1 rounded-full transition-all"
-                                  style={{
-                                    background: `${colors.primary}22`,
-                                    color: colors.primary
-                                  }}
-                                >
-                                  Editar
-                                </button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); no.id && deletarNo(no.id); }}
-                                  className="text-xs px-3 py-1 rounded-full transition-all"
-                                  style={{
-                                    background: 'rgba(239, 68, 68, 0.15)',
-                                    color: '#ef4444'
-                                  }}
-                                >
-                                  Deletar
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
-
-                  {fluxoSelecionado.nos.length === 0 && (
-                    <div className="text-center py-12" style={{ color: colors.textSecondary }}>
-                      <p className="mb-2">Nenhuma etapa criada ainda</p>
-                      <p className="text-xs">Clique em "+ Etapa" para começar</p>
-                    </div>
-                  )}
-                </div>
               </div>
-            ) : (
-              <div className="rounded-2xl p-12 text-center" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-                <span className="text-5xl mb-4 block">🤖</span>
-                <p className="text-lg mb-2" style={{ color: colors.textPrimary }}>
-                  Selecione um fluxo
-                </p>
-                <p className="text-sm" style={{ color: colors.textSecondary }}>
-                  Escolha um fluxo na lista ao lado para começar a editar
-                </p>
+            ))}
+            {fluxos.length === 0 && (
+              <div className="text-center py-16 opacity-20 flex flex-col items-center">
+                <span className="text-4xl mb-3">📭</span>
+                <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: colors.textPrimary }}>Lista vazia</span>
               </div>
             )}
           </div>
+        </aside>
 
-          {/* RIGHT: Chat Preview (col-span-4) */}
-          <div className="col-span-4">
-            <div className="rounded-2xl p-4" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-              <h2 className="text-lg font-bold mb-3" style={{ color: colors.textPrimary }}>
-                Preview do Chat
-              </h2>
-              <BotChatPreview nos={fluxoSelecionado?.nos || []} />
-            </div>
+        {/* MAIN CONTENT: Editor Premium */}
+        <main className="flex-1 overflow-y-auto no-scrollbar relative z-10" style={{ background: colors.dashboardBg }}>
+          <div className="max-w-7xl mx-auto p-10 lg:p-14">
+            {loading ? (
+              <div className="flex h-[60vh] items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                   <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                   <span className="text-[10px] font-black uppercase tracking-[0.3em] animate-pulse" style={{ color: colors.primary }}>Syncing Core...</span>
+                </div>
+              </div>
+            ) : fluxoSelecionado ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+                {/* Editor Area */}
+                <div className="lg:col-span-7 xl:col-span-8 space-y-10 animate-in fade-in slide-in-from-left-4 duration-1000">
+                  <section className="rounded-[3rem] shadow-[0_30px_60px_rgba(0,0,0,0.15)] border p-10 space-y-8 backdrop-blur-xl" style={{ background: `${colors.cardBg}ee`, borderColor: colors.border }}>
+                    <div className="flex justify-between items-center pb-6 border-b border-white/5">
+                      <div>
+                        <h2 className="text-3xl font-black uppercase tracking-tighter" style={{ color: colors.textPrimary }}>{fluxoSelecionado.nome}</h2>
+                        <div className="flex items-center gap-3 mt-1.5">
+                           <span className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>Visual Flow Designer</span>
+                           <span className="w-1 h-1 rounded-full bg-blue-500 opacity-30" />
+                           <span className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>{fluxoSelecionado.nos.length} Stages</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setModalNovoNo(true)}
+                        className="px-10 py-4 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] text-white shadow-2xl hover:scale-105 active:scale-95 transition-all"
+                        style={{ background: colors.gradientButton }}
+                      >
+                        + Nova Etapa
+                      </button>
+                    </div>
+
+                    <div className="space-y-6 pt-4 relative">
+                      {/* Central Line Background */}
+                      <div className="absolute left-[39px] top-10 bottom-20 w-[2px] opacity-5 pointer-events-none" style={{ background: colors.textPrimary }} />
+
+                      {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map((no, index) => {
+                        const config = NODE_TYPE_CONFIG[no.tipo] || NODE_TYPE_CONFIG.mensagem;
+                        const isExpanded = expandedNodeId === no.id;
+
+                        return (
+                          <div key={no.id} className="relative z-10">
+                            <div
+                              className={`rounded-[2.2rem] border transition-all duration-700 overflow-hidden ${isExpanded ? 'shadow-[0_20px_50px_rgba(0,0,0,0.2)] ring-4 ring-white/5' : 'hover:shadow-xl hover:border-white/10'}`}
+                              style={{ 
+                                background: isExpanded ? `${config.color}08` : colors.cardBg, 
+                                borderColor: isExpanded ? config.color : colors.border 
+                              }}
+                            >
+                              {/* Header Stage */}
+                              <div 
+                                className="p-6 flex justify-between items-center cursor-pointer group"
+                                onClick={() => setExpandedNodeId(isExpanded ? null : (no.id || null))}
+                              >
+                                <div className="flex items-center gap-6">
+                                  <div className="w-14 h-14 rounded-[1.2rem] flex items-center justify-center text-2xl shadow-2xl transition-all duration-700 group-hover:scale-110 group-hover:rotate-3" style={{ background: `${config.color}22`, color: config.color, border: `1px solid ${config.color}33` }}>
+                                    {config.icon}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-black text-sm uppercase tracking-tight" style={{ color: colors.textPrimary }}>
+                                        {no.titulo || no.identificador}
+                                      </span>
+                                      <span className="text-[9px] font-black uppercase tracking-[0.15em] px-2.5 py-1 rounded-lg" style={{ background: `${config.color}15`, color: config.color, border: `1px solid ${config.color}22` }}>
+                                        {config.label}
+                                      </span>
+                                    </div>
+                                    {!isExpanded && no.conteudo && (
+                                      <p className="text-[11px] opacity-40 font-medium truncate max-w-[400px] mt-1" style={{ color: colors.textPrimary }}>
+                                        {no.conteudo}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-6">
+                                  {no.opcoes.length > 0 && (
+                                    <span className="hidden sm:inline-block text-[10px] font-black uppercase tracking-widest opacity-20" style={{ color: colors.textPrimary }}>
+                                      {no.opcoes.length} Path{no.opcoes.length > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                  <div className={`w-8 h-8 rounded-full bg-white/5 flex items-center justify-center transition-all duration-700 ${isExpanded ? 'rotate-180 bg-white/10' : ''}`}>
+                                     <span className="opacity-30" style={{ color: colors.textPrimary }}>▼</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Content Stage */}
+                              {isExpanded && (
+                                <div className="px-8 pb-8 pt-2 space-y-6 animate-in slide-in-from-top-6 duration-700">
+                                  <div className="h-[1px] w-full opacity-5" style={{ background: colors.textPrimary }} />
+                                  
+                                  <div className="flex flex-col gap-6">
+                                    {no.conteudo && (
+                                      <div className="p-5 rounded-[1.5rem] bg-black/5 border border-white/5">
+                                        <p className="text-[12px] font-medium leading-relaxed whitespace-pre-wrap" style={{ color: colors.textPrimary }}>
+                                          {no.conteudo}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* Extra details (PIX, Webhook, etc) */}
+                                    {no.dados_extras && Object.keys(no.dados_extras).length > 0 && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {Object.entries(no.dados_extras).map(([key, val]) => (
+                                          key !== 'header_image_url' && (
+                                            <div key={key} className="p-4 rounded-2xl bg-black/5 border border-white/5 flex flex-col gap-1">
+                                              <span className="text-[9px] font-black uppercase tracking-widest opacity-30" style={{ color: colors.textPrimary }}>{key}</span>
+                                              <span className="text-[12px] font-black" style={{ color: config.color }}>{String(val)}</span>
+                                            </div>
+                                          )
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Image Preview */}
+                                    {no.dados_extras?.header_image_url && (
+                                      <div className="rounded-[1.5rem] overflow-hidden border border-white/10 shadow-2xl">
+                                        <div className="bg-black/20 p-2 border-b border-white/5 flex items-center justify-between">
+                                           <span className="text-[9px] font-black uppercase tracking-widest opacity-40 ml-2">Media Asset</span>
+                                           <div className="flex gap-1">
+                                              <div className="w-1.5 h-1.5 rounded-full bg-red-500/40" />
+                                              <div className="w-1.5 h-1.5 rounded-full bg-yellow-500/40" />
+                                              <div className="w-1.5 h-1.5 rounded-full bg-green-500/40" />
+                                           </div>
+                                        </div>
+                                        <img src={resolveImageUrl(no.dados_extras.header_image_url)} alt="preview" className="w-full h-48 object-cover transition-transform duration-1000 hover:scale-105" />
+                                      </div>
+                                    )}
+
+                                    {/* Options / Buttons */}
+                                    {no.opcoes.length > 0 && (
+                                      <div className="space-y-3">
+                                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 flex items-center gap-2">
+                                           <div className="w-1 h-1 rounded-full bg-blue-500" />
+                                           Paths & Interaction
+                                        </h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                          {no.opcoes.sort((a, b) => a.ordem - b.ordem).map((opcao, oi) => (
+                                            <div key={oi} className="p-4 rounded-[1.2rem] border group/path flex flex-col gap-2 transition-all hover:bg-white/5" style={{ background: `${colors.primary}05`, borderColor: `${colors.primary}15` }}>
+                                              <div className="flex justify-between items-center">
+                                                <span className="text-[12px] font-black" style={{ color: colors.textPrimary }}>{opcao.titulo}</span>
+                                                <span className="text-[9px] font-black uppercase tracking-widest opacity-30 px-2 py-0.5 rounded-lg bg-black/10">{opcao.tipo}</span>
+                                              </div>
+                                              {opcao.proximo_no_id && (
+                                                <div className="flex items-center gap-2 opacity-60">
+                                                  <span className="text-blue-500 text-xs font-bold">↳</span>
+                                                  <span className="text-[10px] font-black uppercase tracking-tight truncate" style={{ color: colors.primary }}>
+                                                    {fluxoSelecionado.nos.find(n => n.id === opcao.proximo_no_id)?.titulo || 'Stage #'+opcao.proximo_no_id}
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Quick Actions Stage */}
+                                    <div className="flex gap-4 pt-6 border-t border-white/5">
+                                      <button onClick={(e) => { e.stopPropagation(); abrirEdicaoNo(no); }} className="flex-1 py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all bg-blue-500/10 hover:bg-blue-500 text-blue-500 hover:text-white border border-blue-500/20 shadow-lg active:scale-95">Editar Etapa</button>
+                                      <button onClick={(e) => { e.stopPropagation(); no.id && deletarNo(no.id); }} className="px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 transition-all active:scale-95">Remover</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {fluxoSelecionado.nos.length === 0 && (
+                        <div className="text-center py-24 rounded-[3rem] border-4 border-dashed opacity-20 flex flex-col items-center group cursor-pointer hover:opacity-40 transition-opacity" style={{ borderColor: colors.border }} onClick={() => setModalNovoNo(true)}>
+                          <span className="text-6xl block mb-6 transition-transform duration-700 group-hover:scale-110 group-hover:rotate-6">✨</span>
+                          <p className="text-[11px] font-black uppercase tracking-[0.3em]">Canvas Inicial</p>
+                          <p className="text-[10px] mt-2 font-medium">Clique para desenhar a primeira interação do bot</p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                {/* Preview Area Premium */}
+                <div className="lg:col-span-5 xl:col-span-4">
+                  <div className="sticky top-32 space-y-8 animate-in fade-in slide-in-from-right-4 duration-1000">
+                    <BotChatPreview nos={fluxoSelecionado.nos} />
+                    
+                    <div className="p-8 rounded-[2.5rem] border shadow-[0_20px_40px_rgba(0,0,0,0.1)] space-y-6 backdrop-blur-xl" style={{ background: `${colors.cardBg}aa`, borderColor: colors.border }}>
+                      <div className="flex justify-between items-center">
+                        <div className="flex flex-col">
+                           <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40" style={{ color: colors.textPrimary }}>Deployment Status</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 bg-black/10 px-4 py-2 rounded-full border border-white/5">
+                           <span className={`w-2 h-2 rounded-full ${fluxoSelecionado.ativo ? 'bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-gray-400'}`} />
+                           <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: fluxoSelecionado.ativo ? colors.green : colors.textSecondary }}>{fluxoSelecionado.ativo ? 'Active & Live' : 'Maintenance'}</span>
+                        </div>
+                      </div>
+                      <div className="h-[1px] w-full bg-white/5" />
+                      <div className="flex flex-col items-center gap-1 opacity-30">
+                         <p className="text-[9px] font-black uppercase tracking-[0.2em] text-center" style={{ color: colors.textPrimary }}>Cloud Auto-Sync Active</p>
+                         <p className="text-[8px] font-medium" style={{ color: colors.textPrimary }}>Last synced: {new Date().toLocaleTimeString()}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-[70vh] space-y-10 animate-in zoom-in-95 duration-1000">
+                <div className="relative group">
+                   <div className="absolute -inset-4 bg-blue-500/20 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
+                   <div className="w-32 h-32 rounded-[2.5rem] bg-gradient-to-tr from-white/5 to-white/10 border border-white/10 flex items-center justify-center text-6xl shadow-2xl relative z-10 transition-transform duration-1000 group-hover:scale-110 group-hover:rotate-12">🤖</div>
+                </div>
+                <div className="text-center space-y-4 max-w-lg">
+                  <h2 className="text-4xl font-black uppercase tracking-tighter" style={{ color: colors.textPrimary }}>Crie seu <span className="text-blue-500">Mestre Digital</span></h2>
+                  <p className="text-[12px] font-medium opacity-40 leading-relaxed uppercase tracking-[0.1em]" style={{ color: colors.textPrimary }}>Selecione um projeto na barra lateral ou inicie um novo design de conversação agora mesmo.</p>
+                </div>
+                <button onClick={() => setModalNovoFluxo(true)} className="px-12 py-5 rounded-2xl font-black text-[12px] uppercase tracking-[0.25em] text-white shadow-[0_20px_40px_rgba(59,130,246,0.3)] hover:scale-105 active:scale-95 transition-all" style={{ background: colors.gradientButton }}>Começar Novo Projeto</button>
+              </div>
+            )}
           </div>
-        </div>
+        </main>
       </div>
 
-      {/* Modal Novo Fluxo */}
-      {modalNovoFluxo && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: colors.modalOverlay }}>
-          <div className="rounded-2xl p-8 max-w-md w-full mx-4" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.textPrimary }}>
-              Novo Fluxo
-            </h2>
+      {/* ==================== MODALS PREMIUM ==================== */}
 
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Nome do Fluxo
-                </label>
+      {modalNovoFluxo && (
+        <div className="fixed inset-0 flex items-center justify-center z-[100] backdrop-blur-xl transition-all" style={{ background: 'rgba(0,0,0,0.85)' }}>
+          <div className="rounded-[2.5rem] p-10 max-w-lg w-full mx-4 shadow-[0_50px_100px_rgba(0,0,0,0.5)] border animate-in zoom-in-95 duration-500" style={{ background: colors.cardBg, borderColor: colors.border }}>
+            <div className="text-center mb-8">
+               <h2 className="text-3xl font-black uppercase tracking-tighter" style={{ color: colors.textPrimary }}>Novo Fluxo</h2>
+               <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mt-1" style={{ color: colors.textPrimary }}>Inicie um novo projeto de automação</p>
+            </div>
+
+            <div className="space-y-6 mb-10">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Nome do Projeto</label>
                 <input
                   type="text"
                   value={nomeFluxo}
                   onChange={(e) => setNomeFluxo(e.target.value)}
-                  placeholder="Ex: Atendimento Padrão"
-                  className="w-full px-4 py-3 rounded-lg outline-none"
-                  style={inputStyle}
+                  placeholder="Ex: Suporte VIP"
+                  className="w-full px-6 py-4 rounded-2xl outline-none border transition-all focus:ring-4 focus:ring-blue-500/20 font-bold"
+                  style={{ ...inputStyle, borderColor: colors.border }}
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Descrição
-                </label>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Breve Descrição</label>
                 <textarea
                   value={descricaoFluxo}
                   onChange={(e) => setDescricaoFluxo(e.target.value)}
-                  placeholder="Descreva o objetivo deste fluxo"
+                  placeholder="Qual o objetivo deste robô?"
                   rows={3}
-                  className="w-full px-4 py-3 rounded-lg outline-none resize-none"
-                  style={inputStyle}
+                  className="w-full px-6 py-4 rounded-2xl outline-none border transition-all focus:ring-4 focus:ring-blue-500/20 font-medium resize-none"
+                  style={{ ...inputStyle, borderColor: colors.border }}
                 />
               </div>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-4">
               <button
                 onClick={criarFluxo}
                 disabled={!nomeFluxo}
-                className="flex-1 py-3 rounded-full font-semibold transition-all disabled:opacity-50 text-white"
+                className="flex-1 py-5 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all disabled:opacity-30 text-white shadow-xl hover:scale-[1.02] active:scale-95"
                 style={{ background: colors.gradientButton }}
               >
-                Criar Fluxo
+                Configurar Fluxo
               </button>
               <button
-                onClick={() => {
-                  setModalNovoFluxo(false);
-                  setNomeFluxo('');
-                  setDescricaoFluxo('');
-                }}
-                className="px-6 py-3 rounded-full font-semibold transition-all"
-                style={{
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  color: '#ef4444'
-                }}
+                onClick={() => { setModalNovoFluxo(false); setNomeFluxo(''); setDescricaoFluxo(''); }}
+                className="px-8 py-5 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all hover:bg-red-500/10 text-red-500 border border-red-500/20"
               >
                 Cancelar
               </button>
@@ -1230,46 +1050,56 @@ const BotBuilder: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Novo No - Enhanced with new node types */}
+      {/* Modal Novo No Premium */}
       {modalNovoNo && fluxoSelecionado && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 overflow-y-auto" style={{ background: colors.modalOverlay }}>
-          <div className="rounded-2xl p-8 max-w-2xl w-full mx-4 my-8" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.textPrimary }}>
-              Nova Etapa do Bot
-            </h2>
+        <div className="fixed inset-0 flex items-center justify-center z-[100] backdrop-blur-xl transition-all overflow-y-auto py-10" style={{ background: 'rgba(0,0,0,0.85)' }}>
+          <div className="rounded-[3rem] p-10 max-w-3xl w-full mx-4 shadow-[0_50px_100px_rgba(0,0,0,0.5)] border animate-in zoom-in-95 duration-500" style={{ background: colors.cardBg, borderColor: colors.border }}>
+            <div className="text-center mb-10">
+               <h2 className="text-3xl font-black uppercase tracking-tighter" style={{ color: colors.textPrimary }}>Nova Etapa</h2>
+               <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mt-1" style={{ color: colors.textPrimary }}>Adicionando inteligência ao fluxo: {fluxoSelecionado.nome}</p>
+            </div>
 
-            <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Identificador (unico)
-                </label>
-                <input
-                  type="text"
-                  value={novoNo.identificador}
-                  onChange={(e) => setNovoNo({ ...novoNo, identificador: e.target.value })}
-                  placeholder="Ex: saudacao, menu_principal"
-                  className="w-full px-4 py-3 rounded-lg outline-none"
-                  style={inputStyle}
-                />
+            <div className="space-y-8 mb-10 max-h-[60vh] overflow-y-auto no-scrollbar pr-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Identificador Interno</label>
+                  <input
+                    type="text"
+                    value={novoNo.identificador}
+                    onChange={(e) => setNovoNo({ ...novoNo, identificador: e.target.value })}
+                    placeholder="Ex: inicio_vendas"
+                    className="w-full px-6 py-4 rounded-2xl outline-none border font-bold"
+                    style={{ ...inputStyle, borderColor: colors.border }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Título de Exibição (Opcional)</label>
+                  <input
+                    type="text"
+                    value={novoNo.titulo}
+                    onChange={(e) => setNovoNo({ ...novoNo, titulo: e.target.value })}
+                    placeholder="Ex: Saudação Inicial"
+                    className="w-full px-6 py-4 rounded-2xl outline-none border font-bold"
+                    style={{ ...inputStyle, borderColor: colors.border }}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Tipo
-                </label>
-                <div className="grid grid-cols-4 gap-2">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Selecione o Tipo de Interação</label>
+                <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                   {Object.entries(NODE_TYPE_CONFIG).map(([key, config]) => (
                     <button
                       key={key}
                       onClick={() => setNovoNo({ ...novoNo, tipo: key, opcoes: [], dados_extras: {} })}
-                      className="p-2 rounded-lg text-center transition-all"
+                      className="p-4 rounded-[1.5rem] text-center transition-all group border-2 relative overflow-hidden"
                       style={{
-                        background: novoNo.tipo === key ? `${config.color}22` : colors.hoverBg,
-                        border: `1px solid ${novoNo.tipo === key ? config.color : 'transparent'}`,
+                        background: novoNo.tipo === key ? `${config.color}15` : 'transparent',
+                        borderColor: novoNo.tipo === key ? config.color : 'rgba(255,255,255,0.03)',
                       }}
                     >
-                      <span className="text-lg block">{config.icon}</span>
-                      <span className="text-xs" style={{ color: novoNo.tipo === key ? config.color : colors.textSecondary }}>
+                      <span className="text-2xl block mb-2 transition-transform group-hover:scale-125 duration-500">{config.icon}</span>
+                      <span className="text-[9px] font-black uppercase tracking-widest block" style={{ color: novoNo.tipo === key ? config.color : colors.textSecondary }}>
                         {config.label}
                       </span>
                     </button>
@@ -1277,133 +1107,79 @@ const BotBuilder: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Titulo (opcional)
-                </label>
-                <input
-                  type="text"
-                  value={novoNo.titulo}
-                  onChange={(e) => setNovoNo({ ...novoNo, titulo: e.target.value })}
-                  placeholder="Titulo da etapa"
-                  className="w-full px-4 py-3 rounded-lg outline-none"
-                  style={inputStyle}
-                />
-              </div>
-
-              {/* Content field - not for delay/webhook/pagamento */}
               {!['delay', 'webhook_externo', 'gerar_pagamento'].includes(novoNo.tipo) && (
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                    {novoNo.tipo === 'condicional' ? 'Condição' :
-                     novoNo.tipo === 'coletar_dado' ? 'Mensagem de solicitação' :
-                     'Mensagem'}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>
+                    {novoNo.tipo === 'condicional' ? 'Lógica da Condição' : novoNo.tipo === 'coletar_dado' ? 'Mensagem de Solicitação' : 'Mensagem do Bot'}
                   </label>
                   <textarea
                     value={novoNo.conteudo}
                     onChange={(e) => setNovoNo({ ...novoNo, conteudo: e.target.value })}
                     placeholder={
                       novoNo.tipo === 'condicional' ? 'Ex: dados.cpf != null' :
-                      novoNo.tipo === 'coletar_dado' ? 'Ex: Por favor, informe seu CPF:' :
-                      'Digite a mensagem que o bot enviará'
+                      novoNo.tipo === 'coletar_dado' ? 'Ex: Por favor, informe seu nome completo:' :
+                      'O que o robô deve dizer nesta etapa?'
                     }
-                    rows={3}
-                    className="w-full px-4 py-3 rounded-lg outline-none resize-none"
-                    style={inputStyle}
+                    rows={4}
+                    className="w-full px-6 py-4 rounded-[1.8rem] outline-none border font-medium resize-none"
+                    style={{ ...inputStyle, borderColor: colors.border }}
                   />
                 </div>
               )}
 
-              {/* Image upload for botoes and mensagem */}
+              {/* Upload Section Premium */}
               {['botoes', 'mensagem'].includes(novoNo.tipo) && (
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                    Imagem (opcional)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <label
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all text-sm"
-                      style={{
-                        background: colors.inputBg,
-                        border: `1px dashed ${novoNo.dados_extras?.header_image_url ? colors.primary : colors.inputBorder}`,
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      <span>{novoNo.dados_extras?.header_image_url ? '🖼️ Trocar imagem' : '📤 Carregar imagem'}</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
-                        style={{ display: 'none' }}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (file.size > 5 * 1024 * 1024) { alert('Imagem muito grande. Maximo 5MB.'); return; }
-                          const formData = new FormData();
-                          formData.append('file', file);
-                          try {
-                            const res = await api.post('/bot-builder/upload-imagem', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-                            updateDadosExtras('header_image_url', res.data.url);
-                          } catch (err: any) {
-                            alert(err.response?.data?.detail || 'Erro ao fazer upload');
-                          }
-                        }}
-                      />
-                    </label>
+                <div className="space-y-3 p-6 rounded-[2rem] border border-dashed border-white/10 bg-white/5">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>Mídia do Cabeçalho (WhatsApp)</label>
                     {novoNo.dados_extras?.header_image_url && (
-                      <button
-                        onClick={() => updateDadosExtras('header_image_url', '')}
-                        className="text-xs px-2 py-1 rounded"
-                        style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}
-                      >
-                        Remover
-                      </button>
+                      <button onClick={() => updateDadosExtras('header_image_url', '')} className="text-[9px] font-black uppercase text-red-500 hover:opacity-70">Descartar</button>
                     )}
                   </div>
-                  {novoNo.dados_extras?.header_image_url && (
-                    <div style={{
-                      marginTop: 6,
-                      borderRadius: 8,
-                      overflow: 'hidden',
-                      height: 80,
-                      background: `url(${resolveImageUrl(novoNo.dados_extras.header_image_url)}) center/cover no-repeat`,
-                      backgroundColor: colors.hoverBg,
-                      border: `1px solid ${colors.border}`,
-                    }} />
+                  {!novoNo.dados_extras?.header_image_url ? (
+                    <label className="flex flex-col items-center justify-center gap-3 p-10 rounded-2xl cursor-pointer hover:bg-white/5 transition-all group">
+                        <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </div>
+                        <span className="text-[11px] font-black uppercase tracking-widest opacity-40">Upload JPG, PNG ou WEBP (Max 5MB)</span>
+                        <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                           const file = e.target.files?.[0];
+                           if (!file) return;
+                           const formData = new FormData();
+                           formData.append('file', file);
+                           try {
+                             const res = await api.post('/bot-builder/upload-imagem', formData);
+                             updateDadosExtras('header_image_url', res.data.url);
+                           } catch (err) { alert('Falha no upload'); }
+                        }} />
+                    </label>
+                  ) : (
+                    <div className="rounded-xl overflow-hidden h-32 border border-white/10 relative group">
+                       <img src={resolveImageUrl(novoNo.dados_extras.header_image_url)} alt="preview" className="w-full h-full object-cover" />
+                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          <span className="text-white text-[10px] font-black uppercase tracking-widest">Imagem Carregada</span>
+                       </div>
+                    </div>
                   )}
-                  <p className="text-xs mt-1" style={{ color: colors.textSecondary }}>
-                    Envia imagem acima da mensagem no WhatsApp
-                  </p>
                 </div>
               )}
 
-              {/* === NEW NODE TYPE FIELDS === */}
-
-              {/* Coletar Dado - Dropdown fixo de tipos */}
+              {/* Coletar Dado */}
               {novoNo.tipo === 'coletar_dado' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.coletar_dado.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      Qual dado coletar?
-                    </label>
+                <div className="p-6 rounded-[2rem] border-2 border-pink-500/20 bg-pink-500/5 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>O que vamos perguntar?</label>
                     <select
                       value={novoNo.dados_extras?.variavel || ''}
                       onChange={(e) => {
                         const key = e.target.value;
                         const config = DADOS_COLETAVEIS[key];
-                        setNovoNo({
-                          ...novoNo,
-                          conteudo: config ? config.placeholder : '',
-                          dados_extras: {
-                            ...novoNo.dados_extras,
-                            variavel: key,
-                            validacao: config ? config.validacao : 'texto',
-                          }
-                        });
+                        setNovoNo({ ...novoNo, conteudo: config ? config.placeholder : '', dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: config ? config.validacao : 'texto' } });
                       }}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
+                      className="w-full px-6 py-4 rounded-2xl outline-none border font-bold shadow-sm focus:ring-4 focus:ring-pink-500/10 transition-all"
+                      style={{ ...inputStyle, borderColor: colors.border }}
                     >
-                      <option value="">-- Selecione o dado --</option>
+                      <option value="">-- Escolha o campo de destino --</option>
                       {(() => {
                         const grupos: Record<string, string[]> = {};
                         Object.entries(DADOS_COLETAVEIS).forEach(([key, cfg]) => {
@@ -1420,525 +1196,43 @@ const BotBuilder: React.FC = () => {
                       })()}
                     </select>
                   </div>
-                  {novoNo.dados_extras?.variavel && DADOS_COLETAVEIS[novoNo.dados_extras.variavel] && (
-                    <>
-                      <div className="flex items-center gap-2 text-xs" style={{ color: colors.textSecondary }}>
-                        <span style={{
-                          background: `${NODE_TYPE_CONFIG.coletar_dado.color}22`,
-                          color: NODE_TYPE_CONFIG.coletar_dado.color,
-                          padding: '2px 8px',
-                          borderRadius: 4,
-                          fontWeight: 600,
-                        }}>
-                          {DADOS_COLETAVEIS[novoNo.dados_extras.variavel].validacao}
-                        </span>
-                        <span>Salva automaticamente no cadastro do cliente</span>
-                      </div>
-                      <label className="flex items-center gap-2 cursor-pointer mt-1">
-                        <input
-                          type="checkbox"
-                          checked={novoNo.dados_extras?.pular_se_preenchido || false}
-                          onChange={(e) => updateDadosExtras('pular_se_preenchido', e.target.checked)}
-                          style={{ accentColor: NODE_TYPE_CONFIG.coletar_dado.color }}
-                        />
-                        <span className="text-xs" style={{ color: colors.textSecondary }}>
-                          Pular se ja preenchido (bot reconhece cliente cadastrado)
-                        </span>
-                      </label>
-                    </>
-                  )}
-                  <p className="text-xs" style={{ color: colors.textSecondary }}>
-                    A mensagem de solicitacao acima sera preenchida automaticamente, mas voce pode editar.
-                  </p>
+                  <label className="flex items-center gap-3 cursor-pointer p-2">
+                    <input type="checkbox" checked={novoNo.dados_extras?.pular_se_preenchido || false} onChange={(e) => updateDadosExtras('pular_se_preenchido', e.target.checked)} className="w-5 h-5 rounded-lg" style={{ accentColor: '#EC4899' }} />
+                    <span className="text-[11px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.textPrimary }}>Otimizar: Pular se o cliente já tiver este dado</span>
+                  </label>
                 </div>
               )}
 
               {/* Condicional */}
               {novoNo.tipo === 'condicional' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.condicional.color}0d` }}>
-                  <p className="text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                    Formatos de condicao suportados:
-                  </p>
-                  <div className="space-y-1">
+                <div className="space-y-4 p-6 rounded-[2rem] border-2 border-indigo-500/20 bg-indigo-500/5">
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Formatos Suportados (Clique para usar)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {[
-                      { code: 'cliente_has:cpf', desc: 'Cliente tem CPF cadastrado?' },
+                      { code: 'cliente_has:cpf', desc: 'Cliente tem CPF?' },
                       { code: 'cliente_has:email', desc: 'Cliente tem email?' },
                       { code: 'cliente_has:nome_completo', desc: 'Cliente tem nome?' },
-                      { code: 'variavel == valor', desc: 'Dado coletado igual a valor' },
-                      { code: 'variavel != valor', desc: 'Dado coletado diferente de valor' },
-                      { code: 'variavel exists', desc: 'Dado coletado existe?' },
+                      { code: 'variavel == valor', desc: 'Comparação direta' },
                     ].map(item => (
-                      <div key={item.code} className="flex items-center gap-2">
-                        <code
-                          className="text-xs px-1.5 py-0.5 rounded cursor-pointer"
-                          style={{
-                            background: `${NODE_TYPE_CONFIG.condicional.color}22`,
-                            color: NODE_TYPE_CONFIG.condicional.color,
-                          }}
-                          onClick={() => setNovoNo({ ...novoNo, conteudo: item.code })}
-                        >
-                          {item.code}
-                        </code>
-                        <span className="text-xs" style={{ color: colors.textSecondary }}>{item.desc}</span>
-                      </div>
+                      <button key={item.code} onClick={() => setNovoNo({ ...novoNo, conteudo: item.code })} className="flex flex-col items-start p-3 rounded-xl bg-white/5 border border-white/5 hover:border-indigo-500/30 transition-all">
+                        <code className="text-xs font-bold text-indigo-400">{item.code}</code>
+                        <span className="text-[9px] font-black uppercase opacity-40">{item.desc}</span>
+                      </button>
                     ))}
                   </div>
-                  <p className="text-xs" style={{ color: colors.textSecondary }}>
-                    Clique em uma condicao para usar. Configure caminhos verdadeiro/falso nas opcoes abaixo.
-                  </p>
                 </div>
               )}
 
               {/* Delay */}
               {novoNo.tipo === 'delay' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.delay.color}0d` }}>
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                        Duração
-                      </label>
-                      <input
-                        type="number"
-                        value={novoNo.dados_extras?.duracao || ''}
-                        onChange={(e) => updateDadosExtras('duracao', Number(e.target.value))}
-                        placeholder="5"
-                        min="1"
-                        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                        Unidade
-                      </label>
-                      <select
-                        value={novoNo.dados_extras?.unidade || 'segundos'}
-                        onChange={(e) => updateDadosExtras('unidade', e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                        style={inputStyle}
-                      >
-                        <option value="segundos">Segundos</option>
-                        <option value="minutos">Minutos</option>
-                      </select>
-                    </div>
+                <div className="flex gap-4 p-6 rounded-[2rem] border-2 border-teal-500/20 bg-teal-500/5">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Duração</label>
+                    <input type="number" value={novoNo.dados_extras?.duracao || ''} onChange={(e) => updateDadosExtras('duracao', Number(e.target.value))} placeholder="5" className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
                   </div>
-                </div>
-              )}
-
-              {/* Webhook Externo */}
-              {novoNo.tipo === 'webhook_externo' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.webhook_externo.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      URL
-                    </label>
-                    <input
-                      type="text"
-                      value={novoNo.dados_extras?.url || ''}
-                      onChange={(e) => updateDadosExtras('url', e.target.value)}
-                      placeholder="https://api.exemplo.com/webhook"
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      Método HTTP
-                    </label>
-                    <select
-                      value={novoNo.dados_extras?.method || 'POST'}
-                      onChange={(e) => updateDadosExtras('method', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    >
-                      <option value="GET">GET</option>
-                      <option value="POST">POST</option>
-                      <option value="PUT">PUT</option>
-                      <option value="PATCH">PATCH</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Gerar Pagamento (PIX) */}
-              {novoNo.tipo === 'gerar_pagamento' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.gerar_pagamento.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      Valor (R$)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={novoNo.dados_extras?.valor || ''}
-                      onChange={(e) => updateDadosExtras('valor', e.target.value)}
-                      placeholder="Ex: 29.90"
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      Descricao do pagamento
-                    </label>
-                    <input
-                      type="text"
-                      value={novoNo.dados_extras?.descricao || ''}
-                      onChange={(e) => updateDadosExtras('descricao', e.target.value)}
-                      placeholder="Ex: Servico de limpeza"
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <p className="text-xs" style={{ color: colors.textSecondary }}>
-                    Requer Mercado Pago configurado na empresa. Gera PIX automaticamente.
-                  </p>
-                </div>
-              )}
-
-              {/* Proximo No - for mensagem, coletar_dado, delay, webhook, gerar_pagamento */}
-              {['mensagem', 'coletar_dado', 'delay', 'webhook_externo', 'gerar_pagamento', 'transferir_atendente'].includes(novoNo.tipo) && fluxoSelecionado && fluxoSelecionado.nos.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                    Proximo no (avancar para)
-                  </label>
-                  <select
-                    value={novoNo.proximo_no_id || ''}
-                    onChange={(e) => setNovoNo({ ...novoNo, proximo_no_id: e.target.value ? Number(e.target.value) : undefined })}
-                    className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                    style={inputStyle}
-                  >
-                    <option value="">Nenhum (fim do fluxo)</option>
-                    {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {NODE_TYPE_CONFIG[n.tipo]?.icon || '?'} {n.titulo || n.identificador}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Options (for lista, botoes, condicional) */}
-              {(novoNo.tipo === 'lista' || novoNo.tipo === 'botoes' || novoNo.tipo === 'condicional') && (
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <label className="text-sm font-medium" style={{ color: colors.textSecondary }}>
-                      {novoNo.tipo === 'lista' ? 'Itens da Lista' :
-                       novoNo.tipo === 'condicional' ? 'Caminhos (Verdadeiro/Falso)' :
-                       'Botões'}
-                    </label>
-                    <button
-                      onClick={adicionarOpcao}
-                      className="text-sm px-3 py-1 rounded-full"
-                      style={{
-                        background: `${colors.primary}33`,
-                        color: colors.primary
-                      }}
-                    >
-                      + Adicionar
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {novoNo.opcoes.map((opcao, index) => (
-                      <div
-                        key={index}
-                        className="p-3 rounded-lg"
-                        style={{ background: colors.inputBg, border: `1px solid ${colors.inputBorder}` }}
-                      >
-                        <input
-                          type="text"
-                          value={opcao.titulo}
-                          onChange={(e) => atualizarOpcao(index, 'titulo', e.target.value)}
-                          placeholder={novoNo.tipo === 'condicional' ? (index === 0 ? 'Verdadeiro' : 'Falso') : 'Titulo'}
-                          className="w-full px-3 py-2 rounded mb-2 outline-none"
-                          style={{
-                            background: colors.hoverBg,
-                            border: `1px solid ${colors.border}`,
-                            color: colors.textPrimary
-                          }}
-                        />
-                        {novoNo.tipo === 'lista' && (
-                          <input
-                            type="text"
-                            value={opcao.descricao || ''}
-                            onChange={(e) => atualizarOpcao(index, 'descricao', e.target.value)}
-                            placeholder="Descricao (opcional)"
-                            className="w-full px-3 py-2 rounded mb-2 outline-none"
-                            style={{
-                              background: colors.hoverBg,
-                              border: `1px solid ${colors.border}`,
-                              color: colors.textPrimary
-                            }}
-                          />
-                        )}
-                        {/* Proximo no selector for each option */}
-                        {fluxoSelecionado && fluxoSelecionado.nos.length > 0 && (
-                          <select
-                            value={opcao.proximo_no_id || ''}
-                            onChange={(e) => atualizarOpcao(index, 'proximo_no_id', e.target.value ? e.target.value : '')}
-                            className="w-full px-3 py-2 rounded mb-2 outline-none text-xs"
-                            style={{
-                              background: colors.hoverBg,
-                              border: `1px solid ${colors.border}`,
-                              color: colors.textPrimary
-                            }}
-                          >
-                            <option value="">Ir para... (proximo no)</option>
-                            {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map((n) => (
-                              <option key={n.id} value={n.id}>
-                                {NODE_TYPE_CONFIG[n.tipo]?.icon || '?'} {n.titulo || n.identificador}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                        <button
-                          onClick={() => removerOpcao(index)}
-                          className="text-xs px-2 py-1 rounded"
-                          style={{
-                            background: 'rgba(239, 68, 68, 0.2)',
-                            color: '#ef4444'
-                          }}
-                        >
-                          Remover
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={criarNo}
-                disabled={!novoNo.identificador || (!novoNo.conteudo && !['delay', 'webhook_externo', 'gerar_pagamento', 'transferir_atendente'].includes(novoNo.tipo))}
-                className="flex-1 py-3 rounded-full font-semibold transition-all disabled:opacity-50 text-white"
-                style={{ background: colors.gradientButton }}
-              >
-                Criar Etapa
-              </button>
-              <button
-                onClick={() => {
-                  setModalNovoNo(false);
-                  setNovoNo({
-                    identificador: '',
-                    tipo: 'mensagem',
-                    titulo: '',
-                    conteudo: '',
-                    dados_extras: {},
-                    ordem: 0,
-                    opcoes: []
-                  });
-                }}
-                className="px-6 py-3 rounded-full font-semibold transition-all"
-                style={{
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  color: '#ef4444'
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Editar No */}
-      {modalEditarNo && noEditando && fluxoSelecionado && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 overflow-y-auto" style={{ background: colors.modalOverlay }}>
-          <div className="rounded-2xl p-8 max-w-2xl w-full mx-4 my-8" style={{ background: colors.cardBg, border: `1px solid ${colors.border}` }}>
-            <h2 className="text-2xl font-bold mb-6" style={{ color: colors.textPrimary }}>
-              Editar Etapa
-            </h2>
-
-            <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
-              {/* Identificador */}
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Identificador
-                </label>
-                <input
-                  type="text"
-                  value={noEditando.identificador}
-                  onChange={(e) => setNoEditando({ ...noEditando, identificador: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg outline-none"
-                  style={inputStyle}
-                />
-              </div>
-
-              {/* Titulo */}
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                  Titulo
-                </label>
-                <input
-                  type="text"
-                  value={noEditando.titulo || ''}
-                  onChange={(e) => setNoEditando({ ...noEditando, titulo: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg outline-none"
-                  style={inputStyle}
-                />
-              </div>
-
-              {/* Tipo (read-only badge) */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm" style={{ color: colors.textSecondary }}>Tipo:</span>
-                <span className="text-sm px-2 py-0.5 rounded" style={{
-                  background: `${(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).color}22`,
-                  color: (NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).color,
-                  fontWeight: 600,
-                }}>
-                  {(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).icon} {(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).label}
-                </span>
-              </div>
-
-              {/* Conteudo / Mensagem */}
-              {!['delay', 'webhook_externo', 'gerar_pagamento'].includes(noEditando.tipo) && (
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                    {noEditando.tipo === 'coletar_dado' ? 'Mensagem de solicitacao' : 'Mensagem'}
-                  </label>
-                  <textarea
-                    value={noEditando.conteudo || ''}
-                    onChange={(e) => setNoEditando({ ...noEditando, conteudo: e.target.value })}
-                    rows={3}
-                    className="w-full px-4 py-3 rounded-lg outline-none resize-none"
-                    style={inputStyle}
-                  />
-                </div>
-              )}
-
-              {/* Image upload for botoes/mensagem */}
-              {['botoes', 'mensagem'].includes(noEditando.tipo) && (
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                    Imagem (opcional)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <label
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all text-sm"
-                      style={{
-                        background: colors.inputBg,
-                        border: `1px dashed ${noEditando.dados_extras?.header_image_url ? colors.primary : colors.inputBorder}`,
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      <span>{noEditando.dados_extras?.header_image_url ? '🖼️ Trocar imagem' : '📤 Carregar imagem'}</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
-                        style={{ display: 'none' }}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (file.size > 5 * 1024 * 1024) { alert('Imagem muito grande. Maximo 5MB.'); return; }
-                          const formData = new FormData();
-                          formData.append('file', file);
-                          try {
-                            const res = await api.post('/bot-builder/upload-imagem', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-                            updateEditDadosExtras('header_image_url', res.data.url);
-                          } catch (err: any) {
-                            alert(err.response?.data?.detail || 'Erro ao fazer upload');
-                          }
-                        }}
-                      />
-                    </label>
-                    {noEditando.dados_extras?.header_image_url && (
-                      <button
-                        onClick={() => updateEditDadosExtras('header_image_url', '')}
-                        className="text-xs px-2 py-1 rounded"
-                        style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}
-                      >
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                  {noEditando.dados_extras?.header_image_url && (
-                    <div style={{
-                      marginTop: 6, borderRadius: 8, overflow: 'hidden', height: 80,
-                      background: `url(${resolveImageUrl(noEditando.dados_extras.header_image_url)}) center/cover no-repeat`,
-                      backgroundColor: colors.hoverBg, border: `1px solid ${colors.border}`,
-                    }} />
-                  )}
-                </div>
-              )}
-
-              {/* Coletar dado - dropdown fixo */}
-              {noEditando.tipo === 'coletar_dado' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.coletar_dado.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>
-                      Qual dado coletar?
-                    </label>
-                    <select
-                      value={noEditando.dados_extras?.variavel || ''}
-                      onChange={(e) => {
-                        const key = e.target.value;
-                        const cfg = DADOS_COLETAVEIS[key];
-                        setNoEditando({
-                          ...noEditando,
-                          conteudo: cfg ? cfg.placeholder : noEditando.conteudo,
-                          dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg ? cfg.validacao : 'texto' }
-                        });
-                      }}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    >
-                      <option value="">-- Selecione o dado --</option>
-                      {(() => {
-                        const grupos: Record<string, string[]> = {};
-                        Object.entries(DADOS_COLETAVEIS).forEach(([key, cfg]) => {
-                          if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
-                          grupos[cfg.grupo].push(key);
-                        });
-                        return Object.entries(grupos).map(([grupo, keys]) => (
-                          <optgroup key={grupo} label={grupo}>
-                            {keys.map(key => (
-                              <option key={key} value={key}>{DADOS_COLETAVEIS[key].label}</option>
-                            ))}
-                          </optgroup>
-                        ));
-                      })()}
-                    </select>
-                  </div>
-                  {noEditando.dados_extras?.variavel && DADOS_COLETAVEIS[noEditando.dados_extras.variavel] && (
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={noEditando.dados_extras?.pular_se_preenchido || false}
-                        onChange={(e) => updateEditDadosExtras('pular_se_preenchido', e.target.checked)}
-                        style={{ accentColor: NODE_TYPE_CONFIG.coletar_dado.color }}
-                      />
-                      <span className="text-xs" style={{ color: colors.textSecondary }}>
-                        Pular se ja preenchido (bot reconhece cliente cadastrado)
-                      </span>
-                    </label>
-                  )}
-                </div>
-              )}
-
-              {/* Delay fields */}
-              {noEditando.tipo === 'delay' && (
-                <div className="flex gap-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.delay.color}0d` }}>
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>Duracao</label>
-                    <input
-                      type="number"
-                      value={noEditando.dados_extras?.duracao || ''}
-                      onChange={(e) => updateEditDadosExtras('duracao', Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>Unidade</label>
-                    <select
-                      value={noEditando.dados_extras?.unidade || 'segundos'}
-                      onChange={(e) => updateEditDadosExtras('unidade', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    >
+                  <div className="flex-1 space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Unidade</label>
+                    <select value={novoNo.dados_extras?.unidade || 'segundos'} onChange={(e) => updateDadosExtras('unidade', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
                       <option value="segundos">Segundos</option>
                       <option value="minutos">Minutos</option>
                     </select>
@@ -1946,139 +1240,77 @@ const BotBuilder: React.FC = () => {
                 </div>
               )}
 
-              {/* Webhook fields */}
-              {noEditando.tipo === 'webhook_externo' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.webhook_externo.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>URL</label>
-                    <input
-                      type="text"
-                      value={noEditando.dados_extras?.url || ''}
-                      onChange={(e) => updateEditDadosExtras('url', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
+              {/* Webhook */}
+              {novoNo.tipo === 'webhook_externo' && (
+                <div className="space-y-4 p-6 rounded-[2rem] border-2 border-orange-500/20 bg-orange-500/5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>URL do Endpoint</label>
+                    <input type="text" value={novoNo.dados_extras?.url || ''} onChange={(e) => updateDadosExtras('url', e.target.value)} placeholder="https://api.exemplo.com/hook" className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>Metodo</label>
-                    <select
-                      value={noEditando.dados_extras?.method || 'POST'}
-                      onChange={(e) => updateEditDadosExtras('method', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    >
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Método HTTP</label>
+                    <select value={novoNo.dados_extras?.method || 'POST'} onChange={(e) => updateDadosExtras('method', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
                       <option value="GET">GET</option>
                       <option value="POST">POST</option>
+                      <option value="PUT">PUT</option>
                     </select>
                   </div>
                 </div>
               )}
 
-              {/* Pagamento fields */}
-              {noEditando.tipo === 'gerar_pagamento' && (
-                <div className="space-y-3 p-3 rounded-lg" style={{ background: `${NODE_TYPE_CONFIG.gerar_pagamento.color}0d` }}>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>Valor (R$)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={noEditando.dados_extras?.valor || ''}
-                      onChange={(e) => updateEditDadosExtras('valor', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
+              {/* Pagamento */}
+              {novoNo.tipo === 'gerar_pagamento' && (
+                <div className="space-y-4 p-6 rounded-[2rem] border-2 border-green-500/20 bg-green-500/5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Valor do PIX (R$)</label>
+                    <input type="number" step="0.01" value={novoNo.dados_extras?.valor || ''} onChange={(e) => updateDadosExtras('valor', e.target.value)} placeholder="29.90" className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: colors.textSecondary }}>Descricao</label>
-                    <input
-                      type="text"
-                      value={noEditando.dados_extras?.descricao || ''}
-                      onChange={(e) => updateEditDadosExtras('descricao', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                      style={inputStyle}
-                    />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Descrição da Fatura</label>
+                    <input type="text" value={novoNo.dados_extras?.descricao || ''} onChange={(e) => updateDadosExtras('descricao', e.target.value)} placeholder="Ex: Assinatura Premium" className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
                   </div>
                 </div>
               )}
 
-              {/* Proximo no */}
-              {['mensagem', 'coletar_dado', 'delay', 'webhook_externo', 'gerar_pagamento', 'transferir_atendente'].includes(noEditando.tipo) && (
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: colors.textSecondary }}>
-                    Proximo no
-                  </label>
+              {/* Sequência Automática */}
+              {['mensagem', 'coletar_dado', 'delay', 'webhook_externo', 'gerar_pagamento', 'transferir_atendente'].includes(novoNo.tipo) && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Sequência Automática (Pular para)</label>
                   <select
-                    value={noEditando.proximo_no_id || ''}
-                    onChange={(e) => setNoEditando({ ...noEditando, proximo_no_id: e.target.value ? Number(e.target.value) : undefined })}
-                    className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-                    style={inputStyle}
+                    value={novoNo.proximo_no_id || ''}
+                    onChange={(e) => setNovoNo({ ...novoNo, proximo_no_id: e.target.value ? Number(e.target.value) : undefined })}
+                    className="w-full px-6 py-4 rounded-2xl outline-none border font-bold shadow-sm focus:ring-4 focus:ring-blue-500/10 transition-all"
+                    style={{ ...inputStyle, borderColor: colors.border }}
                   >
-                    <option value="">Nenhum (fim do fluxo)</option>
-                    {fluxoSelecionado.nos.filter(n => n.id !== noEditando.id).sort((a, b) => a.ordem - b.ordem).map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {NODE_TYPE_CONFIG[n.tipo]?.icon || '?'} {n.titulo || n.identificador}
-                      </option>
+                    <option value="">Fim do Fluxo</option>
+                    {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map(n => (
+                      <option key={n.id} value={n.id}>{NODE_TYPE_CONFIG[n.tipo]?.icon} {n.titulo || n.identificador}</option>
                     ))}
                   </select>
                 </div>
               )}
 
-              {/* Opcoes (lista, botoes, condicional) */}
-              {['lista', 'botoes', 'condicional'].includes(noEditando.tipo) && (
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <label className="text-sm font-medium" style={{ color: colors.textSecondary }}>
-                      {noEditando.tipo === 'lista' ? 'Itens da Lista' : noEditando.tipo === 'condicional' ? 'Caminhos' : 'Botoes'}
-                    </label>
-                    <button
-                      onClick={adicionarOpcaoEdit}
-                      className="text-sm px-3 py-1 rounded-full"
-                      style={{ background: `${colors.primary}33`, color: colors.primary }}
-                    >
-                      + Adicionar
-                    </button>
+              {/* Options Section Premium */}
+              {['lista', 'botoes', 'condicional'].includes(novoNo.tipo) && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>Caminhos de Interação</label>
+                    <button onClick={adicionarOpcao} className="px-4 py-2 rounded-xl bg-blue-500/10 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:bg-blue-500 hover:text-white transition-all shadow-lg active:scale-95">+ Add Option</button>
                   </div>
                   <div className="space-y-3">
-                    {noEditando.opcoes.map((opcao, index) => (
-                      <div key={opcao.id || `new-${index}`} className="p-3 rounded-lg" style={{ background: colors.inputBg, border: `1px solid ${colors.inputBorder}` }}>
-                        <input
-                          type="text"
-                          value={opcao.titulo}
-                          onChange={(e) => atualizarOpcaoEdit(index, 'titulo', e.target.value)}
-                          placeholder="Titulo"
-                          className="w-full px-3 py-2 rounded mb-2 outline-none"
-                          style={{ background: colors.hoverBg, border: `1px solid ${colors.border}`, color: colors.textPrimary }}
-                        />
-                        {noEditando.tipo === 'lista' && (
-                          <input
-                            type="text"
-                            value={opcao.descricao || ''}
-                            onChange={(e) => atualizarOpcaoEdit(index, 'descricao', e.target.value)}
-                            placeholder="Descricao (opcional)"
-                            className="w-full px-3 py-2 rounded mb-2 outline-none"
-                            style={{ background: colors.hoverBg, border: `1px solid ${colors.border}`, color: colors.textPrimary }}
-                          />
-                        )}
-                        <select
-                          value={opcao.proximo_no_id || ''}
-                          onChange={(e) => atualizarOpcaoEdit(index, 'proximo_no_id', e.target.value)}
-                          className="w-full px-3 py-2 rounded mb-2 outline-none text-xs"
-                          style={{ background: colors.hoverBg, border: `1px solid ${colors.border}`, color: colors.textPrimary }}
-                        >
-                          <option value="">Ir para... (proximo no)</option>
-                          {fluxoSelecionado.nos.filter(n => n.id !== noEditando.id).sort((a, b) => a.ordem - b.ordem).map((n) => (
-                            <option key={n.id} value={n.id}>
-                              {NODE_TYPE_CONFIG[n.tipo]?.icon || '?'} {n.titulo || n.identificador}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => removerOpcaoEdit(index)}
-                          className="text-xs px-2 py-1 rounded"
-                          style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}
-                        >
-                          Remover
-                        </button>
+                    {novoNo.opcoes.map((opcao, index) => (
+                      <div key={index} className="p-6 rounded-[2rem] border border-white/5 bg-white/5 space-y-4 shadow-xl animate-in slide-in-from-top-4 duration-500">
+                         <div className="flex gap-4">
+                            <input type="text" value={opcao.titulo} onChange={(e) => atualizarOpcao(index, 'titulo', e.target.value)} placeholder={novoNo.tipo === 'condicional' ? (index === 0 ? 'Verdadeiro' : 'Falso') : "Texto do Botão / Item"} className="flex-1 px-5 py-3 rounded-xl outline-none border text-[12px] font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                            <button onClick={() => removerOpcao(index)} className="w-12 h-12 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-md">✕</button>
+                         </div>
+                         {novoNo.tipo === 'lista' && (
+                           <input type="text" value={opcao.descricao || ''} onChange={(e) => atualizarOpcao(index, 'descricao', e.target.value)} placeholder="Descrição secundária (Opcional)" className="w-full px-5 py-3 rounded-xl outline-none border text-[11px] font-medium" style={{ ...inputStyle, borderColor: colors.border }} />
+                         )}
+                         <select value={opcao.proximo_no_id || ''} onChange={(e) => atualizarOpcao(index, 'proximo_no_id', e.target.value)} className="w-full px-5 py-3 rounded-xl outline-none border text-[11px] font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
+                            <option value="">Encerrar aqui</option>
+                            {fluxoSelecionado.nos.sort((a, b) => a.ordem - b.ordem).map(n => <option key={n.id} value={n.id}>{NODE_TYPE_CONFIG[n.tipo]?.icon} {n.titulo || n.identificador}</option>)}
+                         </select>
                       </div>
                     ))}
                   </div>
@@ -2086,21 +1318,206 @@ const BotBuilder: React.FC = () => {
               )}
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-4 pt-4 border-t border-white/5">
               <button
-                onClick={salvarEdicaoNo}
-                className="flex-1 py-3 rounded-full font-semibold transition-all text-white"
+                onClick={criarNo}
+                disabled={!novoNo.identificador}
+                className="flex-1 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all disabled:opacity-30 text-white shadow-[0_20px_40px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-95"
                 style={{ background: colors.gradientButton }}
               >
-                Salvar Alteracoes
+                Gerar Etapa
               </button>
               <button
-                onClick={() => { setModalEditarNo(false); setNoEditando(null); }}
-                className="px-6 py-3 rounded-full font-semibold transition-all"
-                style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}
+                onClick={() => { setModalNovoNo(false); setNovoNo({ identificador: '', tipo: 'mensagem', titulo: '', conteudo: '', dados_extras: {}, ordem: 0, opcoes: [] }); }}
+                className="px-10 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all hover:bg-red-500/10 text-red-500 border border-red-500/20"
               >
-                Cancelar
+                Descartar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar No Premium */}
+      {modalEditarNo && noEditando && fluxoSelecionado && (
+        <div className="fixed inset-0 flex items-center justify-center z-[100] backdrop-blur-xl transition-all overflow-y-auto py-10" style={{ background: 'rgba(0,0,0,0.85)' }}>
+          <div className="rounded-[3rem] p-10 max-w-3xl w-full mx-4 shadow-[0_50px_100px_rgba(0,0,0,0.5)] border animate-in zoom-in-95 duration-500" style={{ background: colors.cardBg, borderColor: colors.border }}>
+            <div className="text-center mb-10">
+               <h2 className="text-3xl font-black uppercase tracking-tighter" style={{ color: colors.textPrimary }}>Refinar Etapa</h2>
+               <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mt-1" style={{ color: colors.textPrimary }}>Ajustando a inteligência: {noEditando.titulo || noEditando.identificador}</p>
+            </div>
+
+            <div className="space-y-8 mb-10 max-h-[60vh] overflow-y-auto no-scrollbar pr-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Identificador</label>
+                  <input type="text" value={noEditando.identificador} onChange={(e) => setNoEditando({ ...noEditando, identificador: e.target.value })} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Título de Exibição</label>
+                  <input type="text" value={noEditando.titulo || ''} onChange={(e) => setNoEditando({ ...noEditando, titulo: e.target.value })} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                 <span className="text-[10px] font-black uppercase tracking-widest opacity-30">Tipo Selecionado:</span>
+                 <div className="px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2" style={{ background: `${(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).color}15`, color: (NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).color, border: `1px solid ${(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).color}22` }}>
+                    {(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).icon} {(NODE_TYPE_CONFIG[noEditando.tipo] || NODE_TYPE_CONFIG.mensagem).label}
+                 </div>
+              </div>
+
+              {!['delay', 'webhook_externo', 'gerar_pagamento'].includes(noEditando.tipo) && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>{noEditando.tipo === 'coletar_dado' ? 'Solicitação de Dado' : 'Conteúdo da Mensagem'}</label>
+                  <textarea value={noEditando.conteudo || ''} onChange={(e) => setNoEditando({ ...noEditando, conteudo: e.target.value })} rows={4} className="w-full px-6 py-4 rounded-[1.8rem] outline-none border font-medium resize-none" style={{ ...inputStyle, borderColor: colors.border }} />
+                </div>
+              )}
+
+              {/* Edit Media Section */}
+              {['botoes', 'mensagem'].includes(noEditando.tipo) && (
+                <div className="space-y-3 p-6 rounded-[2rem] border border-dashed border-white/10 bg-white/5">
+                  <div className="flex items-center justify-between">
+                     <label className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>Mídia do Cabeçalho</label>
+                     {noEditando.dados_extras?.header_image_url && (
+                        <button onClick={() => updateEditDadosExtras('header_image_url', '')} className="text-[9px] font-black uppercase text-red-500 hover:opacity-70">Descartar</button>
+                     )}
+                  </div>
+                  {!noEditando.dados_extras?.header_image_url ? (
+                    <label className="flex flex-col items-center justify-center gap-3 p-10 rounded-2xl cursor-pointer hover:bg-white/5 transition-all group">
+                       <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                       </div>
+                       <span className="text-[11px] font-black uppercase tracking-widest opacity-40">Atualizar Ativo de Mídia</span>
+                       <input type="file" className="hidden" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const formData = new FormData();
+                          formData.append('file', file);
+                          try {
+                            const res = await api.post('/bot-builder/upload-imagem', formData);
+                            updateEditDadosExtras('header_image_url', res.data.url);
+                          } catch (err) { alert('Falha'); }
+                       }} />
+                    </label>
+                  ) : (
+                    <div className="rounded-xl overflow-hidden h-32 border border-white/10 shadow-2xl">
+                       <img src={resolveImageUrl(noEditando.dados_extras.header_image_url)} alt="preview" className="w-full h-full object-cover transition-transform duration-1000 hover:scale-105" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Specialized Logic Fields (Coletar Dado, Delay, etc.) - RE-RESTORED */}
+              {noEditando.tipo === 'coletar_dado' && (
+                <div className="p-6 rounded-[2rem] border-2 border-pink-500/20 bg-pink-500/5 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Dado Selecionado</label>
+                    <select
+                      value={noEditando.dados_extras?.variavel || ''}
+                      onChange={(e) => {
+                        const key = e.target.value;
+                        const cfg = DADOS_COLETAVEIS[key];
+                        setNoEditando({ ...noEditando, conteudo: cfg ? cfg.placeholder : noEditando.conteudo, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg ? cfg.validacao : 'texto' } });
+                      }}
+                      className="w-full px-6 py-4 rounded-2xl outline-none border font-bold shadow-sm transition-all"
+                      style={{ ...inputStyle, borderColor: colors.border }}
+                    >
+                      <option value="">-- Selecione o dado --</option>
+                      {Object.entries(DADOS_COLETAVEIS).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-3 cursor-pointer p-2">
+                    <input type="checkbox" checked={noEditando.dados_extras?.pular_se_preenchido || false} onChange={(e) => updateEditDadosExtras('pular_se_preenchido', e.target.checked)} className="w-5 h-5 rounded-lg" style={{ accentColor: '#EC4899' }} />
+                    <span className="text-[11px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.textPrimary }}>Pular se já preenchido</span>
+                  </label>
+                </div>
+              )}
+
+              {noEditando.tipo === 'delay' && (
+                <div className="flex gap-4 p-6 rounded-[2rem] border-2 border-teal-500/20 bg-teal-500/5">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Duração</label>
+                    <input type="number" value={noEditando.dados_extras?.duracao || ''} onChange={(e) => updateEditDadosExtras('duracao', Number(e.target.value))} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Unidade</label>
+                    <select value={noEditando.dados_extras?.unidade || 'segundos'} onChange={(e) => updateEditDadosExtras('unidade', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
+                      <option value="segundos">Segundos</option>
+                      <option value="minutos">Minutos</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {noEditando.tipo === 'webhook_externo' && (
+                <div className="space-y-4 p-6 rounded-[2rem] border-2 border-orange-500/20 bg-orange-500/5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Endpoint URL</label>
+                    <input type="text" value={noEditando.dados_extras?.url || ''} onChange={(e) => updateEditDadosExtras('url', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Método</label>
+                    <select value={noEditando.dados_extras?.method || 'POST'} onChange={(e) => updateEditDadosExtras('method', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {noEditando.tipo === 'gerar_pagamento' && (
+                <div className="space-y-4 p-6 rounded-[2rem] border-2 border-green-500/20 bg-green-500/5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Valor PIX (R$)</label>
+                    <input type="number" step="0.01" value={noEditando.dados_extras?.valor || ''} onChange={(e) => updateEditDadosExtras('valor', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Descrição</label>
+                    <input type="text" value={noEditando.dados_extras?.descricao || ''} onChange={(e) => updateEditDadosExtras('descricao', e.target.value)} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                  </div>
+                </div>
+              )}
+
+              {['mensagem', 'coletar_dado', 'delay', 'webhook_externo', 'gerar_pagamento', 'transferir_atendente'].includes(noEditando.tipo) && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Sequência Automática</label>
+                  <select value={noEditando.proximo_no_id || ''} onChange={(e) => setNoEditando({ ...noEditando, proximo_no_id: e.target.value ? Number(e.target.value) : undefined })} className="w-full px-6 py-4 rounded-2xl outline-none border font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
+                    <option value="">Fim do Fluxo</option>
+                    {fluxoSelecionado.nos.filter(n => n.id !== noEditando.id).sort((a, b) => a.ordem - b.ordem).map(n => <option key={n.id} value={n.id}>{NODE_TYPE_CONFIG[n.tipo]?.icon} {n.titulo || n.identificador}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {['lista', 'botoes', 'condicional'].includes(noEditando.tipo) && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Caminhos de Interação</label>
+                    <button onClick={adicionarOpcaoEdit} className="px-4 py-2 rounded-xl bg-blue-500/10 text-blue-500 text-[10px] font-black uppercase shadow-lg active:scale-95">+ Add Option</button>
+                  </div>
+                  <div className="space-y-3">
+                    {noEditando.opcoes.map((opcao, index) => (
+                      <div key={opcao.id || `edit-${index}`} className="p-6 rounded-[2rem] border border-white/5 bg-white/5 space-y-4 shadow-xl animate-in slide-in-from-top-4 duration-500">
+                         <div className="flex gap-4">
+                            <input type="text" value={opcao.titulo} onChange={(e) => atualizarOpcaoEdit(index, 'titulo', e.target.value)} placeholder="Texto" className="flex-1 px-5 py-3 rounded-xl outline-none border text-[12px] font-bold" style={{ ...inputStyle, borderColor: colors.border }} />
+                            <button onClick={() => removerOpcaoEdit(index)} className="w-12 h-12 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-md">✕</button>
+                         </div>
+                         {noEditando.tipo === 'lista' && (
+                           <input type="text" value={opcao.descricao || ''} onChange={(e) => atualizarOpcaoEdit(index, 'descricao', e.target.value)} placeholder="Descrição (Opcional)" className="w-full px-5 py-3 rounded-xl outline-none border text-[11px] font-medium" style={{ ...inputStyle, borderColor: colors.border }} />
+                         )}
+                         <select value={opcao.proximo_no_id || ''} onChange={(e) => atualizarOpcaoEdit(index, 'proximo_no_id', e.target.value)} className="w-full px-5 py-3 rounded-xl outline-none border text-[11px] font-bold" style={{ ...inputStyle, borderColor: colors.border }}>
+                            <option value="">Encerrar</option>
+                            {fluxoSelecionado.nos.filter(n => n.id !== noEditando.id).sort((a, b) => a.ordem - b.ordem).map(n => <option key={n.id} value={n.id}>{NODE_TYPE_CONFIG[n.tipo]?.icon} {n.titulo || n.identificador}</option>)}
+                         </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4 pt-4 border-t border-white/5">
+              <button onClick={salvarEdicaoNo} className="flex-1 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all text-white shadow-[0_20px_40px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-95" style={{ background: colors.gradientButton }}>Finalizar Edição</button>
+              <button onClick={() => { setModalEditarNo(false); setNoEditando(null); }} className="px-10 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all hover:bg-red-500/10 text-red-500 border border-red-500/20">Cancelar</button>
             </div>
           </div>
         </div>

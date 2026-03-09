@@ -136,6 +136,117 @@ class MercadoPagoPlatformService:
             logger.error(f"Erro ao verificar pagamento {mp_payment_id}: {e}")
             return None
 
+    async def create_or_get_customer(self, email: str) -> Optional[str]:
+        """Cria ou recupera um Customer no MP pelo email. Retorna customer_id."""
+        try:
+            async with httpx.AsyncClient() as client:
+                # Buscar customer existente
+                search = await client.get(
+                    f"{self.base_url}/v1/customers/search",
+                    headers=self.headers,
+                    params={"email": email},
+                    timeout=15.0,
+                )
+                if search.status_code == 200:
+                    data = search.json()
+                    if data.get("paging", {}).get("total", 0) > 0:
+                        customer_id = data["results"][0]["id"]
+                        logger.info(f"Customer MP existente para {email}: {customer_id}")
+                        return customer_id
+
+                # Criar novo customer
+                create = await client.post(
+                    f"{self.base_url}/v1/customers",
+                    headers=self.headers,
+                    json={"email": email},
+                    timeout=15.0,
+                )
+                create.raise_for_status()
+                customer_id = create.json()["id"]
+                logger.info(f"Customer MP criado para {email}: {customer_id}")
+                return customer_id
+
+        except Exception as e:
+            logger.error(f"Erro ao criar/buscar customer MP para {email}: {e}")
+            return None
+
+    async def save_card(self, customer_id: str, card_token: str) -> Optional[Dict]:
+        """
+        Salva cartao de credito em um Customer MP usando token do MercadoPago.js.
+        Retorna card_id permanente para cobranças futuras sem precisar de novo token.
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/customers/{customer_id}/cards",
+                    headers=self.headers,
+                    json={"token": card_token},
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+                card = response.json()
+
+            logger.info(f"Cartao salvo para customer {customer_id}: {card.get('id')}")
+            return {
+                "card_id": card["id"],
+                "last4": card.get("last_four_digits", "****"),
+                "payment_method_id": card.get("payment_method_id", ""),
+                "expiration_month": card.get("expiration_month"),
+                "expiration_year": card.get("expiration_year"),
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao salvar cartao para customer {customer_id}: {e}")
+            return None
+
+    async def charge_saved_card(
+        self,
+        customer_id: str,
+        card_id: str,
+        payment_method_id: str,
+        amount: float,
+        description: str,
+        external_reference: str = "",
+    ) -> Optional[Dict]:
+        """
+        Cobra cartao salvo de um Customer MP sem redirect e sem novo token.
+        Usado para cobrança mensal automatica de numeros dos devs.
+        """
+        try:
+            payload = {
+                "transaction_amount": round(amount, 2),
+                "description": description,
+                "payment_method_id": payment_method_id,
+                "installments": 1,
+                "external_reference": external_reference,
+                "payer": {
+                    "type": "customer",
+                    "id": customer_id,
+                },
+                "token": card_id,  # ID do cartao salvo funciona como token para customers
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/payments",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                payment = response.json()
+
+            logger.info(f"Cobrança customer {customer_id}: payment {payment['id']} - {payment['status']}")
+            return {
+                "payment_id": str(payment["id"]),
+                "status": payment["status"],
+                "status_detail": payment.get("status_detail", ""),
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao cobrar customer {customer_id} card {card_id}: {e}")
+            return None
+
     async def refund_payment(self, mp_payment_id: str) -> Optional[Dict]:
         """Reembolsa pagamento completo."""
         try:

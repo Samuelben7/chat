@@ -27,6 +27,7 @@ interface DevAdmin {
   empresa_nome: string | null;
   status: string;
   whatsapp_conectado: boolean;
+  numeros_count: number;
   trial_fim: string | null;
   criado_em: string | null;
   plano: string;
@@ -649,12 +650,12 @@ const AdminPanel: React.FC = () => {
                   <thead>
                     <tr>
                       <th>ID</th><th>Dev</th><th>Empresa</th><th>Status</th>
-                      <th>Plano</th><th>Keys</th><th>WhatsApp</th><th>Ações</th>
+                      <th>Plano</th><th>Keys</th><th>Numeros</th><th>Custo/mes</th><th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {devs.length === 0 ? (
-                      <tr><td colSpan={8} className="admin-empty">Nenhum dev encontrado.</td></tr>
+                      <tr><td colSpan={9} className="admin-empty">Nenhum dev encontrado.</td></tr>
                     ) : devs.map(dev => (
                       <tr key={dev.id}>
                         <td className="admin-td-id">#{dev.id}</td>
@@ -675,10 +676,17 @@ const AdminPanel: React.FC = () => {
                         </td>
                         <td style={{ color: '#94a3b8', fontSize: '13px' }}>{dev.plano}</td>
                         <td style={{ color: '#00d4ff', fontSize: '13px', textAlign: 'center' }}>{dev.keys_ativas}</td>
-                        <td>
-                          <span className={`admin-badge ${dev.whatsapp_conectado ? 'admin-badge-connected' : 'admin-badge-disconnected'}`}>
-                            {dev.whatsapp_conectado ? 'Sim' : 'Não'}
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{
+                            padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 700,
+                            background: (dev.numeros_count || 0) > 0 ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)',
+                            color: (dev.numeros_count || 0) > 0 ? '#22c55e' : '#64748b',
+                          }}>
+                            {dev.numeros_count || 0}
                           </span>
+                        </td>
+                        <td style={{ color: '#22c55e', fontSize: '13px', fontWeight: 700 }}>
+                          {(dev.numeros_count || 0) > 0 ? `R$ ${((dev.numeros_count || 0) * 35).toFixed(2).replace('.', ',')}` : '—'}
                         </td>
                         <td>
                           <button
