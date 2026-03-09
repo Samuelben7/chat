@@ -108,14 +108,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // Verificar assinatura ativa — sem ela, vai para planos
-      try {
-        await api.get('/assinatura/minha');
-      } catch {
-        navigate('/planos?tipo=empresa');
-        return;
-      }
-
       // Redirecionar para dashboard
       navigate('/empresa/dashboard');
     } catch (error: any) {
