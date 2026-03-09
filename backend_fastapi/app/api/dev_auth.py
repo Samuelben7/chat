@@ -117,6 +117,8 @@ async def login_dev(dados: DevLoginRequest, db: Session = Depends(get_db)):
         access_token=token,
         dev_id=dev.id,
         email=dev.email,
+        status=dev.status,
+        trial_fim=dev.trial_fim.isoformat() if dev.trial_fim else None,
     )
 
 

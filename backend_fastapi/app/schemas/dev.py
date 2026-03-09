@@ -27,6 +27,8 @@ class DevTokenResponse(BaseModel):
     role: str = "dev"
     dev_id: int
     email: str
+    status: str = "trial"
+    trial_fim: str | None = None
 
 
 class DevRegistroResponse(BaseModel):

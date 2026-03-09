@@ -108,6 +108,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // Verificar assinatura ativa — sem ela, vai para planos
+      try {
+        await api.get('/assinatura/minha');
+      } catch {
+        navigate('/planos?tipo=empresa');
+        return;
+      }
+
       // Redirecionar para dashboard
       navigate('/empresa/dashboard');
     } catch (error: any) {
@@ -154,7 +162,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginDev = async (email: string, senha: string) => {
     try {
       const response = await api.post('/auth/dev/login', { email, senha });
-      const { access_token, dev_id } = response.data;
+      const { access_token, dev_id, status: devStatus, trial_fim } = response.data;
 
       const userData: User = {
         email,
@@ -170,6 +178,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setToken(access_token);
       setUser(userData);
+
+      // Trial vencido ou conta bloqueada → vai para planos
+      const trialExpirado = devStatus === 'trial' && trial_fim && new Date(trial_fim) < new Date();
+      if (devStatus === 'blocked' || trialExpirado) {
+        navigate('/planos?tipo=dev');
+        return;
+      }
 
       navigate('/dev/dashboard');
     } catch (error: any) {

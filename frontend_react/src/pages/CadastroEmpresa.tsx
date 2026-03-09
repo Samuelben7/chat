@@ -506,7 +506,7 @@ const CadastroEmpresa: React.FC = () => {
             {[
               { num: '1', text: 'Acesse sua caixa de entrada' },
               { num: '2', text: 'Clique no link de confirmação' },
-              { num: '3', text: 'Faça login com suas credenciais' },
+              { num: '3', text: 'Faça login e escolha seu plano para começar' },
             ].map((item) => (
               <div key={item.num} className="flex items-center gap-4">
                 <div

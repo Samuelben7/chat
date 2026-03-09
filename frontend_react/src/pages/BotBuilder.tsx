@@ -348,39 +348,32 @@ const BotChatPreview: React.FC<{ nos: BotFluxoNo[] }> = ({ nos }) => {
           </button>
         </div>
 
-        {/* List Modal Premium (Corrigido) */}
+        {/* List Modal — Bottom Sheet */}
         {showListModal && (
-          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end animate-in fade-in slide-in-from-bottom-10 duration-300">
-            <div 
-              className="bg-white rounded-t-[2rem] p-5 flex flex-col shadow-2xl border-t border-white/20 transition-all duration-500"
-              style={{ maxHeight: '55%' }}
-            >
-              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4 flex-shrink-0" />
+          <div className="absolute inset-0 z-50 bg-black/50 flex flex-col justify-end" style={{ animation: 'fadeIn .2s ease' }}>
+            <div className="bg-white rounded-t-[1.5rem] p-4 flex flex-col shadow-2xl" style={{ maxHeight: '72%' }}>
+              {/* Handle */}
+              <div className="w-8 h-1 bg-gray-200 rounded-full mx-auto mb-3 flex-shrink-0" />
 
-              <div className="text-center mb-4 flex-shrink-0">
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-400 mb-1">Opções Disponíveis</p>
-                <h3 className="text-sm font-black text-gray-900 uppercase tracking-tighter">Selecione uma opção</h3>
+              {/* Título */}
+              <div className="flex items-center justify-between mb-3 flex-shrink-0 px-1">
+                <span className="text-[11px] font-black uppercase tracking-wider text-gray-700">Selecione uma opção</span>
+                <button onClick={() => setShowListModal(false)} className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-[14px] hover:bg-gray-200 transition-colors">×</button>
               </div>
 
-              <div className="overflow-y-auto space-y-2 pr-1 custom-scrollbar pb-4 flex-1">
+              {/* Lista */}
+              <div className="overflow-y-auto space-y-1.5 flex-1 pb-2">
                 {currentListItems.map((item, i) => (
                   <button
                     key={i}
                     onClick={() => handleOptionClick(item)}
-                    className="w-full p-4 rounded-2xl border border-gray-100 text-left hover:bg-blue-50 active:scale-[0.98] transition-all flex flex-col gap-1 shadow-sm group"
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-100 text-left hover:bg-blue-50 hover:border-blue-200 active:scale-[0.98] transition-all flex flex-col gap-0.5 group"
                   >
-                    <span className="text-[13px] font-black text-gray-800 group-hover:text-blue-600 transition-colors">{item.titulo}</span>
-                    {item.descricao && <span className="text-[11px] text-gray-400 font-medium leading-tight">{item.descricao}</span>}
+                    <span className="text-[11px] font-bold text-gray-800 group-hover:text-blue-600 transition-colors leading-tight">{item.titulo}</span>
+                    {item.descricao && <span className="text-[10px] text-gray-400 leading-tight">{item.descricao}</span>}
                   </button>
                 ))}
               </div>
-
-              <button 
-                onClick={() => setShowListModal(false)} 
-                className="w-full py-4 mt-2 text-[11px] font-black uppercase tracking-[0.2em] text-rose-500 hover:bg-rose-50 rounded-2xl transition-all flex-shrink-0 border border-transparent hover:border-rose-100"
-              >
-                Cancelar
-              </button>
             </div>
           </div>
         )}      </div>
@@ -783,9 +776,9 @@ const BotBuilder: React.FC = () => {
                 </div>
               </div>
             ) : fluxoSelecionado ? (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
                 {/* Editor Area */}
-                <div className="lg:col-span-7 xl:col-span-8 space-y-10 animate-in fade-in slide-in-from-left-4 duration-1000">
+                <div className="lg:col-span-7 space-y-10 animate-in fade-in slide-in-from-left-4 duration-1000">
                   <section className="rounded-[3rem] shadow-[0_30px_60px_rgba(0,0,0,0.15)] border p-10 space-y-8 backdrop-blur-xl" style={{ background: `${colors.cardBg}ee`, borderColor: colors.border }}>
                     <div className="flex justify-between items-center pb-6 border-b border-white/5">
                       <div>
@@ -954,7 +947,7 @@ const BotBuilder: React.FC = () => {
                 </div>
 
                 {/* Preview Area Premium */}
-                <div className="lg:col-span-5 xl:col-span-4">
+                <div className="lg:col-span-5">
                   <div className="sticky top-32 space-y-8 animate-in fade-in slide-in-from-right-4 duration-1000">
                     <BotChatPreview nos={fluxoSelecionado.nos} />
                     
