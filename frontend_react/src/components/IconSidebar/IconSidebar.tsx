@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { BsChatDots, BsGrid, BsPeople, BsRobot, BsFileText, BsMoonStars, BsSun, BsGear, BsCalendarCheck, BsKanban, BsMegaphone, BsPersonVcard } from 'react-icons/bs';
+import { BsChatDots, BsGrid, BsPeople, BsRobot, BsFileText, BsMoonStars, BsSun, BsGear, BsCalendarCheck, BsKanban, BsMegaphone, BsPersonVcard, BsBriefcase } from 'react-icons/bs';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import logoImg from '../../assets/logo.png';
@@ -25,6 +25,7 @@ const IconSidebar: React.FC = () => {
     { icon: BsCalendarCheck, label: 'Agenda', path: '/empresa/agenda', alwaysShow: role === 'empresa' },
     { icon: BsKanban, label: 'Funil de Vendas', path: '/empresa/kanban', alwaysShow: role === 'empresa' },
     { icon: BsMegaphone, label: 'Envio em Massa', path: '/empresa/envio-massa', alwaysShow: role === 'empresa' },
+    { icon: BsBriefcase, label: 'Processos Judiciais', path: '/empresa/processos', alwaysShow: role === 'empresa' },
   ].filter(item => item.alwaysShow);
 
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');

@@ -18,6 +18,7 @@ import AgendaPage from './pages/AgendaPage';
 import KanbanPage from './pages/KanbanPage';
 import IAConfigPage from './pages/IAConfigPage';
 import EnvioMassaPage from './pages/EnvioMassaPage';
+import ProcessosPage from './pages/ProcessosPage';
 import CadastroEmpresa from './pages/CadastroEmpresa';
 import ConfirmarEmail from './pages/ConfirmarEmail';
 import ConfigurarWhatsApp from './pages/ConfigurarWhatsApp';
@@ -187,6 +188,16 @@ function AppRoutes() {
           element={
             <PrivateRoute allowedRoles={['empresa']}>
               <EnvioMassaPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Processos Judiciais */}
+        <Route
+          path="/empresa/processos"
+          element={
+            <PrivateRoute allowedRoles={['empresa']}>
+              <ProcessosPage />
             </PrivateRoute>
           }
         />
