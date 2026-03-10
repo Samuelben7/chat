@@ -55,6 +55,7 @@ class Empresa(Base):
     auth = relationship("EmpresaAuth", back_populates="empresa", uselist=False)
     templates = relationship("MessageTemplate", back_populates="empresa", cascade="all, delete-orphan")
     listas_contatos = relationship("ListaContatos", back_populates="empresa", cascade="all, delete-orphan")
+    campos_custom = relationship("CampoCustomCliente", back_populates="empresa", cascade="all, delete-orphan")
 
 
 class ConfiguracaoBot(Base):
@@ -129,6 +130,7 @@ class Cliente(Base):
     reclamacoes = relationship("Reclamacao", back_populates="cliente")
     responsavel = relationship("Atendente", foreign_keys=[responsavel_id])
     crm_tags = relationship("CrmClienteTag", back_populates="cliente", cascade="all, delete-orphan")
+    campos_custom_valores = relationship("ClienteValorCustom", back_populates="cliente", cascade="all, delete-orphan")
 
     # Alias para facilitar uso
     @property
@@ -841,3 +843,42 @@ class TokenConfirmacaoEmailDev(Base):
     usado = Column(Boolean, default=False)
     expira_em = Column(DateTime, nullable=False)
     criado_em = Column(DateTime, server_default=func.now())
+
+
+# ==================== CLIENTES CUSTOM FIELDS ====================
+
+class CampoCustomCliente(Base):
+    """Definição de campos customizados por empresa para clientes."""
+    __tablename__ = "campo_custom_cliente"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(100), nullable=False)
+    slug = Column(String(100), nullable=False)
+    tipo = Column(String(20), nullable=False, default='texto')  # texto, numero, data, opcoes, booleano
+    opcoes = Column(JSON, nullable=True)  # lista de opções para tipo='opcoes'
+    obrigatorio = Column(Boolean, default=False)
+    ativo = Column(Boolean, default=True)
+    ordem = Column(Integer, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    empresa = relationship("Empresa", back_populates="campos_custom")
+    valores = relationship("ClienteValorCustom", back_populates="campo", cascade="all, delete-orphan")
+
+
+class ClienteValorCustom(Base):
+    """Valores de campos customizados por cliente."""
+    __tablename__ = "cliente_valor_custom"
+
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("whatsapp_bot_cliente.id", ondelete="CASCADE"), nullable=False, index=True)
+    campo_id = Column(Integer, ForeignKey("campo_custom_cliente.id", ondelete="CASCADE"), nullable=False)
+    valor = Column(Text, nullable=True)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    cliente = relationship("Cliente", back_populates="campos_custom_valores")
+    campo = relationship("CampoCustomCliente", back_populates="valores")
+
+    __table_args__ = (
+        Index('idx_valor_custom_cliente_campo', 'cliente_id', 'campo_id', unique=True),
+    )

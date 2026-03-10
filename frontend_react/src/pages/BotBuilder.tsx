@@ -51,23 +51,23 @@ interface BotFluxoDetalhado extends BotFluxo {
 }
 
 // Dados coletaveis fixos - espelha DADOS_COLETAVEIS do backend
-const DADOS_COLETAVEIS: Record<string, { label: string; validacao: string; placeholder: string; grupo: string }> = {
-  nome_completo:       { label: 'Nome Completo',         validacao: 'nao_vazio', placeholder: 'Por favor, informe seu nome completo:',           grupo: 'Pessoal' },
-  cpf:                 { label: 'CPF',                   validacao: 'cpf',       placeholder: 'Informe seu CPF (apenas numeros):',               grupo: 'Pessoal' },
-  rg:                  { label: 'RG',                    validacao: 'nao_vazio', placeholder: 'Informe seu RG:',                                 grupo: 'Pessoal' },
-  email:               { label: 'E-mail',                validacao: 'email',     placeholder: 'Informe seu e-mail:',                             grupo: 'Pessoal' },
-  data_nascimento:     { label: 'Data de Nascimento',    validacao: 'data',      placeholder: 'Informe sua data de nascimento (DD/MM/AAAA):',    grupo: 'Pessoal' },
-  telefone_secundario: { label: 'Telefone Secundario',   validacao: 'telefone',  placeholder: 'Informe um telefone de contato com DDD:',         grupo: 'Pessoal' },
-  endereco:            { label: 'Endereco (Rua/Numero)', validacao: 'nao_vazio', placeholder: 'Informe seu endereco (rua e numero):',            grupo: 'Endereco' },
-  complemento:         { label: 'Complemento',           validacao: 'texto',     placeholder: 'Informe o complemento (apto, bloco, etc):',       grupo: 'Endereco' },
-  bairro:              { label: 'Bairro',                validacao: 'nao_vazio', placeholder: 'Informe seu bairro:',                             grupo: 'Endereco' },
-  cidade:              { label: 'Cidade',                validacao: 'nao_vazio', placeholder: 'Informe sua cidade:',                             grupo: 'Endereco' },
-  estado:              { label: 'Estado (UF)',           validacao: 'nao_vazio', placeholder: 'Informe seu estado (ex: SP, RJ, MG):',            grupo: 'Endereco' },
-  pais:                { label: 'Pais',                  validacao: 'nao_vazio', placeholder: 'Informe seu pais:',                               grupo: 'Endereco' },
-  cep:                 { label: 'CEP',                   validacao: 'cep',       placeholder: 'Informe seu CEP (8 digitos):',                    grupo: 'Endereco' },
-  chave_pix:           { label: 'Chave PIX',             validacao: 'nao_vazio', placeholder: 'Informe sua chave PIX (CPF, email, telefone ou aleatoria):', grupo: 'Financeiro' },
-  profissao:           { label: 'Profissao',             validacao: 'texto',     placeholder: 'Qual sua profissao?',                             grupo: 'Profissional' },
-  empresa_cliente:     { label: 'Nome da Empresa',       validacao: 'texto',     placeholder: 'Informe o nome da sua empresa:',                  grupo: 'Profissional' },
+const DADOS_COLETAVEIS: Record<string, { label: string; validacao: string; placeholder: string; grupo: string; emoji: string; validacaoDesc: string }> = {
+  nome_completo:       { label: 'Nome Completo',      validacao: 'nao_vazio', placeholder: 'Por favor, informe seu nome completo:',        grupo: 'Pessoal',      emoji: '👤', validacaoDesc: 'Texto obrigatório' },
+  cpf:                 { label: 'CPF',                validacao: 'cpf',       placeholder: 'Informe seu CPF (apenas números):',            grupo: 'Pessoal',      emoji: '🪪', validacaoDesc: '11 dígitos numéricos' },
+  rg:                  { label: 'RG',                 validacao: 'nao_vazio', placeholder: 'Informe seu RG:',                              grupo: 'Pessoal',      emoji: '📄', validacaoDesc: 'Texto obrigatório' },
+  email:               { label: 'E-mail',             validacao: 'email',     placeholder: 'Informe seu e-mail:',                          grupo: 'Pessoal',      emoji: '📧', validacaoDesc: 'formato@email.com' },
+  data_nascimento:     { label: 'Data de Nascimento', validacao: 'data',      placeholder: 'Informe sua data de nascimento (DD/MM/AAAA):', grupo: 'Pessoal',      emoji: '🎂', validacaoDesc: 'DD/MM/AAAA' },
+  telefone_secundario: { label: 'Telefone',           validacao: 'telefone',  placeholder: 'Informe um telefone de contato com DDD:',      grupo: 'Pessoal',      emoji: '📱', validacaoDesc: 'DDD + número' },
+  endereco:            { label: 'Endereço',           validacao: 'nao_vazio', placeholder: 'Informe seu endereço (rua e número):',         grupo: 'Endereço',     emoji: '🏠', validacaoDesc: 'Rua e número' },
+  complemento:         { label: 'Complemento',        validacao: 'texto',     placeholder: 'Informe o complemento (apto, bloco, etc):',   grupo: 'Endereço',     emoji: '🏢', validacaoDesc: 'Texto livre' },
+  bairro:              { label: 'Bairro',             validacao: 'nao_vazio', placeholder: 'Informe seu bairro:',                          grupo: 'Endereço',     emoji: '📍', validacaoDesc: 'Texto obrigatório' },
+  cidade:              { label: 'Cidade',             validacao: 'nao_vazio', placeholder: 'Informe sua cidade:',                          grupo: 'Endereço',     emoji: '🏙️', validacaoDesc: 'Texto obrigatório' },
+  estado:              { label: 'Estado (UF)',        validacao: 'nao_vazio', placeholder: 'Informe seu estado (ex: SP, RJ, MG):',         grupo: 'Endereço',     emoji: '🗺️', validacaoDesc: 'Sigla do estado' },
+  pais:                { label: 'País',               validacao: 'nao_vazio', placeholder: 'Informe seu país:',                            grupo: 'Endereço',     emoji: '🌎', validacaoDesc: 'Texto obrigatório' },
+  cep:                 { label: 'CEP',                validacao: 'cep',       placeholder: 'Informe seu CEP (8 dígitos):',                 grupo: 'Endereço',     emoji: '📮', validacaoDesc: '8 dígitos numéricos' },
+  chave_pix:           { label: 'Chave PIX',          validacao: 'nao_vazio', placeholder: 'Informe sua chave PIX:',                       grupo: 'Financeiro',   emoji: '💰', validacaoDesc: 'CPF, e-mail, telefone ou chave aleatória' },
+  profissao:           { label: 'Profissão',          validacao: 'texto',     placeholder: 'Qual sua profissão?',                          grupo: 'Profissional', emoji: '💼', validacaoDesc: 'Texto livre' },
+  empresa_cliente:     { label: 'Nome da Empresa',    validacao: 'texto',     placeholder: 'Informe o nome da sua empresa:',               grupo: 'Profissional', emoji: '🏭', validacaoDesc: 'Texto livre' },
 };
 
 // Node type config for colors and icons
@@ -1160,38 +1160,56 @@ const BotBuilder: React.FC = () => {
               {/* Coletar Dado */}
               {novoNo.tipo === 'coletar_dado' && (
                 <div className="p-6 rounded-[2rem] border-2 border-pink-500/20 bg-pink-500/5 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>O que vamos perguntar?</label>
-                    <select
-                      value={novoNo.dados_extras?.variavel || ''}
-                      onChange={(e) => {
-                        const key = e.target.value;
-                        const config = DADOS_COLETAVEIS[key];
-                        setNovoNo({ ...novoNo, conteudo: config ? config.placeholder : '', dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: config ? config.validacao : 'texto' } });
-                      }}
-                      className="w-full px-6 py-4 rounded-2xl outline-none border font-bold shadow-sm focus:ring-4 focus:ring-pink-500/10 transition-all"
-                      style={{ ...inputStyle, borderColor: colors.border }}
-                    >
-                      <option value="">-- Escolha o campo de destino --</option>
-                      {(() => {
-                        const grupos: Record<string, string[]> = {};
-                        Object.entries(DADOS_COLETAVEIS).forEach(([key, cfg]) => {
-                          if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
-                          grupos[cfg.grupo].push(key);
-                        });
-                        return Object.entries(grupos).map(([grupo, keys]) => (
-                          <optgroup key={grupo} label={grupo}>
-                            {keys.map(key => (
-                              <option key={key} value={key}>{DADOS_COLETAVEIS[key].label}</option>
-                            ))}
-                          </optgroup>
-                        ));
-                      })()}
-                    </select>
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1 block" style={{ color: colors.textPrimary }}>
+                    Qual dado você quer capturar?
+                  </label>
+                  {/* Card grid - muito mais intuitivo que dropdown */}
+                  <div className="space-y-3">
+                    {(() => {
+                      const grupos: Record<string, string[]> = {};
+                      Object.entries(DADOS_COLETAVEIS).forEach(([key, cfg]) => {
+                        if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
+                        grupos[cfg.grupo].push(key);
+                      });
+                      return Object.entries(grupos).map(([grupo, keys]) => (
+                        <div key={grupo}>
+                          <div className="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1.5 ml-1" style={{ color: colors.textPrimary }}>{grupo}</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {keys.map(key => {
+                              const cfg = DADOS_COLETAVEIS[key];
+                              const sel = novoNo.dados_extras?.variavel === key;
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() => setNovoNo({ ...novoNo, conteudo: cfg.placeholder, dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: cfg.validacao } })}
+                                  className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]"
+                                  style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}
+                                >
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <span className="text-sm">{cfg.emoji}</span>
+                                    <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#EC4899' : colors.textPrimary }}>{cfg.label}</span>
+                                  </div>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textSec }}>{cfg.validacaoDesc}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
+                  {novoNo.dados_extras?.variavel && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: '#EC489910' }}>
+                      <span className="text-pink-400 text-xs font-black">✓</span>
+                      <span className="text-[11px] font-semibold" style={{ color: '#EC4899' }}>
+                        Validação automática: <strong>{DADOS_COLETAVEIS[novoNo.dados_extras.variavel]?.validacaoDesc}</strong>
+                      </span>
+                    </div>
+                  )}
                   <label className="flex items-center gap-3 cursor-pointer p-2">
                     <input type="checkbox" checked={novoNo.dados_extras?.pular_se_preenchido || false} onChange={(e) => updateDadosExtras('pular_se_preenchido', e.target.checked)} className="w-5 h-5 rounded-lg" style={{ accentColor: '#EC4899' }} />
-                    <span className="text-[11px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.textPrimary }}>Otimizar: Pular se o cliente já tiver este dado</span>
+                    <span className="text-[11px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.textPrimary }}>Pular se o cliente já tiver este dado</span>
                   </label>
                 </div>
               )}
@@ -1400,25 +1418,55 @@ const BotBuilder: React.FC = () => {
                 </div>
               )}
 
-              {/* Specialized Logic Fields (Coletar Dado, Delay, etc.) - RE-RESTORED */}
+              {/* Specialized Logic Fields - Coletar Dado */}
               {noEditando.tipo === 'coletar_dado' && (
                 <div className="p-6 rounded-[2rem] border-2 border-pink-500/20 bg-pink-500/5 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1" style={{ color: colors.textPrimary }}>Dado Selecionado</label>
-                    <select
-                      value={noEditando.dados_extras?.variavel || ''}
-                      onChange={(e) => {
-                        const key = e.target.value;
-                        const cfg = DADOS_COLETAVEIS[key];
-                        setNoEditando({ ...noEditando, conteudo: cfg ? cfg.placeholder : noEditando.conteudo, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg ? cfg.validacao : 'texto' } });
-                      }}
-                      className="w-full px-6 py-4 rounded-2xl outline-none border font-bold shadow-sm transition-all"
-                      style={{ ...inputStyle, borderColor: colors.border }}
-                    >
-                      <option value="">-- Selecione o dado --</option>
-                      {Object.entries(DADOS_COLETAVEIS).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                    </select>
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1 block" style={{ color: colors.textPrimary }}>
+                    Qual dado você quer capturar?
+                  </label>
+                  <div className="space-y-3">
+                    {(() => {
+                      const grupos: Record<string, string[]> = {};
+                      Object.entries(DADOS_COLETAVEIS).forEach(([key, cfg]) => {
+                        if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
+                        grupos[cfg.grupo].push(key);
+                      });
+                      return Object.entries(grupos).map(([grupo, keys]) => (
+                        <div key={grupo}>
+                          <div className="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1.5 ml-1" style={{ color: colors.textPrimary }}>{grupo}</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {keys.map(key => {
+                              const cfg = DADOS_COLETAVEIS[key];
+                              const sel = noEditando.dados_extras?.variavel === key;
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() => setNoEditando({ ...noEditando, conteudo: cfg.placeholder, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg.validacao } })}
+                                  className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]"
+                                  style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}
+                                >
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <span className="text-sm">{cfg.emoji}</span>
+                                    <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#EC4899' : colors.textPrimary }}>{cfg.label}</span>
+                                  </div>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textSec }}>{cfg.validacaoDesc}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
+                  {noEditando.dados_extras?.variavel && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: '#EC489910' }}>
+                      <span className="text-pink-400 text-xs font-black">✓</span>
+                      <span className="text-[11px] font-semibold" style={{ color: '#EC4899' }}>
+                        Validação automática: <strong>{DADOS_COLETAVEIS[noEditando.dados_extras.variavel]?.validacaoDesc}</strong>
+                      </span>
+                    </div>
+                  )}
                   <label className="flex items-center gap-3 cursor-pointer p-2">
                     <input type="checkbox" checked={noEditando.dados_extras?.pular_se_preenchido || false} onChange={(e) => updateEditDadosExtras('pular_se_preenchido', e.target.checked)} className="w-5 h-5 rounded-lg" style={{ accentColor: '#EC4899' }} />
                     <span className="text-[11px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.textPrimary }}>Pular se já preenchido</span>

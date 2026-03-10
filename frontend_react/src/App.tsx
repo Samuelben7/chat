@@ -13,6 +13,7 @@ import ChatPage from './pages/ChatPage';
 import BotBuilder from './pages/BotBuilder';
 import TemplateManager from './pages/TemplateManager';
 import ContatosPage from './pages/ContatosPage';
+import ClientesPage from './pages/ClientesPage';
 import AgendaPage from './pages/AgendaPage';
 import KanbanPage from './pages/KanbanPage';
 import IAConfigPage from './pages/IAConfigPage';
@@ -141,6 +142,15 @@ function AppRoutes() {
           element={
             <PrivateRoute allowedRoles={['empresa']}>
               <ContatosPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/empresa/clientes"
+          element={
+            <PrivateRoute allowedRoles={['empresa']}>
+              <ClientesPage />
             </PrivateRoute>
           }
         />

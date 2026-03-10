@@ -297,7 +297,7 @@ Instruções especiais para o assistente:
         }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: C.text }}>Como funciona</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: C.textSec, display: 'flex', flexDirection: 'column', gap: 6, lineHeight: 1.5 }}>
-            <li>A IA usa <strong style={{ color: C.text }}>Claude Haiku</strong> (rápido e econômico) para gerar respostas</li>
+            <li>A IA usa inteligência artificial avançada para gerar respostas personalizadas</li>
             <li>As mensagens vão direto para a Meta — sem sobrecarga no seu servidor</li>
             <li>Quando um atendente humano clicar em <strong style={{ color: C.text }}>"Assumir"</strong> no chat, a IA pausa automaticamente nessa conversa</li>
             <li>Toda conversa fica salva no banco e aparece no chat normalmente</li>

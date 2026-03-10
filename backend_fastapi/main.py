@@ -21,7 +21,7 @@ mimetypes.add_type("audio/ogg", ".ogg")
 mimetypes.add_type("audio/mpeg", ".mp3")
 
 # Import routers
-from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm, perfil_whatsapp, modelos_mensagem
+from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm, perfil_whatsapp, modelos_mensagem, clientes
 from app.api import dev_auth, dev_api_keys, dev_gateway, dev_usage, dev_webhook, dev_numeros, dev_embedded_signup
 from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 
@@ -166,6 +166,7 @@ app.include_router(pagamentos.router, prefix=settings.API_V1_STR, tags=["pagamen
 app.include_router(media.router, prefix=settings.API_V1_STR, tags=["media"])
 app.include_router(agenda.router, prefix=settings.API_V1_STR, tags=["agenda"])
 app.include_router(crm.router, prefix=settings.API_V1_STR, tags=["crm"])
+app.include_router(clientes.router, prefix=settings.API_V1_STR, tags=["clientes"])
 app.include_router(perfil_whatsapp.router, prefix=settings.API_V1_STR, tags=["perfil-whatsapp"])
 app.include_router(modelos_mensagem.router, prefix=settings.API_V1_STR, tags=["modelos-mensagem"])
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { BsChatDots, BsGrid, BsPeople, BsRobot, BsFileText, BsMoonStars, BsSun, BsGear, BsCalendarCheck, BsKanban, BsMegaphone } from 'react-icons/bs';
+import { BsChatDots, BsGrid, BsPeople, BsRobot, BsFileText, BsMoonStars, BsSun, BsGear, BsCalendarCheck, BsKanban, BsMegaphone, BsPersonVcard } from 'react-icons/bs';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import logoImg from '../../assets/logo.png';
@@ -19,6 +19,7 @@ const IconSidebar: React.FC = () => {
     { icon: BsChatDots, label: 'Chat', path: `${basePath}/chat`, alwaysShow: true },
     { icon: BsGrid, label: 'Dashboard', path: `${basePath}/dashboard`, alwaysShow: true },
     { icon: BsPeople, label: 'Contatos', path: '/empresa/contatos', alwaysShow: role === 'empresa' },
+    { icon: BsPersonVcard, label: 'Clientes', path: '/empresa/clientes', alwaysShow: role === 'empresa' },
     { icon: BsRobot, label: 'Bot Builder', path: '/empresa/bot-builder', alwaysShow: role === 'empresa' },
     { icon: BsFileText, label: 'Templates', path: '/empresa/templates', alwaysShow: role === 'empresa' },
     { icon: BsCalendarCheck, label: 'Agenda', path: '/empresa/agenda', alwaysShow: role === 'empresa' },
