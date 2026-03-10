@@ -10,7 +10,7 @@ from datetime import datetime
 from app.database.database import get_db
 from app.models.models import ProcessoJudicial, MovimentacaoProcesso, Cliente
 from app.core.dependencies import CurrentUser, EmpresaIdFromToken
-from app.services.datajud import resolver_tribunal
+from app.services.datajud import resolver_tribunal, buscar_processo, extrair_dados_processo, extrair_movimentacoes
 
 router = APIRouter()
 
@@ -143,10 +143,67 @@ async def cadastrar_processo(
     db.commit()
     db.refresh(processo)
 
-    # Dispara verificação imediata em background
-    background_tasks.add_task(_verificar_agora_bg, processo.id)
+    # Consulta DataJud imediatamente para já popular dados e movimentações
+    background_tasks.add_task(_popular_dados_iniciais, processo.id)
 
     return _processo_resumo(processo)
+
+
+def _popular_dados_iniciais(processo_id: int):
+    """
+    Chama DataJud logo após o cadastro para popular classe, assunto, partes e movimentações.
+    Roda em background via FastAPI BackgroundTasks (sem asyncio).
+    """
+    from app.database.database import SessionLocal
+    db = SessionLocal()
+    try:
+        processo = db.query(ProcessoJudicial).filter(ProcessoJudicial.id == processo_id).first()
+        if not processo:
+            return
+
+        hit = buscar_processo(processo.numero_cnj, processo.indice_datajud)
+        if not hit:
+            return
+
+        # Atualiza metadados
+        dados = extrair_dados_processo(hit)
+        for campo, valor in dados.items():
+            if campo == "partes":
+                if valor:
+                    processo.partes = valor
+            elif valor:
+                setattr(processo, campo, valor)
+
+        processo.ultima_verificacao = datetime.utcnow()
+
+        # Importa movimentações existentes (sem notificar — são históricas)
+        movs = extrair_movimentacoes(hit, processo.numero_cnj)
+        hashes = {
+            m.datajud_hash
+            for m in db.query(MovimentacaoProcesso.datajud_hash)
+            .filter(MovimentacaoProcesso.processo_id == processo_id).all()
+        }
+        for mov_data in movs:
+            if mov_data["datajud_hash"] in hashes:
+                continue
+            nova = MovimentacaoProcesso(
+                processo_id=processo_id,
+                data_movimentacao=mov_data["data_movimentacao"],
+                codigo_nacional=mov_data.get("codigo_nacional"),
+                descricao=mov_data["descricao"],
+                datajud_hash=mov_data["datajud_hash"],
+                notificado_cliente=False,  # históricas não notificam
+            )
+            db.add(nova)
+            if not processo.ultima_movimentacao_data or mov_data["data_movimentacao"] > processo.ultima_movimentacao_data:
+                processo.ultima_movimentacao_data = mov_data["data_movimentacao"]
+
+        db.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger("processos").error(f"Erro ao popular dados iniciais do processo {processo_id}: {e}")
+    finally:
+        db.close()
 
 
 def _verificar_agora_bg(processo_id: int):

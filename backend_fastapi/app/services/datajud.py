@@ -139,9 +139,15 @@ def _hash_movimentacao(numero_cnj: str, data: str, descricao: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-async def buscar_processo(numero_cnj: str, indice: str) -> Optional[dict]:
+def _numero_somente_digitos(numero_cnj: str) -> str:
+    """Remove formatação do número CNJ, deixa só os dígitos. Ex: '0001234-12.2023.8.26.0100' → '00012341220238260100'"""
+    return re.sub(r'\D', '', numero_cnj)
+
+
+def buscar_processo(numero_cnj: str, indice: str) -> Optional[dict]:
     """
-    Busca um processo pelo número CNJ na API do DataJud.
+    Busca um processo pelo número CNJ na API do DataJud (síncrono).
+    Tenta com o número formatado e também só com dígitos (como o DataJud armazena).
     Retorna o documento completo ou None se não encontrado.
     """
     if not DATAJUD_API_KEY:
@@ -149,38 +155,45 @@ async def buscar_processo(numero_cnj: str, indice: str) -> Optional[dict]:
         return None
 
     url = f"{DATAJUD_BASE_URL}/{indice}/_search"
-    payload = {
-        "query": {
-            "match": {
-                "numeroProcesso": numero_cnj
-            }
-        },
-        "size": 1
-    }
     headers = {
         "Authorization": f"APIKey {DATAJUD_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+    # DataJud armazena o número sem formatação (só dígitos)
+    numero_digits = _numero_somente_digitos(numero_cnj)
 
-        hits = data.get("hits", {}).get("hits", [])
-        if not hits:
-            logger.info(f"Processo {numero_cnj} não encontrado no DataJud ({indice})")
+    # Tenta com número sem dígitos primeiro (formato que o DataJud usa internamente)
+    # e também com o número formatado (match full-text)
+    for termo_busca in [numero_digits, numero_cnj]:
+        payload = {
+            "query": {
+                "match": {
+                    "numeroProcesso": termo_busca
+                }
+            },
+            "size": 1
+        }
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+
+            hits = data.get("hits", {}).get("hits", [])
+            if hits:
+                logger.info(f"Processo {numero_cnj} encontrado no DataJud ({indice}) com termo '{termo_busca}'")
+                return hits[0]
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"DataJud HTTP {e.response.status_code} para {numero_cnj}: {e.response.text[:300]}")
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao consultar DataJud para {numero_cnj}: {e}")
             return None
 
-        return hits[0]
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"DataJud HTTP {e.response.status_code} para {numero_cnj}: {e.response.text[:300]}")
-        return None
-    except Exception as e:
-        logger.error(f"Erro ao consultar DataJud para {numero_cnj}: {e}")
-        return None
+    logger.info(f"Processo {numero_cnj} não encontrado no DataJud ({indice})")
+    return None
 
 
 def extrair_movimentacoes(hit: dict, numero_cnj: str) -> list[dict]:

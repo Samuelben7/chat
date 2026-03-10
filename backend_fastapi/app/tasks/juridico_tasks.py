@@ -3,7 +3,6 @@ Tasks Celery para o módulo jurídico:
 - Verificação periódica de processos via DataJud
 - Geração de resumo IA e notificação WhatsApp ao cliente
 """
-import asyncio
 import hashlib
 import logging
 from datetime import datetime
@@ -118,10 +117,8 @@ def _verificar_processo(db, processo: ProcessoJudicial) -> int:
     """
     Verifica um único processo. Retorna número de novas movimentações encontradas.
     """
-    # Consulta DataJud de forma síncrona (dentro do worker Celery)
-    hit = asyncio.get_event_loop().run_until_complete(
-        datajud_service.buscar_processo(processo.numero_cnj, processo.indice_datajud)
-    )
+    # Consulta DataJud (síncrono — httpx.Client direto, sem asyncio)
+    hit = datajud_service.buscar_processo(processo.numero_cnj, processo.indice_datajud)
 
     processo.ultima_verificacao = datetime.utcnow()
 
