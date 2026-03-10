@@ -394,6 +394,13 @@ const BotBuilder: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [expandedNodeId, setExpandedNodeId] = useState<number | null>(null);
 
+  // Gerador de Cadastro
+  const [modalGerador, setModalGerador] = useState(false);
+  const [camposSelecionados, setCamposSelecionados] = useState<string[]>(['nome_completo']);
+  const [nomeFluxoGerador, setNomeFluxoGerador] = useState('Cadastro de Clientes');
+  const [ativarAoCriar, setAtivarAoCriar] = useState(true);
+  const [gerandoFluxo, setGerandoFluxo] = useState(false);
+
   // Form states
   const [nomeFluxo, setNomeFluxo] = useState('');
   const [descricaoFluxo, setDescricaoFluxo] = useState('');
@@ -474,6 +481,108 @@ const BotBuilder: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao deletar fluxo:', error);
+    }
+  };
+
+  const toggleCampo = (campo: string) => {
+    setCamposSelecionados(prev =>
+      prev.includes(campo) ? prev.filter(c => c !== campo) : [...prev, campo]
+    );
+  };
+
+  const selecionarGrupo = (grupo: string) => {
+    const camposGrupo = Object.entries(DADOS_COLETAVEIS)
+      .filter(([, cfg]) => cfg.grupo === grupo)
+      .map(([key]) => key);
+    const todosSelecionados = camposGrupo.every(c => camposSelecionados.includes(c));
+    if (todosSelecionados) {
+      setCamposSelecionados(prev => prev.filter(c => !camposGrupo.includes(c)));
+    } else {
+      setCamposSelecionados(prev => [...new Set([...prev, ...camposGrupo])]);
+    }
+  };
+
+  const gerarFluxoCadastro = async () => {
+    if (camposSelecionados.length === 0) {
+      alert('Selecione pelo menos um campo!');
+      return;
+    }
+    setGerandoFluxo(true);
+    try {
+      // 1. Criar fluxo
+      const fluxoRes = await api.post('/bot-builder/fluxos', {
+        nome: nomeFluxoGerador || 'Cadastro de Clientes',
+        descricao: `Coleta: ${camposSelecionados.map(k => DADOS_COLETAVEIS[k]?.label).join(', ')}`,
+        ativo: false,
+      });
+      const fluxoId = fluxoRes.data.id;
+
+      // 2. Criar nó de introdução
+      const introRes = await api.post(`/bot-builder/fluxos/${fluxoId}/nos`, {
+        identificador: 'cadastro_inicio',
+        tipo: 'mensagem',
+        titulo: 'Início do Cadastro',
+        conteudo: `📋 Vamos fazer seu cadastro!\n\nResponda as perguntas abaixo. Leva menos de 1 minuto. 😊`,
+        dados_extras: {},
+        ordem: 0,
+        opcoes: [],
+      });
+      const noIds: number[] = [introRes.data.id];
+
+      // Manter a ordem original de DADOS_COLETAVEIS para os campos selecionados
+      const camposOrdenados = Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k));
+
+      // 3. Criar nó de coleta para cada campo
+      for (let i = 0; i < camposOrdenados.length; i++) {
+        const campo = camposOrdenados[i];
+        const cfg = DADOS_COLETAVEIS[campo];
+        const noRes = await api.post(`/bot-builder/fluxos/${fluxoId}/nos`, {
+          identificador: `coleta_${campo}`,
+          tipo: 'coletar_dado',
+          titulo: cfg.label,
+          conteudo: cfg.placeholder,
+          dados_extras: {
+            variavel: campo,
+            validacao: cfg.validacao,
+            pular_se_preenchido: true,
+          },
+          ordem: i + 1,
+          opcoes: [],
+        });
+        noIds.push(noRes.data.id);
+      }
+
+      // 4. Criar nó de conclusão
+      const fimRes = await api.post(`/bot-builder/fluxos/${fluxoId}/nos`, {
+        identificador: 'cadastro_concluido',
+        tipo: 'mensagem',
+        titulo: 'Cadastro Concluído',
+        conteudo: `✅ Cadastro concluído com sucesso, {{nome_cliente}}!\n\nObrigado por se cadastrar. Em breve entraremos em contato. 🎉`,
+        dados_extras: {},
+        ordem: camposOrdenados.length + 1,
+        opcoes: [],
+      });
+      noIds.push(fimRes.data.id);
+
+      // 5. Linkar nós em cadeia (cada um aponta para o próximo)
+      for (let i = 0; i < noIds.length - 1; i++) {
+        await api.patch(`/bot-builder/nos/${noIds[i]}`, {
+          proximo_no_id: noIds[i + 1],
+        });
+      }
+
+      // 6. Ativar se solicitado
+      if (ativarAoCriar) {
+        await api.post(`/bot-builder/fluxos/${fluxoId}/ativar`, { ativo: true });
+      }
+
+      setModalGerador(false);
+      carregarFluxos();
+      carregarFluxoDetalhado(fluxoId);
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Erro ao gerar fluxo');
+    } finally {
+      setGerandoFluxo(false);
     }
   };
 
@@ -708,12 +817,19 @@ const BotBuilder: React.FC = () => {
                <h2 className="font-black text-[11px] uppercase tracking-[0.2em]" style={{ color: colors.textPrimary }}>Meus Fluxos</h2>
                <span className="text-[9px] font-black uppercase opacity-30 tracking-widest mt-0.5" style={{ color: colors.textPrimary }}>Total: {fluxos.length}</span>
             </div>
-            <button 
-              onClick={() => setModalNovoFluxo(true)} 
-              className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center font-black hover:scale-110 active:scale-90 transition-all shadow-xl shadow-blue-500/20"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setModalGerador(true)}
+                title="Gerar Fluxo de Cadastro"
+                className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 text-white flex items-center justify-center font-black hover:scale-110 active:scale-90 transition-all shadow-xl shadow-pink-500/20 text-base"
+              >✨</button>
+              <button
+                onClick={() => setModalNovoFluxo(true)}
+                className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-600 text-white flex items-center justify-center font-black hover:scale-110 active:scale-90 transition-all shadow-xl shadow-blue-500/20"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+            </div>
           </div>
           
           <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar">
@@ -1559,6 +1675,163 @@ const BotBuilder: React.FC = () => {
             <div className="flex gap-4 pt-4 border-t border-white/5">
               <button onClick={salvarEdicaoNo} className="flex-1 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all text-white shadow-[0_20px_40px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-95" style={{ background: colors.gradientButton }}>Finalizar Edição</button>
               <button onClick={() => { setModalEditarNo(false); setNoEditando(null); }} className="px-10 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all hover:bg-red-500/10 text-red-500 border border-red-500/20">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL GERADOR DE CADASTRO ==================== */}
+      {modalGerador && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)' }}>
+          <div className="w-full max-w-2xl rounded-[2.5rem] border shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col max-h-[90vh]" style={{ background: colors.cardBg, borderColor: colors.border }}>
+            {/* Header */}
+            <div className="p-8 border-b flex items-center justify-between flex-shrink-0" style={{ borderColor: colors.border }}>
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">✨</span>
+                  <h2 className="text-xl font-black uppercase tracking-[0.2em]" style={{ color: colors.textPrimary }}>Gerador de <span style={{ color: '#EC4899' }}>Cadastro</span></h2>
+                </div>
+                <p className="text-[11px] font-bold opacity-40 mt-1 ml-12 uppercase tracking-widest" style={{ color: colors.textPrimary }}>Selecione os campos e gere o fluxo automaticamente</p>
+              </div>
+              <button onClick={() => setModalGerador(false)} className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg hover:bg-red-500/10 text-red-400 transition-all border border-red-500/10">✕</button>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar">
+
+              {/* Nome do fluxo */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>Nome do Fluxo</label>
+                <input
+                  type="text"
+                  value={nomeFluxoGerador}
+                  onChange={e => setNomeFluxoGerador(e.target.value)}
+                  placeholder="Ex: Cadastro de Clientes"
+                  className="w-full px-6 py-4 rounded-2xl outline-none border font-bold"
+                  style={{ ...{ background: colors.inputBg, border: `1px solid ${colors.inputBorder}`, color: colors.textPrimary } }}
+                />
+              </div>
+
+              {/* Seleção de campos por grupo */}
+              <div className="space-y-5">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: colors.textPrimary }}>
+                  Campos a coletar — {camposSelecionados.length} selecionado{camposSelecionados.length !== 1 ? 's' : ''}
+                </label>
+
+                {(['Pessoal', 'Endereço', 'Financeiro', 'Profissional'] as const).map(grupo => {
+                  const camposGrupo = Object.entries(DADOS_COLETAVEIS).filter(([, cfg]) => cfg.grupo === grupo);
+                  const todosSel = camposGrupo.every(([key]) => camposSelecionados.includes(key));
+                  const grupoEmoji: Record<string, string> = { Pessoal: '👤', 'Endereço': '🏠', Financeiro: '💰', Profissional: '💼' };
+                  return (
+                    <div key={grupo} className="rounded-[1.5rem] border overflow-hidden" style={{ borderColor: colors.border }}>
+                      {/* Cabeçalho do grupo */}
+                      <button
+                        onClick={() => selecionarGrupo(grupo)}
+                        className="w-full px-6 py-4 flex items-center justify-between transition-all hover:opacity-80"
+                        style={{ background: `${colors.inputBg}` }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg">{grupoEmoji[grupo]}</span>
+                          <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: colors.textPrimary }}>{grupo}</span>
+                          <span className="text-[10px] font-bold opacity-40" style={{ color: colors.textPrimary }}>
+                            ({camposGrupo.filter(([k]) => camposSelecionados.includes(k)).length}/{camposGrupo.length})
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: todosSel ? '#EC4899' : colors.textSecondary }}>
+                          {todosSel ? 'Desmarcar todos' : 'Selecionar todos'}
+                        </span>
+                      </button>
+
+                      {/* Campos do grupo */}
+                      <div className="p-4 grid grid-cols-2 gap-3">
+                        {camposGrupo.map(([key, cfg]) => {
+                          const sel = camposSelecionados.includes(key);
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => toggleCampo(key)}
+                              className="flex items-center gap-3 p-4 rounded-2xl border transition-all text-left"
+                              style={{
+                                background: sel ? '#EC489915' : colors.dashboardBg,
+                                borderColor: sel ? '#EC4899' : colors.border,
+                              }}
+                            >
+                              <div className="w-5 h-5 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all"
+                                style={{ borderColor: sel ? '#EC4899' : colors.border, background: sel ? '#EC4899' : 'transparent' }}>
+                                {sel && <span className="text-white text-[10px] font-black">✓</span>}
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-black" style={{ color: colors.textPrimary }}>
+                                  {cfg.emoji} {cfg.label}
+                                </div>
+                                <div className="text-[9px] font-bold opacity-40 mt-0.5" style={{ color: colors.textPrimary }}>
+                                  {cfg.validacaoDesc}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Preview do fluxo */}
+              {camposSelecionados.length > 0 && (
+                <div className="rounded-[1.5rem] border p-5 space-y-2" style={{ borderColor: '#EC489930', background: '#EC489908' }}>
+                  <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#EC4899' }}>Preview do fluxo gerado</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 text-[11px]" style={{ color: colors.textSecondary }}>
+                      <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-[9px] font-black flex-shrink-0">1</span>
+                      <span>💬 "Vamos fazer seu cadastro!"</span>
+                    </div>
+                    {Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k)).map((campo, i) => (
+                      <div key={campo} className="flex items-center gap-2 text-[11px]" style={{ color: colors.textSecondary }}>
+                        <span className="w-5 h-5 rounded-full bg-pink-500/20 text-pink-400 flex items-center justify-center text-[9px] font-black flex-shrink-0">{i + 2}</span>
+                        <span>📝 {DADOS_COLETAVEIS[campo].emoji} {DADOS_COLETAVEIS[campo].label} <span className="opacity-40">(pula se já preenchido)</span></span>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2 text-[11px]" style={{ color: colors.textSecondary }}>
+                      <span className="w-5 h-5 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-[9px] font-black flex-shrink-0">{camposSelecionados.length + 2}</span>
+                      <span>✅ "Cadastro concluído!"</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Ativar ao criar */}
+              <div className="flex items-center justify-between p-5 rounded-2xl border" style={{ borderColor: colors.border, background: colors.inputBg }}>
+                <div>
+                  <p className="text-[11px] font-black" style={{ color: colors.textPrimary }}>Ativar fluxo ao criar</p>
+                  <p className="text-[10px] opacity-40 font-bold mt-0.5" style={{ color: colors.textPrimary }}>O fluxo será ativado imediatamente e desativará o anterior</p>
+                </div>
+                <button
+                  onClick={() => setAtivarAoCriar(!ativarAoCriar)}
+                  className="w-12 h-6 rounded-full transition-all relative flex-shrink-0"
+                  style={{ background: ativarAoCriar ? '#EC4899' : colors.border }}
+                >
+                  <div className="w-5 h-5 rounded-full bg-white shadow-lg absolute top-0.5 transition-all" style={{ left: ativarAoCriar ? '26px' : '2px' }} />
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-8 border-t flex gap-4 flex-shrink-0" style={{ borderColor: colors.border }}>
+              <button
+                onClick={gerarFluxoCadastro}
+                disabled={gerandoFluxo || camposSelecionados.length === 0}
+                className="flex-1 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all text-white disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-95 shadow-[0_20px_40px_rgba(236,72,153,0.4)]"
+                style={{ background: 'linear-gradient(135deg, #EC4899, #8B5CF6)' }}
+              >
+                {gerandoFluxo ? '⏳ Gerando...' : `✨ Gerar Fluxo (${camposSelecionados.length} campo${camposSelecionados.length !== 1 ? 's' : ''})`}
+              </button>
+              <button
+                onClick={() => setModalGerador(false)}
+                className="px-10 py-5 rounded-[1.8rem] font-black text-[11px] uppercase tracking-widest transition-all hover:bg-red-500/10 text-red-500 border border-red-500/20"
+              >
+                Cancelar
+              </button>
             </div>
           </div>
         </div>

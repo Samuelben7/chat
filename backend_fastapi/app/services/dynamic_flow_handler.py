@@ -359,7 +359,8 @@ class DynamicFlowHandler:
                 await self._execute_node(next_node)
                 return
 
-        # Sem proximo no - fluxo terminou, resetar para inicio
+        # Sem proximo no - fluxo terminou: salvar dados coletados e resetar
+        self._flush_dados_para_cliente()
         self._reset_state()
 
     # ==================== HANDLERS DE TIPO DE NO ====================
@@ -750,13 +751,10 @@ class DynamicFlowHandler:
                 await self._send_text(error_msg)
                 return
 
-        # Salvar dado na sessao
+        # Salvar dado na sessão (acumula até o fim do fluxo)
         self._update_state(node.identificador, {variavel: valor})
 
-        # ========== SALVAR NO CLIENTE (BANCO DE DADOS) ==========
-        self._persist_to_cliente(variavel, valor)
-
-        # Avancar
+        # Avancar (salvamento em lote ocorre ao final do fluxo)
         await self._advance_to_next(node)
 
     # ==================== DADOS COLETAVEIS (FIXOS) ====================
@@ -781,71 +779,78 @@ class DynamicFlowHandler:
         "empresa_cliente":      {"campo": "empresa_cliente",      "label": "Nome da Empresa",      "validacao": "texto"},
     }
 
-    def _persist_to_cliente(self, variavel: str, valor: str):
-        """Salva dado coletado diretamente no registro do Cliente no banco."""
-        config = self.DADOS_COLETAVEIS.get(variavel)
-        if not config:
-            logger.warning(f"Variavel '{variavel}' nao esta na lista de dados coletaveis - ignorando")
+    def _flush_dados_para_cliente(self):
+        """Salva em lote todos os dados coletados no fluxo para o registro do Cliente.
+        Chamado apenas ao fim do fluxo (sem proximo_no_id).
+        Campos já preenchidos no banco NÃO são sobrescritos.
+        Campos novos (ou vazios no banco) são preenchidos com o valor coletado."""
+        dados = self.session.dados_temporarios or {}
+        # Filtrar apenas os campos que são dados coletaveis e foram coletados neste fluxo
+        campos_para_salvar = {
+            k: v for k, v in dados.items()
+            if k in self.DADOS_COLETAVEIS and v
+        }
+        if not campos_para_salvar:
             return
 
-        campo_db = config["campo"]
-
         try:
+            from app.services.validators import formatar_cpf
+            from datetime import datetime as dt
+
             cliente = self.db.query(Cliente).filter(
                 Cliente.empresa_id == self.empresa.id,
                 Cliente.whatsapp_number == self.from_number,
             ).first()
 
-            if cliente:
-                # Formatar CPF se necessario
-                if campo_db == "cpf" and valor:
+            if not cliente:
+                # Criar cliente se nao existe (raro, pois o webhook ja cria)
+                nome = campos_para_salvar.get("nome_completo", f"Contato {self.from_number[-4:]}")
+                cliente = Cliente(
+                    empresa_id=self.empresa.id,
+                    whatsapp_number=self.from_number,
+                    nome_completo=nome,
+                )
+                self.db.add(cliente)
+                self.db.flush()  # Para obter o id sem commit
+                logger.info(f"Novo Cliente criado ao fim do fluxo: {self.from_number}")
+
+            campos_atualizados = []
+            for variavel, valor in campos_para_salvar.items():
+                config = self.DADOS_COLETAVEIS[variavel]
+                campo_db = config["campo"]
+
+                # Nao sobrescrever campo ja preenchido no banco
+                valor_atual = getattr(cliente, campo_db, None)
+                if valor_atual:
+                    logger.info(f"Campo '{campo_db}' ja preenchido — mantendo valor existente")
+                    continue
+
+                # Formatar CPF
+                if campo_db == "cpf":
                     try:
-                        from app.services.validators import formatar_cpf
                         valor = formatar_cpf(valor)
                     except:
                         pass
 
-                # Data de nascimento: converter string para date
-                if campo_db == "data_nascimento" and valor:
+                # Converter data de nascimento
+                if campo_db == "data_nascimento":
                     try:
-                        from datetime import datetime as dt
-                        # Aceita dd/mm/aaaa ou dd-mm-aaaa
                         valor_limpo = valor.replace("-", "/")
-                        parsed = dt.strptime(valor_limpo, "%d/%m/%Y").date()
-                        setattr(cliente, campo_db, parsed)
+                        setattr(cliente, campo_db, dt.strptime(valor_limpo, "%d/%m/%Y").date())
+                        campos_atualizados.append(campo_db)
                     except:
-                        setattr(cliente, campo_db, None)
-                        logger.warning(f"Data invalida: {valor}")
-                else:
-                    setattr(cliente, campo_db, valor)
+                        logger.warning(f"Data invalida ignorada: {valor}")
+                    continue
 
-                self.db.commit()
-                logger.info(f"Cliente {self.from_number} atualizado: {campo_db} = {valor[:20]}...")
-            else:
-                # Criar cliente se nao existe (raro, pois o webhook ja cria)
-                new_data = {
-                    "empresa_id": self.empresa.id,
-                    "whatsapp_number": self.from_number,
-                    "nome_completo": valor if campo_db == "nome_completo" else f"Contato {self.from_number[-4:]}",
-                }
-                if campo_db != "nome_completo":
-                    if campo_db == "data_nascimento":
-                        try:
-                            from datetime import datetime as dt
-                            valor_limpo = valor.replace("-", "/")
-                            new_data[campo_db] = dt.strptime(valor_limpo, "%d/%m/%Y").date()
-                        except:
-                            pass
-                    else:
-                        new_data[campo_db] = valor
+                setattr(cliente, campo_db, valor)
+                campos_atualizados.append(campo_db)
 
-                cliente = Cliente(**new_data)
-                self.db.add(cliente)
-                self.db.commit()
-                logger.info(f"Novo Cliente criado via coletar_dado: {self.from_number}")
+            self.db.commit()
+            if campos_atualizados:
+                logger.info(f"Cliente {self.from_number} atualizado em lote: {campos_atualizados}")
 
         except Exception as e:
-            logger.error(f"Erro ao salvar dado no Cliente: {e}")
+            logger.error(f"Erro ao salvar dados em lote no Cliente: {e}")
             self.db.rollback()
 
     # ==================== UTILIDADES ====================
