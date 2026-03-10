@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import ThemeToggle from '../components/ThemeToggle/ThemeToggle';
 import api from '../services/api';
 
 // ─── Animations ───────────────────────────────────────────────────────────────
@@ -347,26 +348,29 @@ const ProcessosPage: React.FC = () => {
               </div>
             </div>
 
-            <button
-              className="proc-btn"
-              onClick={() => { setErroCadastro(''); setModalCadastro(true); }}
-              style={{
-                background: `linear-gradient(135deg, ${accent}, ${accentHover})`,
-                color: '#fff',
-                border: 'none',
-                borderRadius: 10,
-                padding: '10px 20px',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: `0 4px 16px ${accent}40`,
-              }}
-            >
-              <span style={{ fontSize: 16 }}>+</span> Cadastrar Processo
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <ThemeToggle />
+              <button
+                className="proc-btn"
+                onClick={() => { setErroCadastro(''); setModalCadastro(true); }}
+                style={{
+                  background: `linear-gradient(135deg, ${accent}, ${accentHover})`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 20px',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: `0 4px 16px ${accent}40`,
+                }}
+              >
+                <span style={{ fontSize: 16 }}>+</span> Cadastrar Processo
+              </button>
+            </div>
           </div>
 
           {/* Lista de Processos */}
