@@ -5,8 +5,10 @@ Responde mensagens de WhatsApp com contexto do negócio + histórico da conversa
 import asyncio
 import random
 import logging
-from datetime import date
+import re as _re_fmt
+from datetime import date, datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 import anthropic
 
 from app.core.config import settings
@@ -46,6 +48,17 @@ HORÁRIOS DE ATENDIMENTO:
 AGENDAMENTO: Para agendar, solicite nome completo, procedimento desejado e preferência de horário.
 """
 
+def _converter_markdown_whatsapp(texto: str) -> str:
+    """Converte markdown padrão para formatação nativa do WhatsApp."""
+    # **negrito** → *negrito*
+    texto = _re_fmt.sub(r'\*\*(.+?)\*\*', r'*\1*', texto)
+    # __texto__ → _texto_ (já é itálico no WhatsApp)
+    texto = _re_fmt.sub(r'__(.+?)__', r'_\1_', texto)
+    # ## Título ou # Título → *Título*
+    texto = _re_fmt.sub(r'^#{1,6}\s+(.+)$', r'*\1*', texto, flags=_re_fmt.MULTILINE)
+    return texto
+
+
 SYSTEM_PROMPT_BASE = """Você é {nome_assistente}, assistente virtual de atendimento pelo WhatsApp.
 
 {contexto_negocio}
@@ -65,6 +78,8 @@ INSTRUÇÕES DE COMPORTAMENTO:
 8. Use emojis com moderação (1-2 por mensagem, apenas quando natural).
 9. Se não souber responder algo, diga que vai verificar com a equipe.
 10. Responda SEMPRE em português brasileiro.
+    FORMATAÇÃO (WhatsApp): use *negrito* para títulos e destaques, _itálico_ para ênfases sutis.
+    NUNCA use markdown padrão como ## ou **. Para datas, escreva por extenso: "segunda-feira, 10/03 às 10:00".
 11. Quando o objetivo da conversa estiver COMPLETAMENTE concluído (agendamento confirmado com nome/procedimento/horário, dúvida totalmente esclarecida, cliente se despede explicitamente), adicione exatamente este marcador no final da sua resposta: [CONVERSA_ENCERRADA]
     IMPORTANTE: Use esse marcador SOMENTE quando tiver certeza que o atendimento está finalizado. Não use em meio à conversa. Só uma vez, no final.
 12. Quando confirmar um agendamento com data e hora específicos, adicione ANTES do [CONVERSA_ENCERRADA] o marcador: [AGENDAMENTO:AAAA-MM-DD|HH:MM]
@@ -114,6 +129,7 @@ async def gerar_resposta_ia(
     delay_max: int = 10,
     crm_context: Optional[str] = None,
     agenda_context: Optional[str] = None,
+    sistema_feedback: Optional[str] = None,
 ) -> str:
     """
     Gera resposta da IA para uma mensagem recebida.
@@ -135,16 +151,17 @@ async def gerar_resposta_ia(
 
     contexto = contexto_negocio.strip() if contexto_negocio and contexto_negocio.strip() else CONTEXTO_DEMO_ODONTOLOGIA
 
-    today = date.today()
+    now_br = datetime.now(ZoneInfo('America/Sao_Paulo'))
     system_prompt = SYSTEM_PROMPT_BASE.format(
         nome_assistente=nome_assistente or "Assistente",
         contexto_negocio=contexto,
     )
 
-    # Injetar data atual para evitar alucinação de ano errado no marcador [AGENDAMENTO:]
+    # Injetar data E hora atual (fuso Brasil) — evita agendar horários que já passaram
     system_prompt = (
-        f"DATA DE HOJE: {today.strftime('%d/%m/%Y')} (ano {today.year}). "
-        f"Ao usar o marcador [AGENDAMENTO:AAAA-MM-DD|HH:MM], o ano DEVE ser {today.year} ou posterior.\n\n"
+        f"DATA E HORA ATUAL: {now_br.strftime('%d/%m/%Y %H:%M')} (fuso: Brasil/Brasília, ano {now_br.year}). "
+        f"Horários passados NÃO podem ser agendados — se o cliente pedir um horário que já passou hoje, recuse gentilmente. "
+        f"Ao usar o marcador [AGENDAMENTO:AAAA-MM-DD|HH:MM], o ano DEVE ser {now_br.year} ou posterior.\n\n"
     ) + system_prompt
 
     # Enriquecer com contexto CRM quando disponível
@@ -154,6 +171,14 @@ async def gerar_resposta_ia(
             + crm_context
             + "\n\nCom base nesse contexto, personalize a conversa: não pergunte informações que o cliente já forneceu, "
             "e avance naturalmente no atendimento considerando a etapa atual do funil."
+        )
+
+    # Feedback interno do sistema (ex: slot ocupado por outro cliente)
+    if sistema_feedback:
+        system_prompt += (
+            "\n\nFEEDBACK INTERNO DO SISTEMA (informação de bastidores — não mencione ao cliente diretamente, "
+            "apenas aja com base nessa informação ao formular sua resposta):\n"
+            + sistema_feedback
         )
 
     # Enriquecer com dados reais da agenda quando disponíveis
@@ -202,5 +227,7 @@ async def gerar_resposta_ia(
     )
 
     resposta = response.content[0].text.strip()
+    # Converter markdown padrão para formatação nativa do WhatsApp
+    resposta = _converter_markdown_whatsapp(resposta)
     logger.info(f"IA gerou resposta ({len(resposta)} chars) para '{nova_mensagem[:50]}'")
     return resposta

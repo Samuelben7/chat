@@ -781,6 +781,104 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     resposta_limpa = _re.sub(r'\[CANCELAR_AGENDAMENTO:[^\]]+\]', '', resposta_limpa)
                     resposta_limpa = resposta_limpa.replace('[CONVERSA_ENCERRADA]', '').strip()
 
+                    # ===== BOOKING ANTECIPADO: tenta reservar ANTES de enviar mensagem =====
+                    # Isso evita confirmar ao cliente um horário que já foi ocupado por outra instância
+                    _booking_feedback = None
+                    if agendamento_data and agendamento_hora and encerrar_agora:
+                        try:
+                            from app.models.models import AgendaSlot as _AgSlotB, AgendaAgendamento as _AgAgB
+                            from datetime import date as _date_b, datetime as _dtt_b
+                            from zoneinfo import ZoneInfo as _ZI_b
+                            _data_ag_b = _date_b.fromisoformat(agendamento_data)
+                            if _data_ag_b < _dtt_b.now(_ZI_b('America/Sao_Paulo')).date():
+                                _booking_feedback = (
+                                    f"A data {agendamento_data} já passou. "
+                                    "Peça ao cliente que escolha uma data futura e ofereça os horários disponíveis."
+                                )
+                                encerrar_agora = False
+                                agendamento_data = None
+                                agendamento_hora = None
+                            else:
+                                _slot_b = db.query(_AgSlotB).filter(
+                                    _AgSlotB.empresa_id == empresa.id,
+                                    _AgSlotB.data == _data_ag_b,
+                                    _AgSlotB.hora_inicio == agendamento_hora,
+                                ).with_for_update().first()
+
+                                if not _slot_b or _slot_b.status == 'bloqueado' or _slot_b.vagas_ocupadas >= _slot_b.vagas_total:
+                                    _motivo = "não encontrado" if not _slot_b else ("bloqueado" if _slot_b.status == 'bloqueado' else "lotado")
+                                    print(f"⚠️ Booking antecipado falhou ({_motivo}): {agendamento_data} {agendamento_hora}")
+                                    _booking_feedback = (
+                                        f"O horário {agendamento_hora} do dia {agendamento_data} acabou de ser ocupado "
+                                        f"por outro cliente (situação: {_motivo}). NÃO confirme esse horário. "
+                                        "Informe o cliente com empatia e ofereça os próximos horários disponíveis da agenda."
+                                    )
+                                    encerrar_agora = False
+                                    agendamento_data = None
+                                    agendamento_hora = None
+                                else:
+                                    _ja_ag_b = db.query(_AgAgB).filter(
+                                        _AgAgB.slot_id == _slot_b.id,
+                                        _AgAgB.whatsapp_number == from_number,
+                                        _AgAgB.status != 'cancelado',
+                                    ).first()
+                                    if not _ja_ag_b:
+                                        _cli_b = db.query(Cliente).filter(
+                                            Cliente.empresa_id == empresa.id,
+                                            Cliente.whatsapp_number == from_number,
+                                        ).first()
+                                        _ag_b = _AgAgB(
+                                            empresa_id=empresa.id,
+                                            slot_id=_slot_b.id,
+                                            whatsapp_number=from_number,
+                                            nome_cliente=_cli_b.nome_completo if _cli_b else None,
+                                            cliente_id=_cli_b.id if _cli_b else None,
+                                            status='confirmado',
+                                        )
+                                        db.add(_ag_b)
+                                        _slot_b.vagas_ocupadas += 1
+                                        if _slot_b.vagas_ocupadas >= _slot_b.vagas_total:
+                                            _slot_b.status = 'lotado'
+                                        db.commit()
+                                        print(f"📅 Agendamento criado (antecipado): {agendamento_data} {agendamento_hora} para {from_number}")
+                                        try:
+                                            import redis as _redis_b
+                                            from app.core.config import settings as _sb
+                                            _rb = _redis_b.from_url(_sb.REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
+                                            _rb.delete(
+                                                f"agenda:slots:{empresa.id}:{_data_ag_b.isoformat()}",
+                                                f"agenda:cal:{empresa.id}:{_data_ag_b.year}:{_data_ag_b.month}",
+                                            )
+                                        except Exception:
+                                            pass
+                                    else:
+                                        print(f"⚠️ Duplicata ignorada (antecipado): {from_number} já tem agendamento no slot {_slot_b.id}")
+                        except Exception as _ag_err_b:
+                            print(f"⚠️ Erro no booking antecipado: {_ag_err_b}")
+
+                    # Se booking falhou: re-chamar IA com feedback e manter conversa aberta
+                    if _booking_feedback:
+                        try:
+                            _resp_feedback = asyncio.run(gerar_resposta_ia(
+                                mensagens=historico,
+                                nova_mensagem=content,
+                                nome_assistente=getattr(empresa, 'ia_nome_assistente', 'Assistente') or 'Assistente',
+                                contexto_negocio=getattr(empresa, 'ia_contexto', None),
+                                delay_min=2,
+                                delay_max=4,
+                                crm_context=crm_context,
+                                agenda_context=agenda_context,
+                                sistema_feedback=_booking_feedback,
+                            ))
+                            resposta_limpa = _re.sub(r'\[AGENDAMENTO:[^\]]+\]', '', _resp_feedback)
+                            resposta_limpa = _re.sub(r'\[CANCELAR_AGENDAMENTO:[^\]]+\]', '', resposta_limpa)
+                            resposta_limpa = resposta_limpa.replace('[CONVERSA_ENCERRADA]', '').strip()
+                            print(f"🔄 IA respondeu com feedback de conflito para {from_number}")
+                        except Exception as _rfb_err:
+                            print(f"⚠️ Erro ao re-chamar IA com feedback: {_rfb_err}")
+                            resposta_limpa = "Peço desculpas, houve um imprevisto ao confirmar o horário. Por favor, escolha outro horário disponível."
+                    # ===== FIM BOOKING ANTECIPADO =====
+
                     # IA "assume" a conversa se ainda não está em atendimento ou não foi marcada
                     if atendimento.status != 'em_atendimento' or not getattr(atendimento, 'atendido_por_ia', False):
                         atendimento.status = 'em_atendimento'
@@ -854,74 +952,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         atendimento.finalizado_em = datetime.now()
                         atendimento.motivo_encerramento = 'ia_concluiu'
 
-                        # Criar agendamento no banco se IA confirmou um horário
-                        if agendamento_data and agendamento_hora:
-                            try:
-                                from app.models.models import AgendaSlot, AgendaAgendamento
-                                from datetime import date as _date, datetime as _dtt
-                                from zoneinfo import ZoneInfo as _ZI2
-
-                                # Cenário 4: bloquear datas no passado (fuso Brasil)
-                                _data_ag = _date.fromisoformat(agendamento_data)
-                                if _data_ag < _dtt.now(_ZI2('America/Sao_Paulo')).date():
-                                    print(f"⚠️ Data no passado ignorada: {agendamento_data} para {from_number}")
-                                else:
-                                    # Cenário 3: SELECT FOR UPDATE = lock de row contra race condition
-                                    _slot = db.query(AgendaSlot).filter(
-                                        AgendaSlot.empresa_id == empresa.id,
-                                        AgendaSlot.data == _data_ag,
-                                        AgendaSlot.hora_inicio == agendamento_hora,
-                                    ).with_for_update().first()
-
-                                    if not _slot:
-                                        print(f"⚠️ Slot {agendamento_data} {agendamento_hora} não encontrado")
-                                    elif _slot.status == 'bloqueado':
-                                        # Cenário 2: slot bloqueado entre resposta IA e commit
-                                        print(f"⚠️ Slot bloqueado: {agendamento_data} {agendamento_hora}")
-                                    elif _slot.vagas_ocupadas >= _slot.vagas_total:
-                                        print(f"⚠️ Slot lotado: {agendamento_data} {agendamento_hora} ({_slot.vagas_ocupadas}/{_slot.vagas_total})")
-                                    else:
-                                        # Cenário 1: anti-duplicata
-                                        _ja_agendado = db.query(AgendaAgendamento).filter(
-                                            AgendaAgendamento.slot_id == _slot.id,
-                                            AgendaAgendamento.whatsapp_number == from_number,
-                                            AgendaAgendamento.status != 'cancelado',
-                                        ).first()
-                                        if _ja_agendado:
-                                            print(f"⚠️ Duplicata ignorada: {from_number} já tem agendamento no slot {_slot.id}")
-                                        else:
-                                            _cliente = db.query(Cliente).filter(
-                                                Cliente.empresa_id == empresa.id,
-                                                Cliente.whatsapp_number == from_number,
-                                            ).first()
-                                            _ag = AgendaAgendamento(
-                                                empresa_id=empresa.id,
-                                                slot_id=_slot.id,
-                                                whatsapp_number=from_number,
-                                                nome_cliente=_cliente.nome_completo if _cliente else None,
-                                                cliente_id=_cliente.id if _cliente else None,
-                                                status='confirmado',
-                                            )
-                                            db.add(_ag)
-                                            _slot.vagas_ocupadas += 1
-                                            if _slot.vagas_ocupadas >= _slot.vagas_total:
-                                                _slot.status = 'lotado'
-                                            db.commit()
-                                            print(f"📅 Agendamento criado: {agendamento_data} {agendamento_hora} para {from_number}")
-
-                                            # Invalidar cache Redis da agenda
-                                            try:
-                                                import redis as _redis_ag
-                                                from app.core.config import settings as _ag_settings
-                                                _r = _redis_ag.from_url(_ag_settings.REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
-                                                _r.delete(
-                                                    f"agenda:slots:{empresa.id}:{_data_ag.isoformat()}",
-                                                    f"agenda:cal:{empresa.id}:{_data_ag.year}:{_data_ag.month}",
-                                                )
-                                            except Exception:
-                                                pass
-                            except Exception as _ag_err:
-                                print(f"⚠️ Erro ao criar agendamento da IA: {_ag_err}")
+                        # Agendamento já foi criado no bloco de booking antecipado (antes do envio da mensagem)
 
                         # Garantir sessão — criar se não existir (essencial para pesquisa funcionar)
                         sessao_ia = db.query(ChatSessao).filter(
