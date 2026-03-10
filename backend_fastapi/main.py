@@ -23,6 +23,7 @@ mimetypes.add_type("audio/mpeg", ".mp3")
 # Import routers
 from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm, perfil_whatsapp, modelos_mensagem, clientes
 from app.api import dev_auth, dev_api_keys, dev_gateway, dev_usage, dev_webhook, dev_numeros, dev_embedded_signup
+from app.api import processos
 from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 
 # Import Redis Pub/Sub e WebSocket Manager
@@ -169,6 +170,7 @@ app.include_router(crm.router, prefix=settings.API_V1_STR, tags=["crm"])
 app.include_router(clientes.router, prefix=settings.API_V1_STR, tags=["clientes"])
 app.include_router(perfil_whatsapp.router, prefix=settings.API_V1_STR, tags=["perfil-whatsapp"])
 app.include_router(modelos_mensagem.router, prefix=settings.API_V1_STR, tags=["modelos-mensagem"])
+app.include_router(processos.router, prefix=settings.API_V1_STR, tags=["processos-juridicos"])
 
 # Dev API Gateway
 app.include_router(dev_auth.router, prefix=settings.API_V1_STR, tags=["dev-auth"])

@@ -6,7 +6,7 @@ celery_app = Celery(
     "whatsapp_sistema",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=['app.tasks.tasks', 'app.tasks.billing_tasks']
+    include=['app.tasks.tasks', 'app.tasks.billing_tasks', 'app.tasks.juridico_tasks']
 )
 
 # Configurações do Celery
@@ -63,6 +63,10 @@ celery_app.conf.beat_schedule = {
     'cobrar-numeros-devs': {
         'task': 'app.tasks.billing_tasks.cobrar_numeros_devs_task',
         'schedule': 86400.0,  # Diário — a task interna checa se já cobrou no mês
+    },
+    'verificar-processos-judiciais': {
+        'task': 'app.tasks.juridico_tasks.verificar_processos_periodico',
+        'schedule': 21600.0,  # A cada 6 horas
     },
 }
 

@@ -1302,7 +1302,7 @@ const BotBuilder: React.FC = () => {
                            const formData = new FormData();
                            formData.append('file', file);
                            try {
-                             const res = await api.post('/bot-builder/upload-imagem', formData);
+                             const res = await api.post('/bot-builder/upload-imagem', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
                              updateDadosExtras('header_image_url', res.data.url);
                            } catch (err) { alert('Falha no upload'); }
                         }} />
@@ -1584,7 +1584,7 @@ const BotBuilder: React.FC = () => {
                           const formData = new FormData();
                           formData.append('file', file);
                           try {
-                            const res = await api.post('/bot-builder/upload-imagem', formData);
+                            const res = await api.post('/bot-builder/upload-imagem', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
                             updateEditDadosExtras('header_image_url', res.data.url);
                           } catch (err) { alert('Falha'); }
                        }} />

@@ -882,3 +882,71 @@ class ClienteValorCustom(Base):
     __table_args__ = (
         Index('idx_valor_custom_cliente_campo', 'cliente_id', 'campo_id', unique=True),
     )
+
+
+# ─── Módulo Jurídico ───────────────────────────────────────────────────────────
+
+class ProcessoJudicial(Base):
+    """Processo judicial cadastrado pelo advogado, vinculado a um cliente."""
+    __tablename__ = "processo_judicial"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("whatsapp_bot_cliente.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Identificação CNJ
+    numero_cnj = Column(String(25), nullable=False, index=True)  # ex: 0001234-12.2023.8.26.0100
+    tribunal = Column(String(20), nullable=False)                # ex: tjsp, trf1, trt2
+    segmento = Column(String(30))                                # estadual, federal, trabalhista, eleitoral
+    indice_datajud = Column(String(50))                          # ex: api_publica_tjsp
+
+    # Dados do processo
+    classe = Column(String(200))
+    assunto = Column(String(500))
+    orgao_julgador = Column(String(300))
+    partes = Column(JSON)                                        # [{nome, tipo: "autor"/"reu"/"advogado"}]
+    status_atual = Column(String(100))
+
+    # Notificações
+    notificar_cliente = Column(Boolean, default=True)
+    ativo = Column(Boolean, default=True)
+
+    # Controle de sincronização
+    ultima_verificacao = Column(DateTime, nullable=True)
+    ultima_movimentacao_data = Column(DateTime, nullable=True)
+    datajud_id = Column(String(100), nullable=True)             # _id interno do DataJud
+
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    movimentacoes = relationship("MovimentacaoProcesso", back_populates="processo", cascade="all, delete-orphan", order_by="MovimentacaoProcesso.data_movimentacao.desc()")
+    cliente = relationship("Cliente")
+
+    __table_args__ = (
+        Index('idx_processo_empresa_numero', 'empresa_id', 'numero_cnj', unique=True),
+    )
+
+
+class MovimentacaoProcesso(Base):
+    """Movimentação registrada no processo (vinda do DataJud ou scraping)."""
+    __tablename__ = "movimentacao_processo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    processo_id = Column(Integer, ForeignKey("processo_judicial.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    data_movimentacao = Column(DateTime, nullable=False, index=True)
+    codigo_nacional = Column(Integer, nullable=True)             # código TPU do CNJ
+    descricao = Column(Text, nullable=False)                     # descrição original do DataJud
+    texto_completo = Column(Text, nullable=True)                 # texto via scraping (fase 2)
+    resumo_ia = Column(Text, nullable=True)                      # resumo gerado pelo Claude
+
+    notificado_cliente = Column(Boolean, default=False)
+    notificado_em = Column(DateTime, nullable=True)
+
+    datajud_hash = Column(String(64), nullable=True, index=True) # hash para evitar duplicatas
+
+    criado_em = Column(DateTime, server_default=func.now())
+
+    # Relationships
+    processo = relationship("ProcessoJudicial", back_populates="movimentacoes")

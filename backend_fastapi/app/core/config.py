@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # Anthropic (Claude AI)
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # DataJud (CNJ) — Módulo Jurídico
+    DATAJUD_API_KEY: Optional[str] = None
+
     # App
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
