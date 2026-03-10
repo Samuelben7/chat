@@ -31,6 +31,8 @@ from app.models.models import (
     MensagemLog,
     Atendimento,
     Cliente,
+    CampoCustomCliente,
+    ClienteValorCustom,
 )
 from app.services.whatsapp import WhatsAppService
 from app.core.config import settings
@@ -467,15 +469,29 @@ class DynamicFlowHandler:
         variavel = dados_extras.get("variavel", "")
         pular_se_preenchido = dados_extras.get("pular_se_preenchido", False)
 
-        # Auto-skip: se o campo ja esta preenchido no Cliente
-        if pular_se_preenchido and variavel and variavel in self.DADOS_COLETAVEIS:
+        # Auto-skip: se o campo ja esta preenchido no Cliente (padrão ou custom)
+        if pular_se_preenchido and variavel:
             cliente = self._get_cliente()
             if cliente:
-                campo_db = self.DADOS_COLETAVEIS[variavel]["campo"]
-                valor_atual = getattr(cliente, campo_db, None)
+                valor_atual = None
+                if variavel in self.DADOS_COLETAVEIS:
+                    campo_db = self.DADOS_COLETAVEIS[variavel]["campo"]
+                    valor_atual = getattr(cliente, campo_db, None)
+                elif variavel.startswith("custom_"):
+                    slug = variavel.replace("custom_", "", 1)
+                    campo_def = self.db.query(CampoCustomCliente).filter(
+                        CampoCustomCliente.empresa_id == self.empresa.id,
+                        CampoCustomCliente.slug == slug,
+                    ).first()
+                    if campo_def:
+                        registro = self.db.query(ClienteValorCustom).filter(
+                            ClienteValorCustom.cliente_id == cliente.id,
+                            ClienteValorCustom.campo_id == campo_def.id,
+                        ).first()
+                        valor_atual = registro.valor if registro else None
+
                 if valor_atual:
                     logger.info(f"Auto-skip coletar_dado '{variavel}': ja preenchido = {str(valor_atual)[:20]}")
-                    # Salvar nos dados temporarios para uso em interpolacao
                     self._update_state(node.identificador, {variavel: str(valor_atual)})
                     await self._advance_to_next(node)
                     return
@@ -734,17 +750,22 @@ class DynamicFlowHandler:
         dados_extras = node.dados_extras or {}
         variavel = dados_extras.get("variavel", "")
 
-        # Se variavel nao esta na lista de dados coletaveis, rejeitar
-        if variavel not in self.DADOS_COLETAVEIS:
-            logger.warning(f"Variavel '{variavel}' nao esta nos dados coletaveis fixos")
+        # Validar: campo padrão ou custom_<slug>
+        is_custom = variavel.startswith("custom_")
+        if not is_custom and variavel not in self.DADOS_COLETAVEIS:
+            logger.warning(f"Variavel '{variavel}' nao reconhecida")
             await self._send_text("Erro de configuracao. Entrando em contato com suporte...")
             await self._advance_to_next(node)
             return
 
         valor = self.message_content.strip()
 
-        # Usar validacao definida no DADOS_COLETAVEIS (ignora config manual)
-        validacao = self.DADOS_COLETAVEIS[variavel]["validacao"]
+        # Validacao: usa DADOS_COLETAVEIS para campos padrão; config manual para custom
+        if is_custom:
+            validacao = (dados_extras.get("validacao") or "texto")
+        else:
+            validacao = self.DADOS_COLETAVEIS[variavel]["validacao"]
+
         if validacao and validacao != "texto":
             is_valid, error_msg = self._validate_input(valor, validacao)
             if not is_valid:
@@ -782,15 +803,14 @@ class DynamicFlowHandler:
     def _flush_dados_para_cliente(self):
         """Salva em lote todos os dados coletados no fluxo para o registro do Cliente.
         Chamado apenas ao fim do fluxo (sem proximo_no_id).
-        Campos já preenchidos no banco NÃO são sobrescritos.
-        Campos novos (ou vazios no banco) são preenchidos com o valor coletado."""
+        - Campos padrão (DADOS_COLETAVEIS): salvos em Cliente; não sobrescreve existentes.
+        - Campos custom (custom_<slug>): salvos em ClienteValorCustom; cria ou atualiza."""
         dados = self.session.dados_temporarios or {}
-        # Filtrar apenas os campos que são dados coletaveis e foram coletados neste fluxo
-        campos_para_salvar = {
-            k: v for k, v in dados.items()
-            if k in self.DADOS_COLETAVEIS and v
-        }
-        if not campos_para_salvar:
+
+        campos_padrao = {k: v for k, v in dados.items() if k in self.DADOS_COLETAVEIS and v}
+        campos_custom = {k: v for k, v in dados.items() if k.startswith("custom_") and v}
+
+        if not campos_padrao and not campos_custom:
             return
 
         try:
@@ -803,36 +823,33 @@ class DynamicFlowHandler:
             ).first()
 
             if not cliente:
-                # Criar cliente se nao existe (raro, pois o webhook ja cria)
-                nome = campos_para_salvar.get("nome_completo", f"Contato {self.from_number[-4:]}")
+                nome = campos_padrao.get("nome_completo", f"Contato {self.from_number[-4:]}")
                 cliente = Cliente(
                     empresa_id=self.empresa.id,
                     whatsapp_number=self.from_number,
                     nome_completo=nome,
                 )
                 self.db.add(cliente)
-                self.db.flush()  # Para obter o id sem commit
+                self.db.flush()
                 logger.info(f"Novo Cliente criado ao fim do fluxo: {self.from_number}")
 
+            # ── Campos padrão → tabela Cliente ──
             campos_atualizados = []
-            for variavel, valor in campos_para_salvar.items():
+            for variavel, valor in campos_padrao.items():
                 config = self.DADOS_COLETAVEIS[variavel]
                 campo_db = config["campo"]
 
-                # Nao sobrescrever campo ja preenchido no banco
                 valor_atual = getattr(cliente, campo_db, None)
                 if valor_atual:
                     logger.info(f"Campo '{campo_db}' ja preenchido — mantendo valor existente")
                     continue
 
-                # Formatar CPF
                 if campo_db == "cpf":
                     try:
                         valor = formatar_cpf(valor)
                     except:
                         pass
 
-                # Converter data de nascimento
                 if campo_db == "data_nascimento":
                     try:
                         valor_limpo = valor.replace("-", "/")
@@ -845,9 +862,41 @@ class DynamicFlowHandler:
                 setattr(cliente, campo_db, valor)
                 campos_atualizados.append(campo_db)
 
+            # ── Campos custom → tabela ClienteValorCustom ──
+            campos_custom_atualizados = []
+            for variavel, valor in campos_custom.items():
+                slug = variavel.replace("custom_", "", 1)
+                campo_def = self.db.query(CampoCustomCliente).filter(
+                    CampoCustomCliente.empresa_id == self.empresa.id,
+                    CampoCustomCliente.slug == slug,
+                    CampoCustomCliente.ativo == True,
+                ).first()
+                if not campo_def:
+                    logger.warning(f"Campo custom '{slug}' nao encontrado para empresa {self.empresa.id}")
+                    continue
+
+                # Upsert: cria ou atualiza
+                registro = self.db.query(ClienteValorCustom).filter(
+                    ClienteValorCustom.cliente_id == cliente.id,
+                    ClienteValorCustom.campo_id == campo_def.id,
+                ).first()
+
+                if registro:
+                    registro.valor = str(valor)
+                else:
+                    registro = ClienteValorCustom(
+                        cliente_id=cliente.id,
+                        campo_id=campo_def.id,
+                        valor=str(valor),
+                    )
+                    self.db.add(registro)
+                campos_custom_atualizados.append(campo_def.nome)
+
             self.db.commit()
             if campos_atualizados:
-                logger.info(f"Cliente {self.from_number} atualizado em lote: {campos_atualizados}")
+                logger.info(f"Cliente {self.from_number} campos padrão salvos: {campos_atualizados}")
+            if campos_custom_atualizados:
+                logger.info(f"Cliente {self.from_number} campos custom salvos: {campos_custom_atualizados}")
 
         except Exception as e:
             logger.error(f"Erro ao salvar dados em lote no Cliente: {e}")

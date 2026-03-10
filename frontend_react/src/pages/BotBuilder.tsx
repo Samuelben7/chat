@@ -394,6 +394,9 @@ const BotBuilder: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [expandedNodeId, setExpandedNodeId] = useState<number | null>(null);
 
+  // Campos customizados da empresa
+  const [camposCustom, setCamposCustom] = useState<Array<{ id: number; nome: string; slug: string; tipo: string; obrigatorio: boolean }>>([]);
+
   // Gerador de Cadastro
   const [modalGerador, setModalGerador] = useState(false);
   const [camposSelecionados, setCamposSelecionados] = useState<string[]>(['nome_completo']);
@@ -418,7 +421,17 @@ const BotBuilder: React.FC = () => {
 
   useEffect(() => {
     carregarFluxos();
+    carregarCamposCustom();
   }, []);
+
+  const carregarCamposCustom = async () => {
+    try {
+      const response = await api.get('/clientes/campos-custom/');
+      setCamposCustom(response.data);
+    } catch (error) {
+      console.error('Erro ao carregar campos custom:', error);
+    }
+  };
 
   const carregarFluxos = async () => {
     try {
@@ -491,15 +504,29 @@ const BotBuilder: React.FC = () => {
   };
 
   const selecionarGrupo = (grupo: string) => {
-    const camposGrupo = Object.entries(DADOS_COLETAVEIS)
-      .filter(([, cfg]) => cfg.grupo === grupo)
-      .map(([key]) => key);
+    let camposGrupo: string[];
+    if (grupo === 'Personalizado') {
+      camposGrupo = camposCustom.map(c => `custom_${c.slug}`);
+    } else {
+      camposGrupo = Object.entries(DADOS_COLETAVEIS)
+        .filter(([, cfg]) => cfg.grupo === grupo)
+        .map(([key]) => key);
+    }
     const todosSelecionados = camposGrupo.every(c => camposSelecionados.includes(c));
     if (todosSelecionados) {
       setCamposSelecionados(prev => prev.filter(c => !camposGrupo.includes(c)));
     } else {
       setCamposSelecionados(prev => [...new Set([...prev, ...camposGrupo])]);
     }
+  };
+
+  // Rótulo amigável para exibir no preview e descrição do fluxo
+  const getLabelCampo = (key: string): string => {
+    if (key.startsWith('custom_')) {
+      const slug = key.replace('custom_', '');
+      return camposCustom.find(c => c.slug === slug)?.nome || slug;
+    }
+    return DADOS_COLETAVEIS[key]?.label || key;
   };
 
   const gerarFluxoCadastro = async () => {
@@ -512,7 +539,7 @@ const BotBuilder: React.FC = () => {
       // 1. Criar fluxo
       const fluxoRes = await api.post('/bot-builder/fluxos', {
         nome: nomeFluxoGerador || 'Cadastro de Clientes',
-        descricao: `Coleta: ${camposSelecionados.map(k => DADOS_COLETAVEIS[k]?.label).join(', ')}`,
+        descricao: `Coleta: ${camposSelecionados.map(k => getLabelCampo(k)).join(', ')}`,
         ativo: false,
       });
       const fluxoId = fluxoRes.data.id;
@@ -529,21 +556,39 @@ const BotBuilder: React.FC = () => {
       });
       const noIds: number[] = [introRes.data.id];
 
-      // Manter a ordem original de DADOS_COLETAVEIS para os campos selecionados
-      const camposOrdenados = Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k));
+      // Manter a ordem: primeiro os campos padrão (ordem de DADOS_COLETAVEIS), depois os custom
+      const camposOrdenados = [
+        ...Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k)),
+        ...camposSelecionados.filter(k => k.startsWith('custom_')),
+      ];
 
       // 3. Criar nó de coleta para cada campo
       for (let i = 0; i < camposOrdenados.length; i++) {
         const campo = camposOrdenados[i];
-        const cfg = DADOS_COLETAVEIS[campo];
+        let titulo: string, conteudo: string, validacao: string;
+
+        if (campo.startsWith('custom_')) {
+          const slug = campo.replace('custom_', '');
+          const cc = camposCustom.find(c => c.slug === slug);
+          titulo = cc?.nome || slug;
+          conteudo = `Por favor, informe ${cc?.nome || slug}:`;
+          const tipoValidacao: Record<string, string> = { numero: 'numero', data: 'data', texto: 'texto', opcoes: 'texto', booleano: 'texto' };
+          validacao = tipoValidacao[cc?.tipo || 'texto'] || 'texto';
+        } else {
+          const cfg = DADOS_COLETAVEIS[campo];
+          titulo = cfg.label;
+          conteudo = cfg.placeholder;
+          validacao = cfg.validacao;
+        }
+
         const noRes = await api.post(`/bot-builder/fluxos/${fluxoId}/nos`, {
-          identificador: `coleta_${campo}`,
+          identificador: `coleta_${campo.replace('custom_', 'cx_')}`,
           tipo: 'coletar_dado',
-          titulo: cfg.label,
-          conteudo: cfg.placeholder,
+          titulo,
+          conteudo,
           dados_extras: {
             variavel: campo,
-            validacao: cfg.validacao,
+            validacao,
             pular_se_preenchido: true,
           },
           ordem: i + 1,
@@ -1287,7 +1332,7 @@ const BotBuilder: React.FC = () => {
                         if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
                         grupos[cfg.grupo].push(key);
                       });
-                      return Object.entries(grupos).map(([grupo, keys]) => (
+                      const elementos = Object.entries(grupos).map(([grupo, keys]) => (
                         <div key={grupo}>
                           <div className="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1.5 ml-1" style={{ color: colors.textPrimary }}>{grupo}</div>
                           <div className="grid grid-cols-2 gap-2">
@@ -1295,31 +1340,49 @@ const BotBuilder: React.FC = () => {
                               const cfg = DADOS_COLETAVEIS[key];
                               const sel = novoNo.dados_extras?.variavel === key;
                               return (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  onClick={() => setNovoNo({ ...novoNo, conteudo: cfg.placeholder, dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: cfg.validacao } })}
-                                  className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]"
-                                  style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}
-                                >
+                                <button key={key} type="button" onClick={() => setNovoNo({ ...novoNo, conteudo: cfg.placeholder, dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: cfg.validacao } })} className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]" style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}>
                                   <div className="flex items-center gap-1.5 mb-0.5">
                                     <span className="text-sm">{cfg.emoji}</span>
                                     <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#EC4899' : colors.textPrimary }}>{cfg.label}</span>
                                   </div>
-                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textSec }}>{cfg.validacaoDesc}</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textPrimary }}>{cfg.validacaoDesc}</span>
                                 </button>
                               );
                             })}
                           </div>
                         </div>
                       ));
+                      if (camposCustom.length > 0) {
+                        elementos.push(
+                          <div key="Personalizado">
+                            <div className="text-[9px] font-black uppercase tracking-widest mb-1.5 ml-1" style={{ color: '#8B5CF6' }}>⚙️ Personalizados da Empresa</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {camposCustom.map(cc => {
+                                const key = `custom_${cc.slug}`;
+                                const sel = novoNo.dados_extras?.variavel === key;
+                                const tipoValidacao: Record<string, string> = { numero: 'numero', data: 'data', texto: 'texto', opcoes: 'texto', booleano: 'texto' };
+                                return (
+                                  <button key={key} type="button" onClick={() => setNovoNo({ ...novoNo, conteudo: `Por favor, informe ${cc.nome}:`, dados_extras: { ...novoNo.dados_extras, variavel: key, validacao: tipoValidacao[cc.tipo] || 'texto' } })} className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]" style={{ background: sel ? '#8B5CF615' : 'transparent', borderColor: sel ? '#8B5CF6' : colors.border }}>
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                      <span className="text-sm">⚙️</span>
+                                      <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#8B5CF6' : colors.textPrimary }}>{cc.nome}</span>
+                                    </div>
+                                    <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textPrimary }}>{cc.tipo}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return elementos;
                     })()}
                   </div>
                   {novoNo.dados_extras?.variavel && (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: '#EC489910' }}>
-                      <span className="text-pink-400 text-xs font-black">✓</span>
-                      <span className="text-[11px] font-semibold" style={{ color: '#EC4899' }}>
-                        Validação automática: <strong>{DADOS_COLETAVEIS[novoNo.dados_extras.variavel]?.validacaoDesc}</strong>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: novoNo.dados_extras.variavel.startsWith('custom_') ? '#8B5CF610' : '#EC489910' }}>
+                      <span className="text-xs font-black" style={{ color: novoNo.dados_extras.variavel.startsWith('custom_') ? '#8B5CF6' : '#EC4899' }}>✓</span>
+                      <span className="text-[11px] font-semibold" style={{ color: novoNo.dados_extras.variavel.startsWith('custom_') ? '#8B5CF6' : '#EC4899' }}>
+                        {novoNo.dados_extras.variavel.startsWith('custom_') ? `Campo personalizado: ${getLabelCampo(novoNo.dados_extras.variavel)}` : `Validação automática: ${DADOS_COLETAVEIS[novoNo.dados_extras.variavel]?.validacaoDesc}`}
                       </span>
                     </div>
                   )}
@@ -1547,7 +1610,7 @@ const BotBuilder: React.FC = () => {
                         if (!grupos[cfg.grupo]) grupos[cfg.grupo] = [];
                         grupos[cfg.grupo].push(key);
                       });
-                      return Object.entries(grupos).map(([grupo, keys]) => (
+                      const elementos = Object.entries(grupos).map(([grupo, keys]) => (
                         <div key={grupo}>
                           <div className="text-[9px] font-black uppercase tracking-widest opacity-30 mb-1.5 ml-1" style={{ color: colors.textPrimary }}>{grupo}</div>
                           <div className="grid grid-cols-2 gap-2">
@@ -1555,31 +1618,49 @@ const BotBuilder: React.FC = () => {
                               const cfg = DADOS_COLETAVEIS[key];
                               const sel = noEditando.dados_extras?.variavel === key;
                               return (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  onClick={() => setNoEditando({ ...noEditando, conteudo: cfg.placeholder, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg.validacao } })}
-                                  className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]"
-                                  style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}
-                                >
+                                <button key={key} type="button" onClick={() => setNoEditando({ ...noEditando, conteudo: cfg.placeholder, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: cfg.validacao } })} className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]" style={{ background: sel ? '#EC489915' : 'transparent', borderColor: sel ? '#EC4899' : colors.border }}>
                                   <div className="flex items-center gap-1.5 mb-0.5">
                                     <span className="text-sm">{cfg.emoji}</span>
                                     <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#EC4899' : colors.textPrimary }}>{cfg.label}</span>
                                   </div>
-                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textSec }}>{cfg.validacaoDesc}</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textPrimary }}>{cfg.validacaoDesc}</span>
                                 </button>
                               );
                             })}
                           </div>
                         </div>
                       ));
+                      if (camposCustom.length > 0) {
+                        elementos.push(
+                          <div key="Personalizado">
+                            <div className="text-[9px] font-black uppercase tracking-widest mb-1.5 ml-1" style={{ color: '#8B5CF6' }}>⚙️ Personalizados da Empresa</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {camposCustom.map(cc => {
+                                const key = `custom_${cc.slug}`;
+                                const sel = noEditando.dados_extras?.variavel === key;
+                                const tipoValidacao: Record<string, string> = { numero: 'numero', data: 'data', texto: 'texto', opcoes: 'texto', booleano: 'texto' };
+                                return (
+                                  <button key={key} type="button" onClick={() => setNoEditando({ ...noEditando, conteudo: `Por favor, informe ${cc.nome}:`, dados_extras: { ...noEditando.dados_extras, variavel: key, validacao: tipoValidacao[cc.tipo] || 'texto' } })} className="flex flex-col items-start p-3 rounded-2xl border-2 transition-all text-left hover:scale-[1.02]" style={{ background: sel ? '#8B5CF615' : 'transparent', borderColor: sel ? '#8B5CF6' : colors.border }}>
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                      <span className="text-sm">⚙️</span>
+                                      <span className="text-[11px] font-black leading-tight" style={{ color: sel ? '#8B5CF6' : colors.textPrimary }}>{cc.nome}</span>
+                                    </div>
+                                    <span className="text-[9px] font-semibold uppercase tracking-wide opacity-50" style={{ color: colors.textPrimary }}>{cc.tipo}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return elementos;
                     })()}
                   </div>
                   {noEditando.dados_extras?.variavel && (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: '#EC489910' }}>
-                      <span className="text-pink-400 text-xs font-black">✓</span>
-                      <span className="text-[11px] font-semibold" style={{ color: '#EC4899' }}>
-                        Validação automática: <strong>{DADOS_COLETAVEIS[noEditando.dados_extras.variavel]?.validacaoDesc}</strong>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: noEditando.dados_extras.variavel.startsWith('custom_') ? '#8B5CF610' : '#EC489910' }}>
+                      <span className="text-xs font-black" style={{ color: noEditando.dados_extras.variavel.startsWith('custom_') ? '#8B5CF6' : '#EC4899' }}>✓</span>
+                      <span className="text-[11px] font-semibold" style={{ color: noEditando.dados_extras.variavel.startsWith('custom_') ? '#8B5CF6' : '#EC4899' }}>
+                        {noEditando.dados_extras.variavel.startsWith('custom_') ? `Campo personalizado: ${getLabelCampo(noEditando.dados_extras.variavel)}` : `Validação automática: ${DADOS_COLETAVEIS[noEditando.dados_extras.variavel]?.validacaoDesc}`}
                       </span>
                     </div>
                   )}
@@ -1724,49 +1805,25 @@ const BotBuilder: React.FC = () => {
                   const grupoEmoji: Record<string, string> = { Pessoal: '👤', 'Endereço': '🏠', Financeiro: '💰', Profissional: '💼' };
                   return (
                     <div key={grupo} className="rounded-[1.5rem] border overflow-hidden" style={{ borderColor: colors.border }}>
-                      {/* Cabeçalho do grupo */}
-                      <button
-                        onClick={() => selecionarGrupo(grupo)}
-                        className="w-full px-6 py-4 flex items-center justify-between transition-all hover:opacity-80"
-                        style={{ background: `${colors.inputBg}` }}
-                      >
+                      <button onClick={() => selecionarGrupo(grupo)} className="w-full px-6 py-4 flex items-center justify-between transition-all hover:opacity-80" style={{ background: colors.inputBg }}>
                         <div className="flex items-center gap-3">
                           <span className="text-lg">{grupoEmoji[grupo]}</span>
                           <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: colors.textPrimary }}>{grupo}</span>
-                          <span className="text-[10px] font-bold opacity-40" style={{ color: colors.textPrimary }}>
-                            ({camposGrupo.filter(([k]) => camposSelecionados.includes(k)).length}/{camposGrupo.length})
-                          </span>
+                          <span className="text-[10px] font-bold opacity-40" style={{ color: colors.textPrimary }}>({camposGrupo.filter(([k]) => camposSelecionados.includes(k)).length}/{camposGrupo.length})</span>
                         </div>
-                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: todosSel ? '#EC4899' : colors.textSecondary }}>
-                          {todosSel ? 'Desmarcar todos' : 'Selecionar todos'}
-                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: todosSel ? '#EC4899' : colors.textSecondary }}>{todosSel ? 'Desmarcar todos' : 'Selecionar todos'}</span>
                       </button>
-
-                      {/* Campos do grupo */}
                       <div className="p-4 grid grid-cols-2 gap-3">
                         {camposGrupo.map(([key, cfg]) => {
                           const sel = camposSelecionados.includes(key);
                           return (
-                            <button
-                              key={key}
-                              onClick={() => toggleCampo(key)}
-                              className="flex items-center gap-3 p-4 rounded-2xl border transition-all text-left"
-                              style={{
-                                background: sel ? '#EC489915' : colors.dashboardBg,
-                                borderColor: sel ? '#EC4899' : colors.border,
-                              }}
-                            >
-                              <div className="w-5 h-5 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all"
-                                style={{ borderColor: sel ? '#EC4899' : colors.border, background: sel ? '#EC4899' : 'transparent' }}>
+                            <button key={key} onClick={() => toggleCampo(key)} className="flex items-center gap-3 p-4 rounded-2xl border transition-all text-left" style={{ background: sel ? '#EC489915' : colors.dashboardBg, borderColor: sel ? '#EC4899' : colors.border }}>
+                              <div className="w-5 h-5 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all" style={{ borderColor: sel ? '#EC4899' : colors.border, background: sel ? '#EC4899' : 'transparent' }}>
                                 {sel && <span className="text-white text-[10px] font-black">✓</span>}
                               </div>
                               <div>
-                                <div className="text-[11px] font-black" style={{ color: colors.textPrimary }}>
-                                  {cfg.emoji} {cfg.label}
-                                </div>
-                                <div className="text-[9px] font-bold opacity-40 mt-0.5" style={{ color: colors.textPrimary }}>
-                                  {cfg.validacaoDesc}
-                                </div>
+                                <div className="text-[11px] font-black" style={{ color: colors.textPrimary }}>{cfg.emoji} {cfg.label}</div>
+                                <div className="text-[9px] font-bold opacity-40 mt-0.5" style={{ color: colors.textPrimary }}>{cfg.validacaoDesc}</div>
                               </div>
                             </button>
                           );
@@ -1775,6 +1832,42 @@ const BotBuilder: React.FC = () => {
                     </div>
                   );
                 })}
+
+                {/* Grupo: Campos Personalizados da empresa */}
+                {camposCustom.length > 0 && (() => {
+                  const chavesCustom = camposCustom.map(c => `custom_${c.slug}`);
+                  const todosSel = chavesCustom.every(k => camposSelecionados.includes(k));
+                  return (
+                    <div className="rounded-[1.5rem] border overflow-hidden" style={{ borderColor: '#8B5CF640', background: '#8B5CF605' }}>
+                      <button onClick={() => selecionarGrupo('Personalizado')} className="w-full px-6 py-4 flex items-center justify-between transition-all hover:opacity-80" style={{ background: '#8B5CF610' }}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg">⚙️</span>
+                          <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: '#8B5CF6' }}>Personalizados</span>
+                          <span className="text-[10px] font-bold opacity-40" style={{ color: colors.textPrimary }}>({chavesCustom.filter(k => camposSelecionados.includes(k)).length}/{camposCustom.length})</span>
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: todosSel ? '#8B5CF6' : colors.textSecondary }}>{todosSel ? 'Desmarcar todos' : 'Selecionar todos'}</span>
+                      </button>
+                      <div className="p-4 grid grid-cols-2 gap-3">
+                        {camposCustom.map(cc => {
+                          const key = `custom_${cc.slug}`;
+                          const sel = camposSelecionados.includes(key);
+                          const tipoLabel: Record<string, string> = { texto: 'Texto livre', numero: 'Número', data: 'Data', opcoes: 'Opções', booleano: 'Sim/Não' };
+                          return (
+                            <button key={key} onClick={() => toggleCampo(key)} className="flex items-center gap-3 p-4 rounded-2xl border transition-all text-left" style={{ background: sel ? '#8B5CF615' : colors.dashboardBg, borderColor: sel ? '#8B5CF6' : colors.border }}>
+                              <div className="w-5 h-5 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all" style={{ borderColor: sel ? '#8B5CF6' : colors.border, background: sel ? '#8B5CF6' : 'transparent' }}>
+                                {sel && <span className="text-white text-[10px] font-black">✓</span>}
+                              </div>
+                              <div>
+                                <div className="text-[11px] font-black" style={{ color: colors.textPrimary }}>⚙️ {cc.nome}</div>
+                                <div className="text-[9px] font-bold opacity-40 mt-0.5" style={{ color: colors.textPrimary }}>{tipoLabel[cc.tipo] || 'Texto'}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Preview do fluxo */}
@@ -1786,10 +1879,13 @@ const BotBuilder: React.FC = () => {
                       <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-[9px] font-black flex-shrink-0">1</span>
                       <span>💬 "Vamos fazer seu cadastro!"</span>
                     </div>
-                    {Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k)).map((campo, i) => (
+                    {[
+                      ...Object.keys(DADOS_COLETAVEIS).filter(k => camposSelecionados.includes(k)),
+                      ...camposSelecionados.filter(k => k.startsWith('custom_')),
+                    ].map((campo, i) => (
                       <div key={campo} className="flex items-center gap-2 text-[11px]" style={{ color: colors.textSecondary }}>
                         <span className="w-5 h-5 rounded-full bg-pink-500/20 text-pink-400 flex items-center justify-center text-[9px] font-black flex-shrink-0">{i + 2}</span>
-                        <span>📝 {DADOS_COLETAVEIS[campo].emoji} {DADOS_COLETAVEIS[campo].label} <span className="opacity-40">(pula se já preenchido)</span></span>
+                        <span>📝 {campo.startsWith('custom_') ? '⚙️' : DADOS_COLETAVEIS[campo]?.emoji} {getLabelCampo(campo)} <span className="opacity-40">(pula se já preenchido)</span></span>
                       </div>
                     ))}
                     <div className="flex items-center gap-2 text-[11px]" style={{ color: colors.textSecondary }}>
