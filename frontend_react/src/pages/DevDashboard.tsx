@@ -1086,32 +1086,39 @@ const DevDashboard: React.FC = () => {
         {activeTab === 'docs' && (
           <div>
             {/* ── Visao geral ── */}
-            <div style={cardStyle}>
-              <h3 style={{ fontSize: '16px', color: '#1a1f3a', marginBottom: '8px' }}>Documentacao da API</h3>
-              <p style={{ color: '#888', fontSize: '14px' }}>
-                Gateway que autentica sua API key, valida o numero e repassa a requisicao direto para a API da Meta.
-                Voce usa a mesma estrutura da Meta API oficialmente documentada.
+            <div style={{ ...cardStyle, background: 'linear-gradient(135deg, #1a1f3a 0%, #0f172a 100%)', border: 'none' }}>
+              <h3 style={{ fontSize: '18px', color: '#fff', marginBottom: '8px' }}>Documentacao da API</h3>
+              <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: 1.7, margin: 0 }}>
+                Gateway transparente: sua API key autentica, o token Meta correto e injetado automaticamente e a requisicao e repassada <strong style={{ color: '#00d4ff' }}>exatamente</strong> como a Meta Graph API oficial.
+                Voce usa a mesma documentacao da Meta — so troca <code style={{ color: '#7dd3fc' }}>graph.facebook.com</code> por <code style={{ color: '#7dd3fc' }}>api.yoursystem.dev.br/gateway</code>.
               </p>
             </div>
 
-            {/* ── Fluxo recomendado: server-side via link ── */}
+            {/* ── Base URL ── */}
+            <div style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <h4 style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: 1 }}>Base URL do Gateway</h4>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '12px 16px', borderRadius: '8px', fontSize: '13px', margin: 0 }}>{`# Meta API oficial:
+https://graph.facebook.com/v25.0/{endpoint}
+
+# Seu gateway (mesma estrutura, autenticado com X-Api-Key):
+https://api.yoursystem.dev.br/gateway/v25.0/{endpoint}`}</pre>
+            </div>
+
+            {/* ── Conectar número do cliente ── */}
             <div style={{ ...cardStyle, border: '2px solid #00d4ff' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>Fluxo Recomendado: Link Server-side</h4>
-                <span style={{ padding: '2px 10px', background: '#00d4ff', color: '#fff', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>NOVO</span>
+                <span style={{ fontSize: '20px' }}>🔗</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>1. Conectar número do cliente (Embedded Signup)</h4>
               </div>
-              <p style={{ color: '#555', fontSize: '14px', lineHeight: 1.7, marginBottom: '12px' }}>
-                Seu cliente nunca vê nosso sistema. Você gera um link, ele clica no seu sistema, autoriza, e o número aparece automaticamente na sua conta.
-                Sem precisar coletar <code>code</code>, <code>waba_id</code> ou <code>phone_number_id</code> — tudo resolvido server-side.
+              <p style={{ color: '#555', fontSize: '13px', lineHeight: 1.7, marginBottom: '12px' }}>
+                Seu backend gera um link. O cliente clica, autoriza no Facebook e o número aparece automaticamente na sua conta. Sem coletar código, waba_id ou phone_number_id manualmente.
               </p>
-
-              <div style={{ borderLeft: '3px solid #00d4ff', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ borderLeft: '3px solid #00d4ff', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
                 {[
-                  { n: 1, title: 'Gerar link (seu servidor)', desc: 'Seu backend chama POST /dev/numeros/signup-link com seu JWT. Recebe um link do Facebook com state único (válido 1h). Pode passar redirect_back_url para redirecionar o cliente de volta após autorizar.' },
-                  { n: 2, title: 'Embutir link no seu sistema', desc: 'Coloque o signup_url em um botão ou link no seu CRM. O cliente clica e cai direto no Facebook — sem passar pelo nosso domínio.' },
-                  { n: 3, title: 'Cliente autoriza no Facebook', desc: 'O cliente faz login no Facebook, concede permissão ao WhatsApp Business e confirma. Processo 100% guiado pelo Meta.' },
-                  { n: 4, title: 'Número salvo automaticamente', desc: 'Nosso servidor recebe o callback da Meta, troca o code por token, descobre o phone_number_id e waba_id via API da Meta, e registra o DevNumero linkado à sua conta.' },
-                  { n: 5, title: 'Detectar novo número', desc: 'Opção A: seu webhook configurado recebe evento number_connected com phone_number_id. Opção B: faça polling em GET /dev/numeros ou GET /dev/numeros/{id}/status.' },
+                  { n: 1, title: 'Gerar link (seu backend)', desc: 'POST /dev/numeros/signup-link com seu JWT. Pode passar redirect_back_url para retornar o cliente ao seu sistema após autorizar.' },
+                  { n: 2, title: 'Cliente clica e autoriza', desc: 'O cliente cai direto no Facebook sem ver nosso domínio, concede permissão ao WhatsApp Business.' },
+                  { n: 3, title: 'Número salvo automaticamente', desc: 'Nosso servidor troca o code por token, descobre phone_number_id e waba_id e registra na sua conta.' },
+                  { n: 4, title: 'Detectar novo número', desc: 'Seu webhook recebe evento number_connected com phone_number_id, ou faça polling em GET /dev/numeros.' },
                 ].map(step => (
                   <div key={step.n} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                     <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#00d4ff', color: '#fff', fontWeight: 700, fontSize: '12px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{step.n}</span>
@@ -1122,390 +1129,383 @@ const DevDashboard: React.FC = () => {
                   </div>
                 ))}
               </div>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '14px 16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto', margin: 0 }}>{`POST https://api.yoursystem.dev.br/api/v1/dev/numeros/signup-link
+Authorization: Bearer SEU_JWT_DE_DEV
+
+{ "redirect_back_url": "https://seucrm.com/whatsapp/sucesso" }
+
+// Resposta:
+{ "signup_url": "https://www.facebook.com/dialog/oauth?...&state=abc123", "expires_in": 3600 }
+
+// Evento webhook recebido após autorização:
+{ "event": "number_connected", "phone_number_id": "123456789012345",
+  "display_phone_number": "+55 11 99999-9999", "status": "active" }`}</pre>
             </div>
 
-            {/* ── Gerar Link (código) ── */}
+            {/* ── Enviar mensagens ── */}
             <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>1. Gerar link de cadastro (seu backend)</h4>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`POST https://api.yoursystem.dev.br/api/v1/dev/numeros/signup-link
-Authorization: Bearer SEU_JWT_DE_DEV
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>💬</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>2. Enviar mensagens</h4>
+              </div>
+              <p style={{ color: '#555', fontSize: '13px', marginBottom: '12px' }}>
+                Use <code>X-Api-Key</code> no header. O <strong>phone_number_id</strong> na URL define qual número envia — o gateway injeta o token Meta correto automaticamente.
+              </p>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '14px 16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto', marginBottom: '12px' }}>{`// Texto simples
+POST https://api.yoursystem.dev.br/gateway/v25.0/{PHONE_NUMBER_ID}/messages
+X-Api-Key: SUA_API_KEY
 Content-Type: application/json
 
-{
-  "redirect_back_url": "https://seucrm.com/whatsapp/sucesso"  // opcional
-}
+{ "messaging_product": "whatsapp", "to": "5511999999999",
+  "type": "text", "text": { "body": "Olá! Mensagem via gateway." } }
 
-// Resposta:
-{
-  "signup_url": "https://www.facebook.com/dialog/oauth?...&state=abc123...",
-  "expires_in": 3600,
-  "session_id": "abc123..."
-}
+// Imagem
+{ "messaging_product": "whatsapp", "to": "5511999999999",
+  "type": "image", "image": { "link": "https://...", "caption": "Legenda" } }
 
-// Coloque signup_url em um <a href> ou button.onclick = () => window.open(url)`}</pre>
+// Template aprovado
+{ "messaging_product": "whatsapp", "to": "5511999999999",
+  "type": "template",
+  "template": { "name": "nome_do_template", "language": { "code": "pt_BR" },
+    "components": [{ "type": "body",
+      "parameters": [{ "type": "text", "text": "João" }] }] } }`}</pre>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#166534' }}>
+                💡 <strong>Múltiplos números, mesma API key:</strong> basta trocar o <code>phone_number_id</code> na URL. O gateway valida que o número pertence à sua conta.
+              </div>
             </div>
 
-            {/* ── Verificar status via webhook ou polling ── */}
+            {/* ── Templates ── */}
             <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>2. Detectar número conectado</h4>
-              <p style={{ color: '#555', fontSize: '13px', marginBottom: '8px' }}>
-                Opção A — seu webhook recebe automaticamente:
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>📋</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>3. Gerenciar templates de mensagem</h4>
+              </div>
+              <p style={{ color: '#555', fontSize: '13px', marginBottom: '12px' }}>
+                Use o <strong>waba_id</strong> (retornado em <code>GET /dev/numeros</code>) para criar, listar e excluir templates. Templates precisam de aprovação da Meta (geralmente 24–48h).
               </p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto', marginBottom: '12px' }}>{`// POST para seu webhook_url configurado:
-{
-  "event": "number_connected",
-  "phone_number_id": "123456789012345",
-  "display_phone_number": "+55 11 99999-9999",
-  "status": "active"
-}`}</pre>
-              <p style={{ color: '#555', fontSize: '13px', marginBottom: '8px' }}>
-                Opção B — polling:
-              </p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`// Listar todos os números da conta:
-GET /api/v1/dev/numeros
-Authorization: Bearer SEU_JWT_DE_DEV
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '14px 16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`// Listar templates
+GET https://api.yoursystem.dev.br/gateway/v25.0/{WABA_ID}/message_templates
+X-Api-Key: SUA_API_KEY
 
-// Status de um número específico (rate-limit: 1 req/10s):
-GET /api/v1/dev/numeros/{numero_id}/status
-Authorization: Bearer SEU_JWT_DE_DEV
-
-// Resposta:
-{
-  "id": 42,
-  "phone_number_id": "123456789012345",
-  "display_phone_number": "+55 11 99999-9999",
-  "verified_name": "Nome do Negócio",
-  "status": "active",   // active | pending | suspended | cancelled
-  "ativo": true
-}`}</pre>
-            </div>
-
-            {/* ── Enviar mensagem pelo gateway ── */}
-            <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>3. Enviar mensagem (gateway)</h4>
-              <p style={{ color: '#555', fontSize: '13px', marginBottom: '8px' }}>
-                Use a API key no header X-Api-Key. O gateway identifica o numero pelo <strong>phone_number_id</strong> na URL
-                (retornado quando o número foi registrado) e injeta o token Meta correto automaticamente.
-              </p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`POST https://api.yoursystem.dev.br/gateway/v25.0/{PHONE_NUMBER_ID}/messages
+// Criar template (aguarda aprovação da Meta)
+POST https://api.yoursystem.dev.br/gateway/v25.0/{WABA_ID}/message_templates
 X-Api-Key: SUA_API_KEY
 Content-Type: application/json
 
 {
-  "messaging_product": "whatsapp",
-  "to": "5511999999999",
-  "type": "text",
-  "text": { "body": "Ola! Mensagem via API Gateway." }
-}
-
-// O gateway autentica, valida o numero e repassa para:
-// POST https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages`}</pre>
-              <p style={{ color: '#888', fontSize: '12px', marginTop: '8px' }}>
-                Funciona para qualquer endpoint da Meta API: <code>/messages</code>, <code>/media</code>, etc.
-                Voce pode usar vários phone_number_ids com a mesma API key.
-              </p>
-            </div>
-
-            {/* ── Multiplos numeros ── */}
-            <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>4. Multiplos numeros com uma API key</h4>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`# Numero do cliente A
-POST /gateway/v25.0/111111111111111/messages
-X-Api-Key: SUA_API_KEY  <-- mesma key
-
-# Numero do cliente B (mesmo token, numero diferente)
-POST /gateway/v25.0/222222222222222/messages
-X-Api-Key: SUA_API_KEY  <-- mesma key
-
-# O gateway valida que ambos os phone_number_ids
-# pertencem a sua conta e usa o token correto de cada um.`}</pre>
-            </div>
-
-            {/* ── Webhook de mensagens recebidas ── */}
-            <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>5. Receber mensagens (webhook)</h4>
-              <p style={{ color: '#555', fontSize: '13px', lineHeight: 1.6, marginBottom: '8px' }}>
-                Configure sua URL na aba Webhook. Quando alguem responde ao seu numero,
-                encaminhamos o payload da Meta para voce com assinatura HMAC-SHA256.
-                O campo <code>phone_number_id</code> no payload identifica qual numero recebeu a mensagem.
-              </p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`// Header da requisicao para sua URL:
-X-Webhook-Signature: sha256=<hmac_do_body>
-
-// Body (formato padrao Meta):
-{
-  "object": "whatsapp_business_account",
-  "entry": [{
-    "id": "<WABA_ID>",
-    "changes": [{
-      "value": {
-        "metadata": { "phone_number_id": "123456789012345" },
-        "messages": [{ "from": "5511999999999", "type": "text", ... }]
-      }
-    }]
+  "name": "boas_vindas",
+  "language": "pt_BR",
+  "category": "MARKETING",
+  "components": [{
+    "type": "HEADER", "format": "TEXT", "text": "Bem-vindo(a), {{1}}!"
+  }, {
+    "type": "BODY",
+    "text": "Olá {{1}}, seu cadastro foi realizado com sucesso."
+  }, {
+    "type": "FOOTER", "text": "Responda PARAR para cancelar."
   }]
 }
 
-// Verificar assinatura (Node.js):
-const sig = crypto.createHmac('sha256', WEBHOOK_SECRET)
-  .update(rawBody).digest('hex');
-if (sig !== req.headers['x-webhook-signature'].replace('sha256=','')) {
-  return res.status(403).send('Unauthorized');
-}`}</pre>
+// Excluir template
+DELETE https://api.yoursystem.dev.br/gateway/v25.0/{WABA_ID}/message_templates?name=boas_vindas
+X-Api-Key: SUA_API_KEY`}</pre>
             </div>
 
-            {/* ── IDs: numero_id vs phone_number_id ── */}
-            <div style={{ ...cardStyle, background: '#fffbeb', border: '1px solid #fde68a' }}>
-              <h4 style={{ fontSize: '14px', color: '#92400e', marginBottom: '8px' }}>Entendendo os IDs</h4>
-              <div style={{ fontSize: '13px', color: '#78350f', lineHeight: 1.7 }}>
-                <p style={{ margin: '0 0 8px' }}><strong>numero_id</strong> (ex: 42) — ID interno da plataforma. Use para gerenciar o número: verificar status, cancelar, etc.</p>
-                <p style={{ margin: '0 0 8px' }}><strong>phone_number_id</strong> (ex: 123456789012345) — ID da Meta. Use na URL do gateway para enviar mensagens: <code>/gateway/v25.0/{'{phone_number_id}'}/messages</code></p>
-                <p style={{ margin: 0 }}>O <code>phone_number_id</code> é retornado em <code>GET /dev/numeros</code> e no evento <code>number_connected</code> do webhook.</p>
+            {/* ── Consultar limite e qualidade ── */}
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>📊</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>4. Consultar limite e qualidade do número</h4>
+              </div>
+              <p style={{ color: '#555', fontSize: '13px', marginBottom: '12px' }}>
+                Consulte diretamente da Meta os limites de envio, nível (tier), qualidade e status do número — sem passar pelo nosso sistema de métricas.
+              </p>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '14px 16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto', marginBottom: '10px' }}>{`GET https://api.yoursystem.dev.br/gateway/v25.0/{PHONE_NUMBER_ID}?fields=messaging_limit_tier,account_mode,quality_rating,display_phone_number,verified_name,name_status
+X-Api-Key: SUA_API_KEY
+
+// Resposta:
+{
+  "messaging_limit_tier": "TIER_250",    // 250 | 1K | 10K | 100K | UNLIMITED
+  "account_mode": "LIVE",                // LIVE | SANDBOX
+  "quality_rating": "GREEN",             // GREEN | YELLOW | RED | UNKNOWN
+  "display_phone_number": "+55 11 99999-9999",
+  "verified_name": "Nome do Negócio",
+  "name_status": "AVAILABLE_WITHOUT_REVIEW",
+  "id": "123456789012345"
+}`}</pre>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#92400e' }}>
+                📌 <strong>Tiers de envio:</strong> TIER_250 (250/dia) → TIER_1K → TIER_10K → TIER_100K → UNLIMITED. O tier sobe automaticamente com volume e boa qualidade.
               </div>
             </div>
 
-            {/* ── Exemplo completo Node.js ── */}
+            {/* ── Receber mensagens (webhook) ── */}
             <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo completo — Node.js / Express</h4>
-              <p style={{ color: '#888', fontSize: '12px', marginBottom: '10px' }}>Fluxo inteiro: gerar link → detectar conexão → enviar mensagem → receber mensagem</p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`const express = require('express');
-const axios = require('axios');
-const crypto = require('crypto');
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>📥</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>5. Receber mensagens (webhook)</h4>
+              </div>
+              <p style={{ color: '#555', fontSize: '13px', marginBottom: '12px' }}>
+                Configure sua URL na aba Webhook. Encaminhamos o payload original da Meta com assinatura HMAC-SHA256. O campo <code>phone_number_id</code> no payload identifica qual número recebeu.
+              </p>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '14px 16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`// Header recebido na sua URL:
+X-Webhook-Signature: sha256=<hmac_sha256_do_body>
 
-const app = express();
-app.use(express.json());
+// Body (formato padrão Meta):
+{ "object": "whatsapp_business_account", "entry": [{
+    "changes": [{ "value": {
+      "metadata": { "phone_number_id": "123456789012345" },
+      "messages": [{ "from": "5511999999999", "type": "text",
+        "text": { "body": "Oi!" }, "timestamp": "1234567890" }]
+    }}]
+}]}
 
+// Verificar assinatura (Node.js):
+const expected = crypto.createHmac('sha256', WEBHOOK_SECRET).update(rawBody).digest('hex');
+if (req.headers['x-webhook-signature'] !== \`sha256=\${expected}\`) return res.status(403).end();
+
+// Verificar assinatura (Python):
+import hmac, hashlib
+expected = hmac.new(WH_SECRET.encode(), body, hashlib.sha256).hexdigest()
+if not hmac.compare_digest(sig, expected): return Response(status_code=403)`}</pre>
+            </div>
+
+            {/* ── IDs importantes ── */}
+            <div style={{ ...cardStyle, background: '#fffbeb', border: '1px solid #fde68a' }}>
+              <h4 style={{ fontSize: '14px', color: '#92400e', marginBottom: '10px' }}>📌 IDs importantes</h4>
+              <div style={{ fontSize: '13px', color: '#78350f', lineHeight: 1.8 }}>
+                <p style={{ margin: '0 0 6px' }}><code style={{ background: '#fef3c7', padding: '1px 6px', borderRadius: 4 }}>numero_id</code> — ID interno (ex: 42). Use para gerenciar números na plataforma: listar, cancelar, verificar status.</p>
+                <p style={{ margin: '0 0 6px' }}><code style={{ background: '#fef3c7', padding: '1px 6px', borderRadius: 4 }}>phone_number_id</code> — ID da Meta (ex: 123456789012345). Use na URL do gateway para <strong>enviar mensagens</strong> e consultar info do número.</p>
+                <p style={{ margin: 0 }}><code style={{ background: '#fef3c7', padding: '1px 6px', borderRadius: 4 }}>waba_id</code> — ID da WhatsApp Business Account. Use para <strong>templates</strong> e configurações da conta. Retornado em <code>GET /dev/numeros</code>.</p>
+              </div>
+            </div>
+
+            {/* ── Limites da plataforma ── */}
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>⚡</span>
+                <h4 style={{ fontSize: '15px', color: '#1a1f3a', margin: 0 }}>Limites da plataforma e códigos HTTP</h4>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr style={{ borderBottom: '2px solid #eee' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', color: '#888' }}>Limite</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', color: '#888' }}>Valor</th>
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      ['Rate limit gateway', `${usage?.limits?.requests_min || 60} req/min`],
+                      ['Conversas únicas/mês', `${usage?.limits?.conversas_mes || 1000}`],
+                      ['Custo por número', 'R$ 35,00/mês'],
+                      ['Limite diário Meta', 'Conforme seu tier'],
+                    ].map(([label, val]) => (
+                      <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '6px 8px', color: '#555' }}>{label}</td>
+                        <td style={{ padding: '6px 8px', fontWeight: 600 }}>{val}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr style={{ borderBottom: '2px solid #eee' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', color: '#888' }}>HTTP</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', color: '#888' }}>Significado</th>
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      ['200', 'Sucesso'],
+                      ['401', 'API key inválida ou ausente'],
+                      ['403', 'Conta bloqueada / número não registrado'],
+                      ['429', 'Rate limit excedido (veja Retry-After)'],
+                      ['4xx/5xx', 'Erro retornado pela Meta — verifique o body'],
+                    ].map(([code, msg]) => (
+                      <tr key={code} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '6px 8px' }}><code>{code}</code></td>
+                        <td style={{ padding: '6px 8px', color: '#555' }}>{msg}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: '12px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#0c4a6e' }}>
+                💡 <strong>Conversas únicas:</strong> o limite de {usage?.limits?.conversas_mes || 1000}/mês conta números de destino distintos contactados via <code>/messages</code>. Não conta templates ou mensagens dentro da mesma conversa.
+              </div>
+            </div>
+
+            {/* ── Exemplo Node.js ── */}
+            <div style={cardStyle}>
+              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo completo — Node.js</h4>
+              <p style={{ color: '#888', fontSize: '12px', marginBottom: '10px' }}>Conectar número → enviar texto → enviar template → verificar limite → criar template</p>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`const axios = require('axios');
+
+const GW      = 'https://api.yoursystem.dev.br/gateway/v25.0';
 const API_BASE = 'https://api.yoursystem.dev.br/api/v1';
-const DEV_JWT  = 'SEU_JWT_DE_DEV';       // token do painel
-const API_KEY  = 'SUA_API_KEY';          // chave do gateway
-const WH_SECRET = 'SEU_WEBHOOK_SECRET';  // da aba Webhook
+const API_KEY  = 'SUA_API_KEY';
+const DEV_JWT  = 'SEU_JWT_DE_DEV';
 
-// ─── 1. Gerar link para o cliente conectar o WhatsApp ───────────────────────
-app.get('/conectar-whatsapp/:clienteId', async (req, res) => {
-  const redirectUrl = \`https://seucrm.com/whatsapp/sucesso?cliente=\${req.params.clienteId}\`;
+const gw = axios.create({ headers: { 'X-Api-Key': API_KEY } });
+const api = axios.create({ headers: { Authorization: \`Bearer \${DEV_JWT}\` } });
 
-  const { data } = await axios.post(
-    \`\${API_BASE}/dev/numeros/signup-link\`,
-    { redirect_back_url: redirectUrl },
-    { headers: { Authorization: \`Bearer \${DEV_JWT}\` } }
-  );
-  // Redireciona o cliente para o Facebook (ele nunca vê seu domínio)
-  res.redirect(data.signup_url);
-});
+// ─── Gerar link de cadastro para o cliente ───────────────────────────────────
+async function gerarLinkCadastro(redirectUrl) {
+  const { data } = await api.post(\`\${API_BASE}/dev/numeros/signup-link\`,
+    { redirect_back_url: redirectUrl });
+  return data.signup_url; // redirecione o cliente para esta URL
+}
 
-// ─── 2. Página de retorno após cliente autorizar ─────────────────────────────
-app.get('/whatsapp/sucesso', (req, res) => {
-  const { success, numeros, cliente } = req.query;
-  if (success === 'true') {
-    // Buscar números novos e salvar no seu banco
-    res.send(\`Cliente \${cliente}: \${numeros} número(s) conectado(s)!\`);
-  } else {
-    res.send('Falha na autorização. Tente novamente.');
-  }
-});
+// ─── Buscar todos os números da conta ───────────────────────────────────────
+async function listarNumeros() {
+  const { data } = await api.get(\`\${API_BASE}/dev/numeros\`);
+  return data.numeros; // [{ id, phone_number_id, waba_id, display_phone_number, ... }]
+}
 
-// ─── 3. Webhook: receber eventos da plataforma ───────────────────────────────
-app.post('/webhook/whatsapp', (req, res) => {
-  // Validar assinatura HMAC
-  const sig = req.headers['x-webhook-signature']?.replace('sha256=', '');
-  const expected = crypto
-    .createHmac('sha256', WH_SECRET)
-    .update(JSON.stringify(req.body))
-    .digest('hex');
-  if (sig !== expected) return res.status(403).send('Unauthorized');
-
-  const { event, data } = req.body;
-
-  // Número novo conectado (via Embedded Signup)
-  if (event === 'number_connected') {
-    console.log('Novo número:', data.phone_number_id, data.display_phone_number);
-    // Salve phone_number_id no seu banco associado ao cliente
-    return res.json({ ok: true });
-  }
-
-  // Mensagem recebida
-  const entry = req.body?.entry?.[0]?.changes?.[0]?.value;
-  if (entry?.messages) {
-    const msg = entry.messages[0];
-    const phoneNumberId = entry.metadata.phone_number_id; // qual número recebeu
-    console.log(\`[\${phoneNumberId}] Mensagem de \${msg.from}: \${msg.text?.body}\`);
-  }
-
-  res.json({ ok: true });
-});
-
-// ─── 4. Enviar mensagem de texto ─────────────────────────────────────────────
+// ─── Enviar texto ────────────────────────────────────────────────────────────
 async function enviarTexto(phoneNumberId, para, texto) {
-  const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
-    {
-      messaging_product: 'whatsapp',
-      to: para,          // ex: '5511999999999'
-      type: 'text',
-      text: { body: texto, preview_url: false }
-    },
-    { headers: { 'X-Api-Key': API_KEY, 'Content-Type': 'application/json' } }
-  );
+  const { data } = await gw.post(\`\${GW}/\${phoneNumberId}/messages\`, {
+    messaging_product: 'whatsapp', to: para,
+    type: 'text', text: { body: texto }
+  });
+  return data; // { messages: [{ id: 'wamid...' }] }
+}
+
+// ─── Enviar template ─────────────────────────────────────────────────────────
+async function enviarTemplate(phoneNumberId, para, nomeTemplate, variaveis = []) {
+  const { data } = await gw.post(\`\${GW}/\${phoneNumberId}/messages\`, {
+    messaging_product: 'whatsapp', to: para, type: 'template',
+    template: {
+      name: nomeTemplate, language: { code: 'pt_BR' },
+      components: variaveis.length ? [{
+        type: 'body',
+        parameters: variaveis.map(v => ({ type: 'text', text: v }))
+      }] : []
+    }
+  });
   return data;
 }
 
-// ─── 5. Enviar imagem ────────────────────────────────────────────────────────
-async function enviarImagem(phoneNumberId, para, imageUrl, legenda) {
-  const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
-    {
-      messaging_product: 'whatsapp',
-      to: para,
-      type: 'image',
-      image: { link: imageUrl, caption: legenda }
-    },
-    { headers: { 'X-Api-Key': API_KEY } }
-  );
+// ─── Consultar limite e qualidade do número ──────────────────────────────────
+async function consultarNumero(phoneNumberId) {
+  const { data } = await gw.get(\`\${GW}/\${phoneNumberId}\`, {
+    params: { fields: 'messaging_limit_tier,account_mode,quality_rating,display_phone_number' }
+  });
   return data;
+  // { messaging_limit_tier: 'TIER_250', quality_rating: 'GREEN', account_mode: 'LIVE', ... }
 }
 
-// ─── 6. Enviar template aprovado ─────────────────────────────────────────────
-async function enviarTemplate(phoneNumberId, para, nomeTemplate, params) {
-  const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
-    {
-      messaging_product: 'whatsapp',
-      to: para,
-      type: 'template',
-      template: {
-        name: nomeTemplate,
-        language: { code: 'pt_BR' },
-        components: [{
-          type: 'body',
-          parameters: params.map(p => ({ type: 'text', text: p }))
-        }]
-      }
-    },
-    { headers: { 'X-Api-Key': API_KEY } }
-  );
-  return data;
+// ─── Listar templates ────────────────────────────────────────────────────────
+async function listarTemplates(wabaId) {
+  const { data } = await gw.get(\`\${GW}/\${wabaId}/message_templates\`);
+  return data.data; // array de templates
 }
 
-app.listen(3000);`}</pre>
+// ─── Criar template ──────────────────────────────────────────────────────────
+async function criarTemplate(wabaId, nome, texto) {
+  const { data } = await gw.post(\`\${GW}/\${wabaId}/message_templates\`, {
+    name: nome, language: 'pt_BR', category: 'UTILITY',
+    components: [{ type: 'BODY', text: texto }]
+  });
+  return data; // { id, status: 'PENDING' } — aguarda aprovação da Meta
+}
+
+// ─── Uso: ────────────────────────────────────────────────────────────────────
+(async () => {
+  const numeros = await listarNumeros();
+  const { phone_number_id, waba_id } = numeros[0];
+
+  const info = await consultarNumero(phone_number_id);
+  console.log('Tier:', info.messaging_limit_tier, '| Qualidade:', info.quality_rating);
+
+  await enviarTexto(phone_number_id, '5511999999999', 'Olá, mundo!');
+  await enviarTemplate(phone_number_id, '5511999999999', 'boas_vindas', ['João']);
+
+  const templates = await listarTemplates(waba_id);
+  console.log('Templates:', templates.map(t => t.name));
+})();`}</pre>
             </div>
 
             {/* ── Exemplo Python ── */}
             <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo — Python / FastAPI</h4>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`import httpx, hashlib, hmac, json
+              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '4px' }}>Exemplo — Python</h4>
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '11px', overflow: 'auto', lineHeight: 1.6 }}>{`import httpx
+
+GW       = "https://api.yoursystem.dev.br/gateway/v25.0"
+API_BASE = "https://api.yoursystem.dev.br/api/v1"
+API_KEY  = "SUA_API_KEY"
+DEV_JWT  = "SEU_JWT_DE_DEV"
+
+GW_HEADERS  = {"X-Api-Key": API_KEY}
+JWT_HEADERS = {"Authorization": f"Bearer {DEV_JWT}"}
+
+async def listar_numeros():
+    async with httpx.AsyncClient() as c:
+        r = await c.get(f"{API_BASE}/dev/numeros", headers=JWT_HEADERS)
+    return r.json()["numeros"]  # [{ phone_number_id, waba_id, ... }]
+
+async def enviar_texto(phone_number_id: str, para: str, texto: str):
+    async with httpx.AsyncClient() as c:
+        r = await c.post(f"{GW}/{phone_number_id}/messages", headers=GW_HEADERS, json={
+            "messaging_product": "whatsapp", "to": para,
+            "type": "text", "text": {"body": texto}
+        })
+    return r.json()
+
+async def enviar_template(phone_number_id: str, para: str, nome: str, variaveis: list = []):
+    async with httpx.AsyncClient() as c:
+        r = await c.post(f"{GW}/{phone_number_id}/messages", headers=GW_HEADERS, json={
+            "messaging_product": "whatsapp", "to": para, "type": "template",
+            "template": {"name": nome, "language": {"code": "pt_BR"},
+                "components": [{"type": "body",
+                    "parameters": [{"type": "text", "text": v} for v in variaveis]
+                }] if variaveis else []}
+        })
+    return r.json()
+
+async def consultar_numero(phone_number_id: str):
+    async with httpx.AsyncClient() as c:
+        r = await c.get(f"{GW}/{phone_number_id}", headers=GW_HEADERS, params={
+            "fields": "messaging_limit_tier,account_mode,quality_rating,display_phone_number"
+        })
+    return r.json()  # { messaging_limit_tier, quality_rating, account_mode, ... }
+
+async def listar_templates(waba_id: str):
+    async with httpx.AsyncClient() as c:
+        r = await c.get(f"{GW}/{waba_id}/message_templates", headers=GW_HEADERS)
+    return r.json().get("data", [])
+
+async def criar_template(waba_id: str, nome: str, texto: str):
+    async with httpx.AsyncClient() as c:
+        r = await c.post(f"{GW}/{waba_id}/message_templates", headers=GW_HEADERS, json={
+            "name": nome, "language": "pt_BR", "category": "UTILITY",
+            "components": [{"type": "BODY", "text": texto}]
+        })
+    return r.json()  # { id, status: "PENDING" } — aguarda aprovação da Meta
+
+# Receber webhook — validar assinatura HMAC-SHA256
+import hmac, hashlib
 from fastapi import FastAPI, Request, Response
 
 app = FastAPI()
+WH_SECRET = "SEU_WEBHOOK_SECRET"
 
-API_BASE   = "https://api.yoursystem.dev.br/api/v1"
-GATEWAY    = "https://api.yoursystem.dev.br/gateway"
-DEV_JWT    = "SEU_JWT_DE_DEV"
-API_KEY    = "SUA_API_KEY"
-WH_SECRET  = "SEU_WEBHOOK_SECRET"
-
-HEADERS_JWT = {"Authorization": f"Bearer {DEV_JWT}"}
-HEADERS_GW  = {"X-Api-Key": API_KEY, "Content-Type": "application/json"}
-
-# ─── Gerar link de signup para cliente ───────────────────────────────────────
-async def gerar_link(cliente_id: str) -> str:
-    redirect = f"https://seucrm.com/sucesso?cliente={cliente_id}"
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{API_BASE}/dev/numeros/signup-link",
-            json={"redirect_back_url": redirect},
-            headers=HEADERS_JWT,
-        )
-    return r.json()["signup_url"]
-
-# ─── Enviar mensagem de texto ─────────────────────────────────────────────────
-async def enviar_texto(phone_number_id: str, para: str, texto: str):
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{GATEWAY}/v25.0/{phone_number_id}/messages",
-            json={
-                "messaging_product": "whatsapp",
-                "to": para,
-                "type": "text",
-                "text": {"body": texto}
-            },
-            headers=HEADERS_GW,
-        )
-    return r.json()
-
-# ─── Receber webhook ──────────────────────────────────────────────────────────
 @app.post("/webhook/whatsapp")
 async def webhook(request: Request):
     body = await request.body()
-
-    # Validar assinatura
     sig = request.headers.get("x-webhook-signature", "").replace("sha256=", "")
     expected = hmac.new(WH_SECRET.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return Response(status_code=403)
 
-    payload = json.loads(body)
-    event = payload.get("event")
-
-    if event == "number_connected":
-        phone_id = payload.get("phone_number_id")
-        print(f"Novo número conectado: {phone_id}")
+    payload = (await request.json())
+    if payload.get("event") == "number_connected":
+        print("Número conectado:", payload["phone_number_id"])
         return {"ok": True}
 
-    # Mensagem recebida (formato padrão Meta)
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
             phone_id = value.get("metadata", {}).get("phone_number_id")
             for msg in value.get("messages", []):
                 print(f"[{phone_id}] De {msg['from']}: {msg.get('text',{}).get('body')}")
-
     return {"ok": True}`}</pre>
-            </div>
-
-            {/* ── Limites e codigos ── */}
-            <div style={cardStyle}>
-              <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '12px' }}>Limites e codigos de resposta</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead><tr style={{ borderBottom: '2px solid #eee' }}>
-                    <th style={{ textAlign: 'left', padding: '6px', color: '#888' }}>Limite</th>
-                    <th style={{ textAlign: 'left', padding: '6px', color: '#888' }}>Valor</th>
-                  </tr></thead>
-                  <tbody>
-                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '6px', color: '#555' }}>Rate limit</td>
-                      <td style={{ padding: '6px', fontWeight: 600 }}>{usage?.limits?.requests_min || 60} req/min</td>
-                    </tr>
-                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '6px', color: '#555' }}>Mensagens/mes</td>
-                      <td style={{ padding: '6px', fontWeight: 600 }}>{usage?.limits?.mensagens_mes || 1000}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: '6px', color: '#555' }}>Custo por numero</td>
-                      <td style={{ padding: '6px', fontWeight: 600 }}>R$ 35,00/mes</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead><tr style={{ borderBottom: '2px solid #eee' }}>
-                    <th style={{ textAlign: 'left', padding: '6px', color: '#888' }}>HTTP</th>
-                    <th style={{ textAlign: 'left', padding: '6px', color: '#888' }}>Significado</th>
-                  </tr></thead>
-                  <tbody>
-                    {[
-                      ['200', 'Sucesso'],
-                      ['401', 'API key invalida'],
-                      ['403', 'Conta bloqueada / numero nao registrado'],
-                      ['429', 'Rate limit (veja Retry-After)'],
-                    ].map(([code, msg]) => (
-                      <tr key={code} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={{ padding: '6px' }}><code>{code}</code></td>
-                        <td style={{ padding: '6px', color: '#555' }}>{msg}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         )}
