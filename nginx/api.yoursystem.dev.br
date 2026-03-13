@@ -1,12 +1,9 @@
-# Rate limit zone para API Gateway (por API key)
 limit_req_zone $http_x_api_key zone=gateway_api:10m rate=10r/s;
 limit_req_status 429;
 
 server {
     listen 80;
     server_name api.yoursystem.dev.br;
-
-    # Redirect HTTP -> HTTPS
     location / {
         return 301 https://$host$request_uri;
     }
@@ -16,18 +13,19 @@ server {
     listen 443 ssl http2;
     server_name api.yoursystem.dev.br;
 
-    # SSL (managed by Certbot)
     ssl_certificate /etc/letsencrypt/live/api.yoursystem.dev.br/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.yoursystem.dev.br/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # Upload limit
-    client_max_body_size 20M;
+    # DNS resolver para o Nginx conseguir falar com a Meta (Facebook)
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver_timeout 5s;
+
+    client_max_body_size 100M;
 
     # ==================== INTERNAL: Validacao de Token ====================
-    # Inacessivel externamente (directive "internal")
-    location = /internal/validar-token {
+    location /internal/validar-token {
         internal;
         proxy_pass http://127.0.0.1:8000/api/v1/internal/validar-token;
         proxy_pass_request_body off;
@@ -37,43 +35,29 @@ server {
         proxy_set_header X-Original-Method $request_method;
     }
 
-    # ==================== GATEWAY: Enviar mensagens WhatsApp ====================
-    location /gateway/messages {
+    # ==================== GATEWAY: Proxy transparente para Meta Graph API ====================
+    # Dev usa: POST/GET https://api.yoursystem.dev.br/gateway/v25.0/{qualquer_endpoint}
+    # Nginx autentica via API key e repassa exatamente para graph.facebook.com
+    # Exemplos:
+    #   /gateway/v25.0/{phone_id}/messages                     -> enviar mensagem
+    #   /gateway/v25.0/{phone_id}/media                        -> upload de midia
+    #   /gateway/v25.0/{waba_id}/message_templates             -> criar/listar templates
+    #   GET /gateway/v25.0/{phone_id}?fields=messaging_limit_tier,quality_rating
+    location ~ ^/gateway/(.+)$ {
         auth_request /internal/validar-token;
         auth_request_set $meta_token $upstream_http_x_meta_token;
-        auth_request_set $phone_number_id $upstream_http_x_phone_number_id;
 
-        proxy_pass https://graph.facebook.com/v25.0/$phone_number_id/messages;
+        proxy_pass https://graph.facebook.com/$1$is_args$args;
         proxy_ssl_server_name on;
         proxy_set_header Authorization "Bearer $meta_token";
-        proxy_set_header Content-Type "application/json";
         proxy_set_header Host graph.facebook.com;
-
-        # Limpar headers sensíveis
+        proxy_set_header Content-Type $http_content_type;
         proxy_set_header X-Api-Key "";
         proxy_set_header Cookie "";
-
         proxy_buffering off;
         proxy_request_buffering off;
 
-        limit_req zone=gateway_api burst=10 nodelay;
-    }
-
-    # ==================== GATEWAY: Upload de mídia ====================
-    location /gateway/media {
-        auth_request /internal/validar-token;
-        auth_request_set $meta_token $upstream_http_x_meta_token;
-        auth_request_set $phone_number_id $upstream_http_x_phone_number_id;
-
-        proxy_pass https://graph.facebook.com/v25.0/$phone_number_id/media;
-        proxy_ssl_server_name on;
-        proxy_set_header Authorization "Bearer $meta_token";
-        proxy_set_header Host graph.facebook.com;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-
-        client_max_body_size 100M;
+        limit_req zone=gateway_api burst=20 nodelay;
     }
 
     # ==================== WebSocket ====================

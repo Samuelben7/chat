@@ -198,16 +198,24 @@ async def validar_token(
     meta_token = None
     phone_number_id_out = None
 
-    # Tentar extrair phone_number_id da URI da requisicao original
-    requested_phone_id = _extract_phone_number_id(x_original_uri or "")
+    # Extrair o ID numérico da URI (pode ser phone_number_id OU waba_id)
+    requested_id = _extract_phone_number_id(x_original_uri or "")
 
-    if requested_phone_id:
-        # Buscar numero especifico deste dev
+    if requested_id:
+        # Primeiro: tentar como phone_number_id
         numero = db.query(DevNumero).filter(
-            DevNumero.phone_number_id == requested_phone_id,
+            DevNumero.phone_number_id == requested_id,
             DevNumero.dev_id == dev_id,
             DevNumero.ativo == True,
         ).first()
+
+        # Segundo: tentar como waba_id (endpoints de templates, info de WABA, etc.)
+        if not numero:
+            numero = db.query(DevNumero).filter(
+                DevNumero.waba_id == requested_id,
+                DevNumero.dev_id == dev_id,
+                DevNumero.ativo == True,
+            ).first()
 
         if numero:
             if numero.status == "suspended":
@@ -218,20 +226,22 @@ async def validar_token(
             meta_token = numero.whatsapp_token
             phone_number_id_out = numero.phone_number_id
 
-            # Detectar e registrar primeiro uso
-            await _registrar_primeiro_uso(dev_id, numero, db)
+            # Detectar e registrar primeiro uso (apenas para endpoints de envio)
+            if "/messages" in (x_original_uri or ""):
+                await _registrar_primeiro_uso(dev_id, numero, db)
         else:
-            # Numero nao registrado como DevNumero — verificar fallback legado
-            if dev.phone_number_id == requested_phone_id and dev.whatsapp_token:
+            # Fallback: campo legado do dev ou usar primeiro numero ativo
+            # (cobre endpoints que usam IDs de business ou outros IDs Meta)
+            if dev.whatsapp_token:
                 meta_token = dev.whatsapp_token
-                phone_number_id_out = dev.phone_number_id
+                phone_number_id_out = dev.phone_number_id or requested_id
             else:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Phone number {requested_phone_id} not registered for this account"
+                    detail=f"ID {requested_id} not associated with your account"
                 )
     else:
-        # URI sem phone_number_id — usar numero padrao (legado ou primeiro ativo)
+        # URI sem ID numérico — usar numero padrao
         numero_padrao = db.query(DevNumero).filter(
             DevNumero.dev_id == dev_id,
             DevNumero.ativo == True,
@@ -248,11 +258,22 @@ async def validar_token(
         else:
             raise HTTPException(status_code=403, detail="WhatsApp not connected")
 
-    # 9. Incrementar contador mensal
+    # 9. Incrementar contador mensal de requests
     pipe = redis_cache.client.pipeline()
     pipe.incr(month_key)
-    pipe.expire(month_key, 86400 * 35)  # expira em 35 dias
+    pipe.expire(month_key, 86400 * 35)
     pipe.execute()
+
+    # 10. Rastrear conversas únicas: para POST em endpoints /messages,
+    # registrar o phone_number_id destino no set do mês (aproximação via X-Original-URI)
+    # O número exato do destinatário está no body (inacessível aqui), então
+    # usamos o phone_number_id de origem como proxy quando é endpoint de mensagem
+    if x_original_method == "POST" and "/messages" in (x_original_uri or "") and phone_number_id_out:
+        mes_atual = datetime.now(timezone.utc).strftime("%Y-%m")
+        conv_key = f"gateway:conversas:{dev_id}:{mes_atual}"
+        # Adiciona ao set — sadd ignora duplicatas automaticamente
+        redis_cache.client.sadd(conv_key, phone_number_id_out)
+        redis_cache.client.expire(conv_key, 86400 * 35)
 
     # 10. Log assíncrono (não bloqueia a resposta)
     latency = int((time.time() - start_time) * 1000)
