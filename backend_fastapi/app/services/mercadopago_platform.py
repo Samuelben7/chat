@@ -170,10 +170,88 @@ class MercadoPagoPlatformService:
             logger.error(f"Erro ao criar/buscar customer MP para {email}: {e}")
             return None
 
+    async def pre_autorizar_e_registrar_cartao(
+        self,
+        card_token: str,
+        customer_id: str,
+        payment_method_id: str,
+        email: str,
+        dev_id: int,
+    ) -> Dict:
+        """
+        Verifica e registra cartão para cobranças futuras sem CVV via pré-autorização de R$1.
+
+        Fluxo:
+        1. Faz pré-auth R$1 com capture=false → MP reserva mas NÃO debita, e salva o cartão
+           linkado ao customer automaticamente (pager.type=customer).
+        2. Cancela a pré-auth imediatamente.
+        3. Retorna card_id permanente para cobranças recorrentes.
+
+        Raises:
+            Exception: Se o cartão for recusado ou erro na API.
+        """
+        import uuid
+        idempotency_key = f"verify-card-{dev_id}-{uuid.uuid4().hex[:8]}"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Passo 1: pré-autorização (não debita)
+            preauth_resp = await client.post(
+                f"{self.base_url}/v1/payments",
+                headers={**self.headers, "X-Idempotency-Key": idempotency_key},
+                json={
+                    "transaction_amount": 1.00,
+                    "token": card_token,
+                    "description": "Verificacao de cartao - plataforma",
+                    "payment_method_id": payment_method_id,
+                    "installments": 1,
+                    "capture": False,
+                    "external_reference": f"verify_card_dev_{dev_id}",
+                    "payer": {
+                        "type": "customer",
+                        "id": customer_id,
+                        "email": email,
+                    },
+                },
+            )
+
+            if preauth_resp.status_code not in (200, 201):
+                err = preauth_resp.json()
+                msg = err.get("message", "Cartão recusado")
+                logger.error(f"Pré-auth recusada para dev {dev_id}: {preauth_resp.text}")
+                raise Exception(msg)
+
+            preauth = preauth_resp.json()
+            payment_id = preauth["id"]
+            card_info = preauth.get("card", {})
+            card_id = card_info.get("id")
+            last4 = card_info.get("last_four_digits", "****")
+            pm_detected = preauth.get("payment_method_id", payment_method_id)
+
+            logger.info(f"Pré-auth criada: payment={payment_id} status={preauth.get('status')} card={card_id}")
+
+            # Passo 2: cancelar a pré-auth imediatamente
+            cancel_resp = await client.put(
+                f"{self.base_url}/v1/payments/{payment_id}",
+                headers={**self.headers, "X-Idempotency-Key": f"{idempotency_key}-cancel"},
+                json={"status": "cancelled"},
+            )
+            if cancel_resp.status_code in (200, 201):
+                logger.info(f"Pré-auth {payment_id} cancelada com sucesso")
+            else:
+                logger.warning(f"Pré-auth {payment_id} não cancelada automaticamente: {cancel_resp.text}")
+
+        return {
+            "card_id": card_id,
+            "last4": last4,
+            "payment_method_id": pm_detected,
+            "preauth_payment_id": str(payment_id),
+        }
+
     async def save_card(self, customer_id: str, card_token: str) -> Optional[Dict]:
         """
         Salva cartao de credito em um Customer MP usando token do MercadoPago.js.
         Retorna card_id permanente para cobranças futuras sem precisar de novo token.
+        NOTA: Prefira pre_autorizar_e_registrar_cartao() para garantir cobranças sem CVV.
         """
         try:
             async with httpx.AsyncClient() as client:

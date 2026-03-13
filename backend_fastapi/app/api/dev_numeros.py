@@ -326,23 +326,33 @@ async def salvar_cartao_dev(
         if not customer_id:
             raise HTTPException(status_code=500, detail="Erro ao criar customer no Mercado Pago")
 
-        # Salvar cartao usando token do MercadoPago.js
-        card_result = await mp.save_card(customer_id, dados.card_token)
-        if not card_result:
-            raise HTTPException(status_code=500, detail="Erro ao salvar cartao no Mercado Pago")
+        # Pré-autorização de R$1 para verificar + registrar cartão para cobranças futuras sem CVV.
+        # A pré-auth é cancelada imediatamente — o valor NÃO é debitado.
+        card_result = await mp.pre_autorizar_e_registrar_cartao(
+            card_token=dados.card_token,
+            customer_id=customer_id,
+            payment_method_id=dados.payment_method_id,
+            email=dev.email,
+            dev_id=dev_id,
+        )
+
+        card_id = card_result.get("card_id")
+        if not card_id:
+            raise HTTPException(status_code=400, detail="Cartão aprovado mas não pôde ser salvo. Tente novamente.")
 
         # Persistir no DevUsuario
         dev.mp_customer_id = customer_id
-        dev.mp_card_id = card_result["card_id"]
+        dev.mp_card_id = card_id
         dev.mp_card_last4 = dados.last4 or card_result.get("last4", "****")
         dev.mp_card_method = dados.payment_method_id or card_result.get("payment_method_id", "")
         db.commit()
 
-        logger.info(f"Cartao salvo para dev {dev_id}: customer={customer_id} card={card_result['card_id']}")
+        logger.info(f"Cartao verificado e salvo para dev {dev_id}: customer={customer_id} card={card_id}")
         return {
             "sucesso": True,
             "last4": dev.mp_card_last4,
             "payment_method_id": dev.mp_card_method,
+            "verificado": True,
         }
 
     except HTTPException:
