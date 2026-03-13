@@ -1170,7 +1170,7 @@ Authorization: Bearer SEU_JWT_DE_DEV
                 Use a API key no header X-Api-Key. O gateway identifica o numero pelo <strong>phone_number_id</strong> na URL
                 (retornado quando o número foi registrado) e injeta o token Meta correto automaticamente.
               </p>
-              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`POST https://api.yoursystem.dev.br/gateway/v20.0/{PHONE_NUMBER_ID}/messages
+              <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`POST https://api.yoursystem.dev.br/gateway/v25.0/{PHONE_NUMBER_ID}/messages
 X-Api-Key: SUA_API_KEY
 Content-Type: application/json
 
@@ -1182,7 +1182,7 @@ Content-Type: application/json
 }
 
 // O gateway autentica, valida o numero e repassa para:
-// POST https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages`}</pre>
+// POST https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages`}</pre>
               <p style={{ color: '#888', fontSize: '12px', marginTop: '8px' }}>
                 Funciona para qualquer endpoint da Meta API: <code>/messages</code>, <code>/media</code>, etc.
                 Voce pode usar vários phone_number_ids com a mesma API key.
@@ -1193,11 +1193,11 @@ Content-Type: application/json
             <div style={cardStyle}>
               <h4 style={{ fontSize: '14px', color: '#1a1f3a', marginBottom: '8px' }}>4. Multiplos numeros com uma API key</h4>
               <pre style={{ background: '#1a1f3a', color: '#e2e8f0', padding: '16px', borderRadius: '8px', fontSize: '12px', overflow: 'auto' }}>{`# Numero do cliente A
-POST /gateway/v20.0/111111111111111/messages
+POST /gateway/v25.0/111111111111111/messages
 X-Api-Key: SUA_API_KEY  <-- mesma key
 
 # Numero do cliente B (mesmo token, numero diferente)
-POST /gateway/v20.0/222222222222222/messages
+POST /gateway/v25.0/222222222222222/messages
 X-Api-Key: SUA_API_KEY  <-- mesma key
 
 # O gateway valida que ambos os phone_number_ids
@@ -1242,7 +1242,7 @@ if (sig !== req.headers['x-webhook-signature'].replace('sha256=','')) {
               <h4 style={{ fontSize: '14px', color: '#92400e', marginBottom: '8px' }}>Entendendo os IDs</h4>
               <div style={{ fontSize: '13px', color: '#78350f', lineHeight: 1.7 }}>
                 <p style={{ margin: '0 0 8px' }}><strong>numero_id</strong> (ex: 42) — ID interno da plataforma. Use para gerenciar o número: verificar status, cancelar, etc.</p>
-                <p style={{ margin: '0 0 8px' }}><strong>phone_number_id</strong> (ex: 123456789012345) — ID da Meta. Use na URL do gateway para enviar mensagens: <code>/gateway/v20.0/{'{phone_number_id}'}/messages</code></p>
+                <p style={{ margin: '0 0 8px' }}><strong>phone_number_id</strong> (ex: 123456789012345) — ID da Meta. Use na URL do gateway para enviar mensagens: <code>/gateway/v25.0/{'{phone_number_id}'}/messages</code></p>
                 <p style={{ margin: 0 }}>O <code>phone_number_id</code> é retornado em <code>GET /dev/numeros</code> e no evento <code>number_connected</code> do webhook.</p>
               </div>
             </div>
@@ -1320,7 +1320,7 @@ app.post('/webhook/whatsapp', (req, res) => {
 // ─── 4. Enviar mensagem de texto ─────────────────────────────────────────────
 async function enviarTexto(phoneNumberId, para, texto) {
   const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
     {
       messaging_product: 'whatsapp',
       to: para,          // ex: '5511999999999'
@@ -1335,7 +1335,7 @@ async function enviarTexto(phoneNumberId, para, texto) {
 // ─── 5. Enviar imagem ────────────────────────────────────────────────────────
 async function enviarImagem(phoneNumberId, para, imageUrl, legenda) {
   const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
     {
       messaging_product: 'whatsapp',
       to: para,
@@ -1350,7 +1350,7 @@ async function enviarImagem(phoneNumberId, para, imageUrl, legenda) {
 // ─── 6. Enviar template aprovado ─────────────────────────────────────────────
 async function enviarTemplate(phoneNumberId, para, nomeTemplate, params) {
   const { data } = await axios.post(
-    \`https://api.yoursystem.dev.br/gateway/v20.0/\${phoneNumberId}/messages\`,
+    \`https://api.yoursystem.dev.br/gateway/v25.0/\${phoneNumberId}/messages\`,
     {
       messaging_product: 'whatsapp',
       to: para,
@@ -1404,7 +1404,7 @@ async def gerar_link(cliente_id: str) -> str:
 async def enviar_texto(phone_number_id: str, para: str, texto: str):
     async with httpx.AsyncClient() as client:
         r = await client.post(
-            f"{GATEWAY}/v20.0/{phone_number_id}/messages",
+            f"{GATEWAY}/v25.0/{phone_number_id}/messages",
             json={
                 "messaging_product": "whatsapp",
                 "to": para,

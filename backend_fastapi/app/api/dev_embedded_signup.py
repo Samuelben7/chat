@@ -72,7 +72,9 @@ async def embedded_signup_callback(
             subscribe_app_to_waba,
         )
 
-        access_token = await exchange_code_for_token(code)
+        # redirect_uri deve ser o mesmo usado na URL de autorização (obrigatório pela Meta)
+        redirect_uri = f"{settings.PUBLIC_BASE_URL}{settings.API_V1_STR}/webhook/embedded-signup"
+        access_token = await exchange_code_for_token(code, redirect_uri=redirect_uri)
         numeros_salvos = []
 
         async with httpx.AsyncClient(timeout=20.0) as client:

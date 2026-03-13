@@ -13,12 +13,15 @@ logger = logging.getLogger("meta_signup")
 GRAPH_API_BASE = "https://graph.facebook.com/v25.0"
 
 
-async def exchange_code_for_token(code: str) -> str:
+async def exchange_code_for_token(code: str, redirect_uri: str | None = None) -> str:
     """
     Troca o authorization code do FB.login por um access_token de longa duração.
 
     Args:
         code: Authorization code retornado pelo FB.login callback
+        redirect_uri: O mesmo redirect_uri usado na requisição inicial de autorização.
+                      OBRIGATÓRIO quando o OAuth flow inclui redirect_uri (ex: Embedded Signup server-side).
+                      Opcional apenas para flows sem redirect_uri (ex: FB.login JS SDK).
 
     Returns:
         Access token para a WABA
@@ -32,6 +35,8 @@ async def exchange_code_for_token(code: str) -> str:
         "client_secret": settings.META_APP_SECRET,
         "code": code,
     }
+    if redirect_uri:
+        params["redirect_uri"] = redirect_uri
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, params=params)
