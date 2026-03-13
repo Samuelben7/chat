@@ -20,7 +20,7 @@ import {
   ListaContatos,
 } from '../types';
 
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
+export const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
 
 // DEBUG: Verificar qual URL está sendo usada
 console.log('🔧 API_BASE_URL:', API_BASE_URL);

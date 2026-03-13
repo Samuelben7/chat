@@ -928,6 +928,57 @@ async def update_ia_config(
     }
 
 
+# ─── Tracking Config (Meta + Google) ──────────────────────────────────────────
+
+@router.get("/empresa/tracking-config")
+async def get_tracking_config(
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Retorna configuração de tracking da empresa (Meta CAPI + Google GA4)."""
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    return {
+        # Meta
+        "meta_pixel_id": getattr(empresa, "meta_pixel_id", "") or "",
+        "meta_capi_token": getattr(empresa, "meta_capi_token", "") or "",
+        # Google
+        "google_gtag_id": getattr(empresa, "google_gtag_id", "") or "",
+        "google_api_secret": getattr(empresa, "google_api_secret", "") or "",
+    }
+
+
+@router.patch("/empresa/tracking-config")
+async def update_tracking_config(
+    dados: dict,
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Salva configuração de tracking. Campos opcionais — envie null para limpar."""
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    campos = {"meta_pixel_id", "meta_capi_token", "google_gtag_id", "google_api_secret"}
+    for campo in campos:
+        if campo in dados:
+            valor = dados[campo]
+            setattr(empresa, campo, valor.strip() if isinstance(valor, str) else valor or None)
+
+    db.commit()
+
+    tem_meta = bool(empresa.meta_pixel_id and empresa.meta_capi_token)
+    tem_google = bool(empresa.google_gtag_id and empresa.google_api_secret)
+    return {
+        "success": True,
+        "meta_ativo": tem_meta,
+        "google_ativo": tem_google,
+    }
+
+
 # ========== RECUPERAÇÃO DE SENHA (EMPRESA + ATENDENTE) ==========
 
 @router.post("/esqueci-senha", response_model=EsqueciSenhaResponse)

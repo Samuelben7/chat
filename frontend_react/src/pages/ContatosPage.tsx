@@ -377,9 +377,10 @@ const ContatosPage: React.FC = () => {
           <div className="flex items-center gap-3">
             <button
               onClick={() => window.location.href = '/empresa/dashboard'}
-              className="px-4 py-2 rounded-lg text-sm font-medium"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-80"
               style={{ background: colors.hoverBg, color: colors.textSecondary, border: `1px solid ${colors.border}` }}
             >
+              <span style={{ fontSize: 16 }}>←</span>
               Dashboard
             </button>
             <ThemeToggle />
@@ -874,7 +875,7 @@ const ContatosPage: React.FC = () => {
                             }
                             try {
                               const result = await templatesApi.uploadMedia(file);
-                              const baseUrl = process.env.REACT_APP_API_URL?.replace('/api/v1', '') || 'http://localhost:8000';
+                              const baseUrl = process.env.REACT_APP_API_URL?.replace('/api/v1', '') || 'https://api.yoursystem.dev.br';
                               setMediaUrl(`${baseUrl}${result.url}`);
                             } catch (err: any) {
                               alert(err.response?.data?.detail || 'Erro ao fazer upload');

@@ -41,6 +41,12 @@ class Empresa(Base):
     ia_delay_max = Column(Integer, default=10)  # delay máximo em segundos
     ia_nome_assistente = Column(String(100), default="Assistente")
 
+    # ── Tracking: Meta + Google (opcionais) ────────────────────────────────
+    meta_pixel_id = Column(String(50))           # ID do Pixel Meta (ex: 123456789)
+    meta_capi_token = Column(Text)               # Meta Conversions API access token
+    google_gtag_id = Column(String(50))          # Google Tag ID (G-xxx ou AW-xxx)
+    google_api_secret = Column(String(200))      # GA4 Measurement Protocol API Secret
+
     # Status
     ativa = Column(Boolean, default=True)
     criada_em = Column(DateTime(timezone=True), server_default=func.now())

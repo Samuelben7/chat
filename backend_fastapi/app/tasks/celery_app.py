@@ -6,7 +6,7 @@ celery_app = Celery(
     "whatsapp_sistema",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=['app.tasks.tasks', 'app.tasks.billing_tasks', 'app.tasks.juridico_tasks']
+    include=['app.tasks.tasks', 'app.tasks.billing_tasks', 'app.tasks.juridico_tasks', 'app.tasks.tracking_tasks']
 )
 
 # Configurações do Celery

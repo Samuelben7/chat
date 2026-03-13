@@ -28,6 +28,7 @@ import Portfolio from './pages/Portfolio';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
+import ConviteAniversario from './pages/ConviteAniversario';
 import DevLogin from './pages/DevLogin';
 import DevCadastro from './pages/DevCadastro';
 import DevDashboard from './pages/DevDashboard';
@@ -37,6 +38,7 @@ import RedefinirSenha from './pages/RedefinirSenha';
 import DevEsqueciSenha from './pages/DevEsqueciSenha';
 import DevRedefinirSenha from './pages/DevRedefinirSenha';
 import DevConfirmarEmail from './pages/DevConfirmarEmail';
+import TrackingConfigPage from './pages/TrackingConfigPage';
 
 function AppRoutes() {
   const location = useLocation();
@@ -50,6 +52,7 @@ function AppRoutes() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/termos" element={<Terms />} />
         <Route path="/data" element={<DataDeletion />} />
+        <Route path="/aniversario" element={<ConviteAniversario />} />
 
         {/* Rotas Públicas - Sistema (Dinâmico) */}
         <Route path="/login" element={<LoginUnificado />} />
@@ -198,6 +201,16 @@ function AppRoutes() {
           element={
             <PrivateRoute allowedRoles={['empresa']}>
               <ProcessosPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Tracking & Conversões */}
+        <Route
+          path="/empresa/tracking"
+          element={
+            <PrivateRoute allowedRoles={['empresa']}>
+              <TrackingConfigPage />
             </PrivateRoute>
           }
         />

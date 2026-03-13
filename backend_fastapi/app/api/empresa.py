@@ -265,12 +265,12 @@ async def obter_dados_grafico(
     """
     now = datetime.now()
     labels = []
-    valores = []
+    valores = []        # conversas abertas por período
+    valores_fin = []    # conversas finalizadas por período
     dias_semana = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
     if periodo == "semana":
         data_inicio = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
-        # Single GROUP BY date query
         rows = db.query(
             func.date(Atendimento.iniciado_em).label('dia'),
             func.count(Atendimento.id),
@@ -280,10 +280,21 @@ async def obter_dados_grafico(
         ).group_by(func.date(Atendimento.iniciado_em)).all()
         counts_by_date = {str(r[0]): r[1] for r in rows}
 
+        rows_fin = db.query(
+            func.date(Atendimento.finalizado_em).label('dia'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.finalizado_em >= data_inicio,
+            Atendimento.status == 'finalizado',
+        ).group_by(func.date(Atendimento.finalizado_em)).all()
+        fin_by_date = {str(r[0]): r[1] for r in rows_fin}
+
         for i in range(6, -1, -1):
             data = now - timedelta(days=i)
             labels.append(dias_semana[data.weekday()])
             valores.append(counts_by_date.get(str(data.date()), 0))
+            valores_fin.append(fin_by_date.get(str(data.date()), 0))
 
     elif periodo == "mes":
         data_inicio = now - timedelta(days=30)
@@ -296,6 +307,16 @@ async def obter_dados_grafico(
         ).group_by(func.date(Atendimento.iniciado_em)).all()
         counts_by_date = {str(r[0]): r[1] for r in rows}
 
+        rows_fin = db.query(
+            func.date(Atendimento.finalizado_em).label('dia'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.finalizado_em >= data_inicio,
+            Atendimento.status == 'finalizado',
+        ).group_by(func.date(Atendimento.finalizado_em)).all()
+        fin_by_date = {str(r[0]): r[1] for r in rows_fin}
+
         for i in range(5, -1, -1):
             inicio = now - timedelta(days=(i+1)*5)
             fim = now - timedelta(days=i*5)
@@ -303,8 +324,13 @@ async def obter_dados_grafico(
                 counts_by_date.get(str((inicio + timedelta(days=d)).date()), 0)
                 for d in range(5)
             )
+            total_fin = sum(
+                fin_by_date.get(str((inicio + timedelta(days=d)).date()), 0)
+                for d in range(5)
+            )
             labels.append(f"{inicio.day}-{fim.day}")
             valores.append(total)
+            valores_fin.append(total_fin)
 
     else:  # dia
         data_inicio = now - timedelta(hours=24)
@@ -317,20 +343,35 @@ async def obter_dados_grafico(
         ).group_by(extract('hour', Atendimento.iniciado_em)).all()
         counts_by_hour = {int(r[0]): r[1] for r in rows}
 
+        rows_fin = db.query(
+            extract('hour', Atendimento.finalizado_em).label('hora'),
+            func.count(Atendimento.id),
+        ).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.finalizado_em >= data_inicio,
+            Atendimento.status == 'finalizado',
+        ).group_by(extract('hour', Atendimento.finalizado_em)).all()
+        fin_by_hour = {int(r[0]): r[1] for r in rows_fin}
+
         for i in range(5, -1, -1):
             hora_inicio = now - timedelta(hours=(i+1)*4)
-            hora_fim = now - timedelta(hours=i*4)
             total = sum(
                 counts_by_hour.get(h % 24, 0)
                 for h in range(hora_inicio.hour, hora_inicio.hour + 4)
             )
+            total_fin = sum(
+                fin_by_hour.get(h % 24, 0)
+                for h in range(hora_inicio.hour, hora_inicio.hour + 4)
+            )
             labels.append(f"{hora_inicio.hour}h")
             valores.append(total)
+            valores_fin.append(total_fin)
 
-    return GraficoAtendimentosResponse(
-        labels=labels,
-        valores=valores
-    )
+    return {
+        "labels": labels,
+        "valores": valores,
+        "valores_finalizadas": valores_fin,
+    }
 
 
 @router.get("/empresa/metricas-crm")
@@ -341,58 +382,48 @@ async def obter_metricas_crm(
     """
     Retorna métricas específicas do CRM para o dashboard.
     """
-    # Total de leads (clientes) da empresa
-    total_leads = db.query(Cliente).filter(
-        Cliente.empresa_id == empresa_id
-    ).count()
+    # Filtro base: apenas clientes não arquivados (consistente com o Kanban)
+    _base = (Cliente.empresa_id == empresa_id) & (Cliente.crm_arquivado == False)
 
-    # Leads por etapa do funil
+    # Total de leads (clientes) da empresa — excluindo arquivados
+    total_leads = db.query(Cliente).filter(_base).count()
+
+    # Leads por etapa do funil — excluindo arquivados
     etapas_query = db.query(
         Cliente.funil_etapa, func.count(Cliente.id)
-    ).filter(
-        Cliente.empresa_id == empresa_id
-    ).group_by(Cliente.funil_etapa).all()
+    ).filter(_base).group_by(Cliente.funil_etapa).all()
 
     leads_por_etapa = {etapa: count for etapa, count in etapas_query}
 
-    # Valor do pipeline (excluindo fechado e perdido)
+    # Valor do pipeline (excluindo fechado e perdido, excluindo arquivados)
     valor_pipeline = db.query(
         func.coalesce(func.sum(Cliente.valor_estimado), 0)
     ).filter(
-        Cliente.empresa_id == empresa_id,
+        _base,
         ~Cliente.funil_etapa.in_(['fechado', 'perdido'])
     ).scalar()
 
-    # Valor fechado
+    # Valor fechado — excluindo arquivados
     valor_fechado = db.query(
         func.coalesce(func.sum(Cliente.valor_estimado), 0)
-    ).filter(
-        Cliente.empresa_id == empresa_id,
-        Cliente.funil_etapa == 'fechado'
-    ).scalar()
+    ).filter(_base, Cliente.funil_etapa == 'fechado').scalar()
 
-    # Leads novos no mês atual
+    # Leads novos no mês atual — excluindo arquivados
     now = datetime.now()
     primeiro_dia_mes = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     leads_novos_mes = db.query(Cliente).filter(
-        Cliente.empresa_id == empresa_id,
+        _base,
         Cliente.criado_em_crm >= primeiro_dia_mes
     ).count()
 
-    # Taxa de conversão (fechado / total)
-    total_fechado = db.query(Cliente).filter(
-        Cliente.empresa_id == empresa_id,
-        Cliente.funil_etapa == 'fechado'
-    ).count()
+    # Taxa de conversão (fechado / total) — excluindo arquivados
+    total_fechado = db.query(Cliente).filter(_base, Cliente.funil_etapa == 'fechado').count()
     taxa_conversao = round((total_fechado / total_leads * 100), 2) if total_leads > 0 else 0.0
 
-    # Ticket médio (média do valor_estimado para fechados)
+    # Ticket médio — excluindo arquivados
     ticket_medio = db.query(
         func.coalesce(func.avg(Cliente.valor_estimado), 0)
-    ).filter(
-        Cliente.empresa_id == empresa_id,
-        Cliente.funil_etapa == 'fechado'
-    ).scalar()
+    ).filter(_base, Cliente.funil_etapa == 'fechado').scalar()
 
     # Top 5 tags com mais clientes
     top_tags_query = db.query(

@@ -544,6 +544,8 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     empresa_id=empresa.id,
                 )
                 db.add(atendimento)
+                # Tracking: dispara eventos de conversão (Meta e/ou Google) no primeiro contato
+                _disparar_tracking_novo_contato(empresa, from_number)
         else:
             atendimento.ultima_mensagem_em = datetime.now()
 
@@ -590,6 +592,14 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                 try:
                     from app.services.ai_chat_service import gerar_resposta_ia
                     from app.services.whatsapp import WhatsAppService
+
+                    # TYPING INDICATOR: mostrar que a IA está processando (fire-and-forget)
+                    if message_id:
+                        try:
+                            _ws_typing = WhatsAppService(empresa)
+                            asyncio.run(_ws_typing.send_typing_indicator(message_id))
+                        except Exception as _te:
+                            print(f"⚠️ Typing indicator IA falhou (não crítico): {_te}")
 
                     # SALVAR mensagem do cliente ANTES de processar com IA
                     # (BotMessageHandler faz isso internamente; no path IA precisamos fazer manual)
@@ -2375,3 +2385,30 @@ def arquivar_leads_antigos():
         db.rollback()
     finally:
         db.close()
+
+
+# ─── Tracking helper ──────────────────────────────────────────────────────────
+
+def _disparar_tracking_novo_contato(empresa, numero_whatsapp: str):
+    """
+    Dispara tasks de conversão Meta CAPI e/ou Google GA4 no primeiro contato.
+    Só aciona a task da plataforma que a empresa tiver configurada.
+    """
+    try:
+        tem_meta = bool(getattr(empresa, "meta_pixel_id", None) and getattr(empresa, "meta_capi_token", None))
+        tem_google = bool(getattr(empresa, "google_gtag_id", None) and getattr(empresa, "google_api_secret", None))
+
+        if not tem_meta and not tem_google:
+            return  # nenhuma plataforma configurada — não faz nada
+
+        from app.tasks.tracking_tasks import task_meta_conversao, task_google_conversao
+
+        if tem_meta:
+            task_meta_conversao.delay(empresa.id, numero_whatsapp)
+
+        if tem_google:
+            task_google_conversao.delay(empresa.id, numero_whatsapp)
+
+    except Exception as e:
+        import logging
+        logging.getLogger("tracking").warning(f"Erro ao disparar tracking para {numero_whatsapp}: {e}")

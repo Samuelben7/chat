@@ -260,16 +260,13 @@ export const DashboardEmpresa: React.FC = () => {
         setAniversariantes(anivRes.data || []);
         setSatisfacao(satRes.data);
 
-        // Formatar dados do gráfico
+        // Formatar dados do gráfico com dados reais de abertas vs finalizadas
         if (grafRes.data?.labels?.length) {
-          const met = metRes.data;
-          const totalMsg = met ? (met.mensagens_enviadas + met.mensagens_recebidas) : 0;
-          const totalConv = met ? Math.max(met.total_conversas, 1) : 1;
-          const ratio = Math.max(totalMsg / totalConv, 1);
-          const formatted: GraficoItem[] = grafRes.data.labels.map((label: string, i: number) => {
-            const conv = grafRes.data.valores[i] || 0;
-            return { label, conversas: conv, mensagens: Math.round(conv * ratio) };
-          });
+          const formatted: GraficoItem[] = grafRes.data.labels.map((label: string, i: number) => ({
+            label,
+            conversas: grafRes.data.valores[i] || 0,
+            finalizadas: grafRes.data.valores_finalizadas?.[i] || 0,
+          }));
           setGraficoData(formatted);
         }
       } catch (e) {
@@ -609,20 +606,25 @@ export const DashboardEmpresa: React.FC = () => {
                         background: 'linear-gradient(135deg, rgba(6,182,212,0.2), rgba(139,92,246,0.2))',
                         fontSize: 14,
                       }}>📈</span>
-                      Mensagens &amp; Conversas
+                      Conversas &amp; Conversão
                     </h3>
                     <p style={{ fontSize: 12, color: C.textMuted, margin: '4px 0 0 0' }}>
                       {periodo === 'dia' ? 'Últimas 24h' : periodo === 'semana' ? 'Últimos 7 dias' : 'Últimos 30 dias'}
+                      {metricasCrm && (
+                        <span style={{ marginLeft: 8, color: C.emerald, fontWeight: 700 }}>
+                          · {metricasCrm.taxa_conversao}% conversão
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{ width: 10, height: 10, borderRadius: '50%', background: C.cyan }} />
-                      <span style={{ color: C.textSec }}>Mensagens</span>
+                      <span style={{ color: C.textSec }}>Abertas</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: C.violet }} />
-                      <span style={{ color: C.textSec }}>Conversas</span>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: C.emerald }} />
+                      <span style={{ color: C.textSec }}>Finalizadas</span>
                     </div>
                   </div>
                 </div>
@@ -632,13 +634,13 @@ export const DashboardEmpresa: React.FC = () => {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={graficoData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                       <defs>
-                        <linearGradient id="gradMsg" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor={C.cyan}   stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={C.cyan}   stopOpacity={0} />
-                        </linearGradient>
                         <linearGradient id="gradConv" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor={C.violet} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={C.violet} stopOpacity={0} />
+                          <stop offset="5%"  stopColor={C.cyan}    stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={C.cyan}    stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gradFin" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor={C.emerald} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={C.emerald} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -671,23 +673,23 @@ export const DashboardEmpresa: React.FC = () => {
                       />
                       <Area
                         type="monotone"
-                        dataKey="mensagens"
-                        name="Mensagens"
+                        dataKey="conversas"
+                        name="Abertas"
                         stroke={C.cyan}
                         strokeWidth={2}
-                        fill="url(#gradMsg)"
+                        fill="url(#gradConv)"
                         dot={false}
                         activeDot={{ r: 4, fill: C.cyan, stroke: '#0e7490', strokeWidth: 2 }}
                       />
                       <Area
                         type="monotone"
-                        dataKey="conversas"
-                        name="Conversas"
-                        stroke={C.violet}
+                        dataKey="finalizadas"
+                        name="Finalizadas"
+                        stroke={C.emerald}
                         strokeWidth={2}
-                        fill="url(#gradConv)"
+                        fill="url(#gradFin)"
                         dot={false}
-                        activeDot={{ r: 4, fill: C.violet, stroke: '#6d28d9', strokeWidth: 2 }}
+                        activeDot={{ r: 4, fill: C.emerald, stroke: '#059669', strokeWidth: 2 }}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -1027,6 +1029,7 @@ export const DashboardEmpresa: React.FC = () => {
               { icon: '💬', label: 'Conversas',     desc: 'Chat em tempo real',       path: '/empresa/chat',                   color: C.violet   },
               { icon: '📋', label: 'Templates',     desc: 'Mensagens modelo',          path: '/empresa/templates',              color: C.amber    },
               { icon: '👥', label: 'Contatos',      desc: 'Gestão de contatos',        path: '/empresa/contatos',               color: C.emerald  },
+              { icon: '🪪', label: 'Clientes',      desc: 'Dados e campos custom',     path: '/empresa/clientes',               color: C.pink     },
               { icon: '🤖', label: 'Bot Builder',   desc: 'Fluxo do bot',              path: '/empresa/bot-builder',            color: C.cyan     },
               { icon: '✨', label: 'Agente IA',     desc: 'Atendimento com IA',        path: '/empresa/ia-config',              color: '#a855f7'  },
               { icon: '📅', label: 'Agenda',        desc: 'Agendamentos',              path: '/empresa/agenda',                 color: C.violet   },
@@ -1034,6 +1037,7 @@ export const DashboardEmpresa: React.FC = () => {
               { icon: '📢', label: 'Envio em Massa',desc: 'Mensagens e templates',     path: '/empresa/envio-massa',            color: C.pink     },
               { icon: '📱', label: 'Perfil Meta',   desc: 'Foto, nome e categoria',    path: '/empresa/perfil-whatsapp',        color: '#25D366'  },
               { icon: '⚙️', label: 'Encerramento',  desc: 'Mensagem e pesquisa',       path: '__config_encerramento__',         color: C.textSec  },
+              { icon: '📊', label: 'Rastreamento',  desc: 'Meta Pixel e Google Ads',   path: '/empresa/tracking',               color: '#f59e0b'  },
               { icon: '➕', label: 'Novo Atendente',desc: 'Cadastrar atendente',       path: '__criar_atendente__',             color: C.emerald  },
             ].map(item => (
               <div

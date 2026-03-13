@@ -23,7 +23,7 @@ mimetypes.add_type("audio/mpeg", ".mp3")
 # Import routers
 from app.api import webhook, mensagens, chat, atendentes, websocket, empresas, auth, empresa, atendente, websocket_endpoint, webhooks_evolution, bot_builder, templates, contatos, pagamentos, media, agenda, crm, perfil_whatsapp, modelos_mensagem, clientes
 from app.api import dev_auth, dev_api_keys, dev_gateway, dev_usage, dev_webhook, dev_numeros, dev_embedded_signup
-from app.api import processos
+from app.api import processos, aniversario
 from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 
 # Import Redis Pub/Sub e WebSocket Manager
@@ -45,6 +45,7 @@ app.add_middleware(
     allow_origins=[
         "https://yoursystem.dev.br",
         "https://www.yoursystem.dev.br",
+        "https://api.yoursystem.dev.br",
         "http://localhost:3000",
         "http://localhost:5173",
     ],
@@ -187,3 +188,4 @@ app.include_router(admin_planos.router, prefix=settings.API_V1_STR, tags=["admin
 app.include_router(assinaturas.router, prefix=settings.API_V1_STR, tags=["assinaturas"])
 app.include_router(pagamentos_plataforma.router, prefix=settings.API_V1_STR, tags=["pagamentos-plataforma"])
 app.include_router(admin_panel.router, prefix=settings.API_V1_STR, tags=["admin-panel"])
+app.include_router(aniversario.router, prefix=settings.API_V1_STR, tags=["aniversario"])

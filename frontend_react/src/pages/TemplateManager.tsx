@@ -12,8 +12,8 @@ const getFullUrl = (url?: string) => {
   if (url.startsWith('http')) return url;
 
   // Usa URL.origin para extrair apenas o domínio base (evita split incorreto em subdomínios como api.xxx)
-  const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api/v1';
-  let baseUrl = 'http://localhost:8000';
+  const apiUrl = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
+  let baseUrl = 'https://api.yoursystem.dev.br';
   try {
     baseUrl = new URL(apiUrl).origin;
   } catch { /* fallback ao default */ }

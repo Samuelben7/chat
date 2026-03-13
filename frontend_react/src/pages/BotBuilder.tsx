@@ -5,7 +5,7 @@ import api from '../services/api';
 import whatsappBg from '../images/PLANO-DE-FUNDO-WHATS-APP.png';
 
 // Base URL do servidor (sem /api/v1) para acessar arquivos estáticos como /uploads/...
-const SERVER_BASE_URL = process.env.REACT_APP_API_URL?.replace('/api/v1', '') || 'http://localhost:8000';
+const SERVER_BASE_URL = process.env.REACT_APP_API_URL?.replace('/api/v1', '') || 'https://api.yoursystem.dev.br';
 
 /** Converte path local (/uploads/...) em URL completa para preview */
 const resolveImageUrl = (url: string) => {
