@@ -658,12 +658,29 @@ const DevDashboard: React.FC = () => {
                     Cobrança automatica de R$ {cartaoStatus.valor_proximo_cobr?.toFixed(2)} no dia {cartaoStatus.proximo_cobr_em ? new Date(cartaoStatus.proximo_cobr_em).toLocaleDateString('pt-BR') : 'proximo ciclo'}
                   </p>
                 </div>
-                <button
-                  onClick={() => { setShowCartaoForm(true); initMpSdk(); }}
-                  style={{ padding: '8px 16px', background: 'transparent', color: '#15803d', border: '1px solid #86efac', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                >
-                  Trocar cartao
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => { setShowCartaoForm(true); initMpSdk(); }}
+                    style={{ padding: '8px 16px', background: 'transparent', color: '#15803d', border: '1px solid #86efac', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Trocar cartao
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm('Remover cartão cadastrado?')) return;
+                      try {
+                        await devNumerosApi.removerCartao();
+                        const s = await devNumerosApi.statusCartao().catch(() => null);
+                        setCartaoStatus(s);
+                      } catch (e: any) {
+                        alert(e?.response?.data?.detail || 'Erro ao remover cartão');
+                      }
+                    }}
+                    style={{ padding: '8px 16px', background: 'transparent', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Remover
+                  </button>
+                </div>
               </div>
             )}
 

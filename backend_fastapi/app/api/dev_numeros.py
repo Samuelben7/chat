@@ -362,6 +362,51 @@ async def salvar_cartao_dev(
         raise HTTPException(status_code=500, detail="Erro interno ao salvar cartao")
 
 
+@router.delete("/pagamento/cartao")
+async def remover_cartao_dev(
+    dev_id: CurrentDev = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Remove o cartão salvo do dev: deleta no MP e limpa os campos no DB.
+    O dev pode então adicionar um novo cartão.
+    """
+    dev = db.query(DevUsuario).filter(DevUsuario.id == dev_id).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dev nao encontrado")
+
+    if not dev.mp_card_id:
+        raise HTTPException(status_code=404, detail="Nenhum cartao cadastrado")
+
+    try:
+        from app.services.mercadopago_platform import MercadoPagoPlatformService
+        mp = MercadoPagoPlatformService()
+
+        if dev.mp_customer_id and dev.mp_card_id:
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                del_resp = await client.delete(
+                    f"{mp.base_url}/v1/customers/{dev.mp_customer_id}/cards/{dev.mp_card_id}",
+                    headers=mp.headers,
+                )
+                if del_resp.status_code not in (200, 204):
+                    logger.warning(f"MP nao removeu cartao {dev.mp_card_id}: {del_resp.text}")
+
+        dev.mp_card_id = None
+        dev.mp_card_last4 = None
+        dev.mp_card_method = None
+        db.commit()
+
+        logger.info(f"Cartao removido para dev {dev_id}")
+        return {"sucesso": True, "mensagem": "Cartao removido com sucesso"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao remover cartao dev {dev_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao remover cartao")
+
+
 @router.get("/pagamento/status-cartao")
 async def status_cartao_dev(
     dev_id: CurrentDev = None,

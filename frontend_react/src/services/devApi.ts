@@ -125,6 +125,11 @@ export const devNumerosApi = {
     return response.data;
   },
 
+  removerCartao: async () => {
+    const response = await api.delete('/dev/numeros/pagamento/cartao');
+    return response.data;
+  },
+
   gerarSignupLink: async (redirect_back_url?: string) => {
     const response = await api.post('/dev/numeros/signup-link', { redirect_back_url });
     return response.data as { signup_url: string; expires_in: number; session_id: string };
