@@ -205,10 +205,24 @@ def processar_webhook_completo(webhook_data: dict):
                     continue
 
                 # Verificar se pertence a um DEV primeiro
+                # 1. Checar DevUsuario.phone_number_id (campo legado)
                 dev_usuario = db.query(DevUsuario).filter(
                     DevUsuario.phone_number_id == phone_number_id,
                     DevUsuario.ativo == True,
                 ).first()
+
+                # 2. Se não achou, checar tabela DevNumero (multi-número)
+                if not dev_usuario:
+                    from app.models.models import DevNumero as _DevNumero
+                    dev_num = db.query(_DevNumero).filter(
+                        _DevNumero.phone_number_id == phone_number_id,
+                        _DevNumero.ativo == True,
+                    ).first()
+                    if dev_num:
+                        dev_usuario = db.query(DevUsuario).filter(
+                            DevUsuario.id == dev_num.dev_id,
+                            DevUsuario.ativo == True,
+                        ).first()
 
                 if dev_usuario:
                     # Forward para webhook do dev (nao processar como empresa)
