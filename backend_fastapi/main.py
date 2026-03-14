@@ -27,6 +27,7 @@ from app.api import processos, aniversario
 from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 from app.api import setores, especialidades
 from app.api import contrato_pdf
+from app.api import agenda_lembretes, ia_bot_chamada
 
 # Import Redis Pub/Sub e WebSocket Manager
 from app.core.redis_pubsub import pubsub_manager
@@ -194,3 +195,5 @@ app.include_router(aniversario.router, prefix=settings.API_V1_STR, tags=["aniver
 app.include_router(setores.router, prefix=settings.API_V1_STR, tags=["setores"])
 app.include_router(especialidades.router, prefix=settings.API_V1_STR, tags=["especialidades"])
 app.include_router(contrato_pdf.router, prefix=settings.API_V1_STR, tags=["contrato"])
+app.include_router(agenda_lembretes.router, prefix=settings.API_V1_STR, tags=["agenda-lembretes"])
+app.include_router(ia_bot_chamada.router, prefix=settings.API_V1_STR, tags=["ia-bot-chamadas"])

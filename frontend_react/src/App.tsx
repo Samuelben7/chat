@@ -15,6 +15,7 @@ import TemplateManager from './pages/TemplateManager';
 import ContatosPage from './pages/ContatosPage';
 import ClientesPage from './pages/ClientesPage';
 import AgendaPage from './pages/AgendaPage';
+import AgendamentosPage from './pages/AgendamentosPage';
 import KanbanPage from './pages/KanbanPage';
 import IAConfigPage from './pages/IAConfigPage';
 import EnvioMassaPage from './pages/EnvioMassaPage';
@@ -165,6 +166,15 @@ function AppRoutes() {
           element={
             <PrivateRoute allowedRoles={['empresa']}>
               <AgendaPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/empresa/agendamentos"
+          element={
+            <PrivateRoute allowedRoles={['empresa']}>
+              <AgendamentosPage />
             </PrivateRoute>
           }
         />

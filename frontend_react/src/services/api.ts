@@ -516,4 +516,32 @@ export const perfilWhatsAppApi = {
   },
 };
 
+// ─── Agenda Lembretes ──────────────────────────────────────────────────────────
+export const agendaLembretesApi = {
+  getConfig: () => api.get('/agenda/lembrete-config').then(r => r.data),
+  salvarConfig: (dados: any) => api.put('/agenda/lembrete-config', dados).then(r => r.data),
+  enviarLembreteManual: (agId: number) => api.post(`/agenda/agendamentos/${agId}/lembrete`).then(r => r.data),
+};
+
+// ─── IA Bot Chamadas ───────────────────────────────────────────────────────────
+export const iaBotChamadasApi = {
+  listar: () => api.get('/ia/bot-chamadas').then(r => r.data),
+  criar: (dados: any) => api.post('/ia/bot-chamadas', dados).then(r => r.data),
+  atualizar: (id: number, dados: any) => api.patch(`/ia/bot-chamadas/${id}`, dados).then(r => r.data),
+  deletar: (id: number) => api.delete(`/ia/bot-chamadas/${id}`).then(r => r.data),
+};
+
+// ─── Agendamentos (mensal + comparecimento) ────────────────────────────────────
+export const agendamentosApi = {
+  listarMes: (mes: number, ano: number) =>
+    api.get('/agenda/agendamentos/mes', { params: { mes, ano } }).then(r => r.data),
+  listar: (params?: any) => api.get('/agenda/agendamentos', { params }).then(r => r.data),
+  criar: (dados: any) => api.post('/agenda/agendamentos', dados).then(r => r.data),
+  atualizar: (id: number, dados: any) => api.patch(`/agenda/agendamentos/${id}`, dados).then(r => r.data),
+  deletar: (id: number) => api.delete(`/agenda/agendamentos/${id}`).then(r => r.data),
+  marcarComparecimento: (id: number, compareceu: boolean) =>
+    api.patch(`/agenda/agendamentos/${id}/comparecimento`, { compareceu }).then(r => r.data),
+  listarEspecialidades: () => api.get('/agenda/especialidades').then(r => r.data),
+};
+
 export default api;

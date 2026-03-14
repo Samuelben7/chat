@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
 # Criar instância do Celery
@@ -59,6 +60,10 @@ celery_app.conf.beat_schedule = {
     'arquivar-leads-antigos': {
         'task': 'app.tasks.tasks.arquivar_leads_antigos',
         'schedule': 86400.0,  # Diário (24 horas)
+    },
+    'lembretes-agendamentos': {
+        'task': 'app.tasks.tasks.enviar_lembretes_agendamentos',
+        'schedule': crontab(hour=10, minute=0),  # Todo dia às 10h
     },
     'cobrar-numeros-devs': {
         'task': 'app.tasks.billing_tasks.cobrar_numeros_devs_task',

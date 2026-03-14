@@ -574,15 +574,50 @@ class AgendaAgendamento(Base):
     empresa_id = Column(Integer, ForeignKey('empresa.id'), nullable=False, index=True)
     slot_id = Column(Integer, ForeignKey('agenda_slot.id'), nullable=False, index=True)
     cliente_id = Column(Integer, ForeignKey('whatsapp_bot_cliente.id'), nullable=True)
+    especialidade_id = Column(Integer, ForeignKey('especialidade.id', ondelete='SET NULL'), nullable=True)
     whatsapp_number = Column(String(20), nullable=False)
     nome_cliente = Column(String(150), nullable=True)
     status = Column(String(20), default='confirmado')  # pendente/confirmado/cancelado/realizado
+    compareceu = Column(Boolean, nullable=True, default=None)  # None=não avaliado, True=foi, False=faltou
     observacoes = Column(Text, nullable=True)
+    lembrete_enviado = Column(Boolean, default=False)
     criado_em = Column(DateTime, server_default=func.now())
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     slot = relationship('AgendaSlot', back_populates='agendamentos')
     cliente = relationship('Cliente')
+    especialidade = relationship('Especialidade')
+
+
+class IaBotChamada(Base):
+    """Vínculo entre IA e BotFluxo existente para coleta de dados estruturados."""
+    __tablename__ = 'ia_bot_chamada'
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id', ondelete='CASCADE'), nullable=False, index=True)
+    nome = Column(String(100), nullable=False)
+    gatilho = Column(String(50), nullable=False, default='agendamento')  # agendamento | cadastro | manual
+    bot_fluxo_id = Column(Integer, ForeignKey('bot_fluxo.id', ondelete='CASCADE'), nullable=False)
+    descricao_campos = Column(Text, nullable=True)
+    ativo = Column(Boolean, default=True)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    bot_fluxo = relationship('BotFluxo')
+
+
+class AgendaLembreteConfig(Base):
+    """Configuração de lembrete automático de agendamento por empresa."""
+    __tablename__ = 'agenda_lembrete_config'
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey('empresa.id', ondelete='CASCADE'), unique=True, nullable=False)
+    mensagem_interativa = Column(JSON, nullable=True)       # payload interativo (janela 24h aberta)
+    mensagem_interativa_nome = Column(String(200), nullable=True)
+    template_nome = Column(String(100), nullable=True)      # template Meta (fora da janela)
+    template_idioma = Column(String(10), default='pt_BR')
+    template_componentes = Column(JSON, default=list)       # componentes com params dinâmicos
+    ativo = Column(Boolean, default=True)
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # ==================== CRM - TAGS & KANBAN ====================

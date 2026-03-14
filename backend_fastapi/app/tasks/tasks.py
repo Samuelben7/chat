@@ -602,8 +602,20 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
             ).first()
             em_pesquisa = sessao_atual and sessao_atual.estado_atual == 'pesquisa_satisfacao'
 
-            # ── Agente de IA (prioridade sobre bot, EXCETO pesquisa) ──
-            ia_ativa = getattr(empresa, 'ia_ativa', False) and not em_pesquisa
+            # ── Verificar se IA ativou bot de coleta de dados ──
+            em_coleta_bot = False
+            _coleta_fluxo_id = None
+            try:
+                _rk = redis_cache.client.get(f"ia:col_bot:{empresa.id}:{from_number}")
+                if _rk:
+                    em_coleta_bot = True
+                    _coleta_fluxo_id = int(_rk)
+                    print(f"🤖 Sessão de coleta de dados ativa (fluxo {_coleta_fluxo_id}) para {from_number}")
+            except Exception:
+                pass
+
+            # ── Agente de IA (prioridade sobre bot, EXCETO pesquisa e coleta) ──
+            ia_ativa = getattr(empresa, 'ia_ativa', False) and not em_pesquisa and not em_coleta_bot
             if ia_ativa and content and message_type in ('text', 'button', 'interactive'):
                 try:
                     from app.services.ai_chat_service import gerar_resposta_ia
@@ -669,8 +681,58 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     except Exception as _crm_err:
                         print(f"⚠️ Erro ao buscar CRM context: {_crm_err}")
 
+                    # ── Verificar se bot de coleta acabou de concluir ──
+                    _bot_coleta_concluido = False
+                    try:
+                        if redis_cache.client.exists(f"ia:col_bot_done:{empresa.id}:{from_number}"):
+                            _bot_coleta_concluido = True
+                            redis_cache.client.delete(f"ia:col_bot_done:{empresa.id}:{from_number}")
+                            print(f"✅ IA retomando após bot de coleta para {from_number}")
+                    except Exception:
+                        pass
+
+                    # ── Contexto de especialidades (anti-alucinação) ──
+                    especialidades_context = None
+                    try:
+                        from app.models.models import Especialidade as _Esp, IaBotChamada as _IaBot
+                        esps = db.query(_Esp).filter(
+                            _Esp.empresa_id == empresa.id,
+                            _Esp.ativo == True,
+                        ).order_by(_Esp.nome).all()
+                        if esps:
+                            linhas_esp = []
+                            for e in esps:
+                                valor_str = f"R$ {e.valor:.2f}".replace('.', ',') if e.valor else "a consultar"
+                                dur_str = f" - {e.duracao_minutos}min" if e.duracao_minutos else ""
+                                linhas_esp.append(f"[ID:{e.id}] {e.nome} - {valor_str}{dur_str}")
+                            especialidades_context = (
+                                "ESPECIALIDADES/PROCEDIMENTOS DISPONÍVEIS (use apenas IDs desta lista ao confirmar agendamento):\n"
+                                + "\n".join(linhas_esp)
+                                + "\n\nNUNCA invente ou use ID de especialidade que não está listado acima."
+                            )
+                        # Bot chamadas configuradas
+                        bots_chamada = db.query(_IaBot).filter(
+                            _IaBot.empresa_id == empresa.id,
+                            _IaBot.ativo == True,
+                        ).all()
+                        if bots_chamada:
+                            linhas_bot = []
+                            for bc in bots_chamada:
+                                linhas_bot.append(
+                                    f"[ID:{bc.bot_fluxo_id}] '{bc.nome}' (gatilho: {bc.gatilho})"
+                                    + (f" — coleta: {bc.descricao_campos}" if bc.descricao_campos else "")
+                                )
+                            if especialidades_context:
+                                especialidades_context += (
+                                    "\n\nBOTS DE COLETA CONFIGURADOS (use [COLETAR_DADOS:fluxo_id] ANTES de confirmar agendamento se o cliente não tiver cadastro):\n"
+                                    + "\n".join(linhas_bot)
+                                    + "\n\nREGRA: Se for agendar e o cliente ainda não tem nome completo cadastrado, emita [COLETAR_DADOS:ID] com o ID do bot de cadastro para coletar os dados primeiro."
+                                )
+                    except Exception as _esp_err:
+                        print(f"⚠️ Erro ao buscar especialidades/bot-chamadas: {_esp_err}")
+
                     # Montar contexto da agenda (próximos 14 dias com slots disponíveis)
-                    agenda_context = None
+                    agenda_context = especialidades_context  # começa com especialidades
                     try:
                         from app.models.models import AgendaSlot, AgendaHorarioFuncionamento
                         from datetime import date, timezone
@@ -714,13 +776,14 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                                 data_fmt = f"{d.day:02d}/{MESES_PT[d.month - 1]}"
                                 linhas.append(f"- {nome_dia} {data_fmt}: {', '.join(horas)}")
 
-                            agenda_context = (
-                                f"Horários disponíveis para agendamento (próximos 14 dias):\n"
+                            agenda_str = (
+                                f"\n\nHorários disponíveis para agendamento (próximos 14 dias):\n"
                                 + "\n".join(linhas)
                             )
+                            agenda_context = (agenda_context or "") + agenda_str
                             print(f"📅 Agenda context: {len(dias_map)} dias disponíveis para a IA")
                         else:
-                            agenda_context = "Não há horários disponíveis nos próximos 14 dias. Informe o cliente e ofereça para verificar manualmente."
+                            agenda_context = (agenda_context or "") + "\n\nNão há horários disponíveis nos próximos 14 dias. Informe o cliente e ofereça para verificar manualmente."
 
                         # Incluir agendamentos futuros DO CLIENTE (para ele poder cancelar)
                         try:
@@ -754,6 +817,14 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     except Exception as _ag_err:
                         print(f"⚠️ Erro ao buscar agenda context: {_ag_err}")
 
+                    _sistema_feedback_ia = None
+                    if _bot_coleta_concluido:
+                        _sistema_feedback_ia = (
+                            "O bot de coleta de dados acabou de concluir. "
+                            "Os dados do cliente foram atualizados no banco. "
+                            "Retome o atendimento de onde parou, confirmando os dados coletados e prosseguindo com o agendamento."
+                        )
+
                     resposta_ia = asyncio.run(gerar_resposta_ia(
                         mensagens=historico,
                         nova_mensagem=content,
@@ -763,6 +834,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         delay_max=getattr(empresa, 'ia_delay_max', 10) or 10,
                         crm_context=crm_context,
                         agenda_context=agenda_context,
+                        sistema_feedback=_sistema_feedback_ia,
                     ))
 
                     # Detectar marcadores na resposta da IA
@@ -770,13 +842,15 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
                     import re as _re
 
-                    # Detectar agendamento confirmado: [AGENDAMENTO:2026-03-07|10:00]
+                    # Detectar agendamento confirmado: [AGENDAMENTO:2026-03-07|10:00] ou [AGENDAMENTO:2026-03-07|10:00|ESP:2]
                     agendamento_data = None
                     agendamento_hora = None
-                    _ag_match = _re.search(r'\[AGENDAMENTO:(\d{4}-\d{2}-\d{2})\|(\d{2}:\d{2})\]', resposta_ia)
+                    agendamento_esp_id = None
+                    _ag_match = _re.search(r'\[AGENDAMENTO:(\d{4}-\d{2}-\d{2})\|(\d{2}:\d{2})(?:\|ESP:(\d+))?\]', resposta_ia)
                     if _ag_match:
                         agendamento_data = _ag_match.group(1)
                         agendamento_hora = _ag_match.group(2)
+                        agendamento_esp_id = int(_ag_match.group(3)) if _ag_match.group(3) else None
                         # Fallback: corrigir ano se IA usou ano passado (alucinação)
                         try:
                             from datetime import date as _date_check
@@ -802,9 +876,26 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     if _cancel_match:
                         cancelar_ag_id = int(_cancel_match.group(1))
 
+                    # Detectar bot de coleta de dados: [COLETAR_DADOS:fluxo_id]
+                    coletar_dados_fluxo_id = None
+                    _cd_match = _re.search(r'\[COLETAR_DADOS:(\d+)\]', resposta_ia)
+                    if _cd_match:
+                        coletar_dados_fluxo_id = int(_cd_match.group(1))
+                        try:
+                            _r_cd = redis_cache.client
+                            _r_cd.setex(
+                                f"ia:col_bot:{empresa.id}:{from_number}",
+                                1800,  # 30 minutos
+                                str(coletar_dados_fluxo_id),
+                            )
+                            print(f"🤖 IA ativou bot de coleta (fluxo {coletar_dados_fluxo_id}) para {from_number}")
+                        except Exception as _cde:
+                            print(f"⚠️ Erro ao salvar sessão bot coleta: {_cde}")
+
                     # Remover todos os marcadores da resposta que vai para o cliente
                     resposta_limpa = _re.sub(r'\[AGENDAMENTO:[^\]]+\]', '', resposta_ia)
                     resposta_limpa = _re.sub(r'\[CANCELAR_AGENDAMENTO:[^\]]+\]', '', resposta_limpa)
+                    resposta_limpa = _re.sub(r'\[COLETAR_DADOS:[^\]]+\]', '', resposta_limpa)
                     resposta_limpa = resposta_limpa.replace('[CONVERSA_ENCERRADA]', '').strip()
 
                     # ===== BOOKING ANTECIPADO: tenta reservar ANTES de enviar mensagem =====
@@ -859,6 +950,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                                             whatsapp_number=from_number,
                                             nome_cliente=_cli_b.nome_completo if _cli_b else None,
                                             cliente_id=_cli_b.id if _cli_b else None,
+                                            especialidade_id=agendamento_esp_id,
                                             status='confirmado',
                                         )
                                         db.add(_ag_b)
@@ -1068,6 +1160,30 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
 
                     asyncio.run(bot_handler.process_message())
                     print(f"✅ Mensagem processada pelo bot")
+
+                    # ── Detectar fim do bot de coleta de dados ──
+                    if em_coleta_bot and _coleta_fluxo_id:
+                        try:
+                            sessao_pos = db.query(ChatSessao).filter(
+                                ChatSessao.empresa_id == empresa.id,
+                                ChatSessao.whatsapp_number == from_number,
+                            ).first()
+                            # Bot concluiu se a sessão não tem estado ativo (voltou ao início)
+                            sessao_sem_estado = (
+                                not sessao_pos
+                                or not sessao_pos.estado_atual
+                                or sessao_pos.estado_atual in ('', 'inicio', None)
+                            )
+                            if sessao_sem_estado:
+                                redis_cache.client.delete(f"ia:col_bot:{empresa.id}:{from_number}")
+                                redis_cache.client.setex(
+                                    f"ia:col_bot_done:{empresa.id}:{from_number}",
+                                    300,  # 5 minutos para a IA retomar
+                                    "1",
+                                )
+                                print(f"✅ Bot de coleta concluído para {from_number} — IA retomará na próxima msg")
+                        except Exception as _bcd_e:
+                            print(f"⚠️ Erro ao detectar fim do bot coleta: {_bcd_e}")
 
                 except Exception as e:
                     print(f"❌ Erro no bot: {e}")
@@ -2455,3 +2571,163 @@ def _disparar_tracking_novo_contato(empresa, numero_whatsapp: str):
     except Exception as e:
         import logging
         logging.getLogger("tracking").warning(f"Erro ao disparar tracking para {numero_whatsapp}: {e}")
+
+
+# ─── Task: Lembretes de Agendamento ──────────────────────────────────────────
+
+@celery_app.task(name="app.tasks.tasks.enviar_lembretes_agendamentos")
+def enviar_lembretes_agendamentos():
+    """
+    Roda todo dia às 10h via Celery Beat.
+    Para cada agendamento de amanhã (confirmado, sem lembrete enviado):
+      - Se janela 24h aberta  → envia mensagem interativa configurada
+      - Se janela 24h fechada → envia template Meta com parâmetros resolvidos
+    """
+    import asyncio as _asl
+    import re as _re_lbr
+    from datetime import date as _date, timedelta as _td, datetime as _dtt
+
+    db: Session = SessionLocal()
+    try:
+        from app.models.models import (
+            AgendaAgendamento as _AA, AgendaSlot as _AS,
+            AgendaLembreteConfig as _ALC, Cliente as _Cli, Especialidade as _Esp,
+            Empresa as _Emp
+        )
+
+        amanha = _date.today() + _td(days=1)
+
+        # Buscar todos agendamentos de amanhã confirmados sem lembrete enviado
+        ags = (
+            db.query(_AA)
+            .join(_AS, _AA.slot_id == _AS.id)
+            .filter(
+                _AS.data == amanha,
+                _AA.status == 'confirmado',
+                _AA.lembrete_enviado == False,
+            )
+            .all()
+        )
+
+        if not ags:
+            print(f"📭 Lembretes: nenhum agendamento amanhã ({amanha})")
+            return {"enviados": 0}
+
+        enviados = 0
+        for ag in ags:
+            try:
+                cfg = db.query(_ALC).filter(
+                    _ALC.empresa_id == ag.empresa_id,
+                    _ALC.ativo == True,
+                ).first()
+                if not cfg:
+                    continue
+                if not cfg.mensagem_interativa and not cfg.template_nome:
+                    continue
+
+                empresa = db.query(_Emp).filter(_Emp.id == ag.empresa_id).first()
+                if not empresa or not empresa.whatsapp_token:
+                    continue
+
+                cliente = db.query(_Cli).filter(_Cli.id == ag.cliente_id).first() if ag.cliente_id else None
+
+                # Verificar janela 24h
+                janela_aberta = False
+                try:
+                    from app.core.redis_client import redis_cache as _rc
+                    janela_aberta = bool(_rc.client.exists(f"empresa:{ag.empresa_id}:janela_24h:{ag.whatsapp_number}"))
+                except Exception:
+                    pass
+
+                import httpx as _hx
+
+                enviado = False
+                if janela_aberta and cfg.mensagem_interativa:
+                    # Enviar mensagem interativa (janela aberta)
+                    url = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}/messages"
+                    headers = {"Authorization": f"Bearer {empresa.whatsapp_token}", "Content-Type": "application/json"}
+                    body = {
+                        "messaging_product": "whatsapp",
+                        "recipient_type": "individual",
+                        "to": ag.whatsapp_number,
+                        **cfg.mensagem_interativa,
+                    }
+                    with _hx.Client(timeout=15.0) as hc:
+                        r = hc.post(url, headers=headers, json=body)
+                        enviado = r.status_code == 200
+                        if not enviado:
+                            print(f"⚠️ Falha lembrete interativo para {ag.whatsapp_number}: {r.text[:200]}")
+
+                elif cfg.template_nome:
+                    # Resolver parâmetros no template
+                    _PARAM_RE = _re_lbr.compile(r'\{(\w+(?::\w+)?)\}')
+                    slot = ag.slot
+                    esp = ag.especialidade
+
+                    def _res(m):
+                        p = m.group(1)
+                        if p == 'nome_cliente':
+                            return (cliente.nome_completo if cliente else ag.nome_cliente) or 'Cliente'
+                        if p == 'data_agendamento':
+                            return slot.data.strftime('%d/%m/%Y') if slot else ''
+                        if p == 'hora_agendamento':
+                            return slot.hora_inicio if slot else ''
+                        if p == 'especialidade':
+                            return esp.nome if esp else ''
+                        if p == 'valor':
+                            if esp and esp.valor:
+                                return f"R$ {esp.valor:.2f}".replace('.', ',')
+                            return ''
+                        if p.startswith('campo_custom:') and cliente:
+                            cn = p.split(':', 1)[1]
+                            for cv in (cliente.campos_custom_valores or []):
+                                if cv.campo and cv.campo.nome == cn:
+                                    return cv.valor or ''
+                        return m.group(0)
+
+                    componentes = []
+                    for comp in (cfg.template_componentes or []):
+                        c = dict(comp)
+                        if 'parameters' in c:
+                            c['parameters'] = [
+                                {**p, 'text': _PARAM_RE.sub(_res, p.get('text', ''))} if p.get('type') == 'text' else p
+                                for p in c['parameters']
+                            ]
+                        componentes.append(c)
+
+                    url = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}/messages"
+                    headers = {"Authorization": f"Bearer {empresa.whatsapp_token}", "Content-Type": "application/json"}
+                    body = {
+                        "messaging_product": "whatsapp",
+                        "to": ag.whatsapp_number,
+                        "type": "template",
+                        "template": {
+                            "name": cfg.template_nome,
+                            "language": {"code": cfg.template_idioma or "pt_BR"},
+                            "components": componentes,
+                        },
+                    }
+                    with _hx.Client(timeout=15.0) as hc:
+                        r = hc.post(url, headers=headers, json=body)
+                        enviado = r.status_code == 200
+                        if not enviado:
+                            print(f"⚠️ Falha template lembrete para {ag.whatsapp_number}: {r.text[:200]}")
+
+                if enviado:
+                    ag.lembrete_enviado = True
+                    db.commit()
+                    enviados += 1
+                    print(f"✅ Lembrete enviado para {ag.whatsapp_number} (ag {ag.id})")
+
+            except Exception as _le:
+                print(f"⚠️ Erro ao enviar lembrete ag {ag.id}: {_le}")
+                db.rollback()
+                continue
+
+        return {"enviados": enviados, "data": str(amanha)}
+
+    except Exception as e:
+        print(f"❌ Erro na task de lembretes: {e}")
+        return {"enviados": 0, "erro": str(e)}
+    finally:
+        db.close()

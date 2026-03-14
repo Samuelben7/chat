@@ -20,10 +20,30 @@ def _hoje() -> date:
 
 from app.database.database import get_db
 from app.models.models import (
-    AgendaHorarioFuncionamento, AgendaSlot, AgendaAgendamento, Cliente
+    AgendaHorarioFuncionamento, AgendaSlot, AgendaAgendamento, Cliente, Especialidade
 )
 from app.core.dependencies import CurrentUser, EmpresaIdFromToken
 from app.core.config import settings as _settings
+
+_CACHE_TTL_ESP = 600  # 10 min — especialidades
+
+def _get_especialidades_cached(r, empresa_id: int, db) -> list:
+    """Retorna especialidades ativas com cache Redis."""
+    key = f"agenda:esp:{empresa_id}"
+    cached = _cache_get(r, key)
+    if cached is not None:
+        return cached
+    esps = db.query(Especialidade).filter(
+        Especialidade.empresa_id == empresa_id,
+        Especialidade.ativo == True
+    ).order_by(Especialidade.nome).all()
+    data = [{"id": e.id, "nome": e.nome, "valor": float(e.valor) if e.valor else None,
+             "duracao_minutos": e.duracao_minutos} for e in esps]
+    _cache_set(r, key, data, _CACHE_TTL_ESP)
+    return data
+
+def _invalidar_especialidades(r, empresa_id: int):
+    _cache_del(r, f"agenda:esp:{empresa_id}")
 
 router = APIRouter()
 
@@ -611,8 +631,14 @@ async def listar_agendamentos(
             "hora_fim": ag.slot.hora_fim,
             "whatsapp_number": ag.whatsapp_number,
             "nome_cliente": ag.nome_cliente,
+            "cliente_id": ag.cliente_id,
             "status": ag.status,
+            "compareceu": ag.compareceu,
             "observacoes": ag.observacoes,
+            "especialidade_id": ag.especialidade_id,
+            "especialidade_nome": ag.especialidade.nome if ag.especialidade else None,
+            "especialidade_valor": float(ag.especialidade.valor) if ag.especialidade and ag.especialidade.valor else None,
+            "lembrete_enviado": ag.lembrete_enviado,
             "criado_em": ag.criado_em.isoformat() if ag.criado_em else None,
         }
         for ag in agendamentos
@@ -679,6 +705,7 @@ async def criar_agendamento(
         empresa_id=empresa_id,
         slot_id=slot_id,
         cliente_id=cliente_id,
+        especialidade_id=dados.get("especialidade_id"),
         whatsapp_number=whatsapp,
         nome_cliente=nome,
         status=dados.get("status", "confirmado"),
@@ -766,3 +793,110 @@ async def deletar_agendamento(
     db.commit()
     _invalidar_dia(_redis(), empresa_id, ag_slot_data)
     return {"message": "Agendamento removido"}
+
+
+# ─── Visão Mensal de Agendamentos ─────────────────────────────────────────────
+
+@router.get("/agenda/agendamentos/mes")
+async def agendamentos_mes(
+    mes: int = Query(..., ge=1, le=12),
+    ano: int = Query(..., ge=2020, le=2100),
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
+    db: Session = Depends(get_db)
+):
+    """Visão mensal completa de agendamentos para a tela de acompanhamento."""
+    primeiro_dia = date(ano, mes, 1)
+    ultimo_dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+    agendamentos = (
+        db.query(AgendaAgendamento)
+        .join(AgendaSlot, AgendaAgendamento.slot_id == AgendaSlot.id)
+        .filter(
+            AgendaAgendamento.empresa_id == empresa_id,
+            AgendaSlot.data >= primeiro_dia,
+            AgendaSlot.data <= ultimo_dia,
+        )
+        .order_by(AgendaSlot.data, AgendaSlot.hora_inicio)
+        .all()
+    )
+
+    return [
+        {
+            "id": ag.id,
+            "slot_id": ag.slot_id,
+            "data": str(ag.slot.data),
+            "hora_inicio": ag.slot.hora_inicio,
+            "hora_fim": ag.slot.hora_fim,
+            "whatsapp_number": ag.whatsapp_number,
+            "nome_cliente": ag.nome_cliente,
+            "cliente_id": ag.cliente_id,
+            "status": ag.status,
+            "compareceu": ag.compareceu,
+            "observacoes": ag.observacoes,
+            "especialidade_id": ag.especialidade_id,
+            "especialidade_nome": ag.especialidade.nome if ag.especialidade else None,
+            "especialidade_valor": float(ag.especialidade.valor) if ag.especialidade and ag.especialidade.valor else None,
+            "lembrete_enviado": ag.lembrete_enviado,
+            "criado_em": ag.criado_em.isoformat() if ag.criado_em else None,
+        }
+        for ag in agendamentos
+    ]
+
+
+# ─── Marcar Comparecimento ────────────────────────────────────────────────────
+
+@router.patch("/agenda/agendamentos/{agendamento_id}/comparecimento")
+async def marcar_comparecimento(
+    agendamento_id: int,
+    dados: dict,
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Marca se o cliente compareceu (True) ou faltou (False).
+    Quando compareceu=True e o cliente está cadastrado, atualiza o funil para 'fechado'.
+    """
+    ag = db.query(AgendaAgendamento).filter(
+        AgendaAgendamento.id == agendamento_id,
+        AgendaAgendamento.empresa_id == empresa_id
+    ).first()
+    if not ag:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+
+    compareceu = dados.get("compareceu")
+    if compareceu is None:
+        raise HTTPException(status_code=400, detail="Campo 'compareceu' obrigatório (true/false)")
+
+    ag.compareceu = compareceu
+
+    # Se compareceu → marcar como 'realizado' e atualizar CRM automaticamente
+    if compareceu and ag.status != 'cancelado':
+        ag.status = 'realizado'
+        if ag.cliente_id:
+            cliente = db.query(Cliente).filter(Cliente.id == ag.cliente_id).first()
+            if cliente and cliente.funil_etapa not in ('fechado', 'perdido'):
+                cliente.funil_etapa = 'fechado'
+                cliente.atualizado_em_crm = datetime.utcnow()
+
+    db.commit()
+    return {
+        "id": ag.id,
+        "compareceu": ag.compareceu,
+        "status": ag.status,
+        "crm_atualizado": compareceu and ag.cliente_id is not None
+    }
+
+
+# ─── Especialidades Cached ────────────────────────────────────────────────────
+
+@router.get("/agenda/especialidades")
+async def listar_especialidades_agenda(
+    user: CurrentUser = None,
+    empresa_id: EmpresaIdFromToken = None,
+    db: Session = Depends(get_db)
+):
+    """Lista especialidades ativas com cache Redis (para uso no agendamento)."""
+    r = _redis()
+    return _get_especialidades_cached(r, empresa_id, db)

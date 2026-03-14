@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api, { iaBotChamadasApi } from '../services/api';
 
 const CONTEXTO_DEMO = `Você é a assistente virtual de uma clínica odontológica.
 
@@ -80,12 +80,39 @@ const IAConfigPage: React.FC = () => {
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(false);
 
+  // Bot Chamadas
+  const [botChamadas, setBotChamadas] = useState<any[]>([]);
+  const [fluxosBot, setFluxosBot] = useState<any[]>([]);
+  const [novaChamada, setNovaChamada] = useState({ nome: '', gatilho: 'agendamento', bot_fluxo_id: '', descricao_campos: '' });
+  const [criandoChamada, setCriandoChamada] = useState(false);
+  const [mostrarFormChamada, setMostrarFormChamada] = useState(false);
+
   useEffect(() => {
     api.get('/auth/empresa/ia-config')
       .then(r => setConfig(r.data))
       .catch(console.error)
       .finally(() => setLoading(false));
+    iaBotChamadasApi.listar().then(setBotChamadas).catch(() => {});
+    api.get('/bot-builder/fluxos').then(r => setFluxosBot(r.data || [])).catch(() => {});
   }, []);
+
+  const criarChamada = async () => {
+    if (!novaChamada.nome || !novaChamada.bot_fluxo_id) return;
+    setCriandoChamada(true);
+    try {
+      await iaBotChamadasApi.criar({ ...novaChamada, bot_fluxo_id: parseInt(novaChamada.bot_fluxo_id) });
+      const lista = await iaBotChamadasApi.listar();
+      setBotChamadas(lista);
+      setNovaChamada({ nome: '', gatilho: 'agendamento', bot_fluxo_id: '', descricao_campos: '' });
+      setMostrarFormChamada(false);
+    } catch { /* */ }
+    setCriandoChamada(false);
+  };
+
+  const deletarChamada = async (id: number) => {
+    await iaBotChamadasApi.deletar(id);
+    setBotChamadas(p => p.filter(c => c.id !== id));
+  };
 
   const salvar = async () => {
     setSalvando(true);
@@ -335,6 +362,88 @@ Instruções especiais para o assistente:
           >
             Cancelar
           </button>
+        </div>
+
+        {/* ── Seção Bot Chamadas ── */}
+        <div style={{ ...glass, padding: 28, marginTop: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🤖 Chamadas de Bot para Coleta de Dados</h2>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: C.textSec }}>
+                A IA ativa um fluxo do Bot Builder para coletar dados estruturados (nome, CPF, etc.) sem risco de alucinação.
+              </p>
+            </div>
+            <button onClick={() => setMostrarFormChamada(v => !v)}
+              style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: C.violet, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+              + Nova Chamada
+            </button>
+          </div>
+
+          {mostrarFormChamada && (
+            <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 16, marginBottom: 16, display: 'grid', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={labelStyle}>Nome da chamada</label>
+                  <input style={inputDark} placeholder="Ex: Cadastro inicial" value={novaChamada.nome}
+                    onChange={e => setNovaChamada(p => ({ ...p, nome: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Gatilho</label>
+                  <select style={{ ...inputDark, boxSizing: 'border-box' }} value={novaChamada.gatilho}
+                    onChange={e => setNovaChamada(p => ({ ...p, gatilho: e.target.value }))}>
+                    <option value="agendamento">Agendamento</option>
+                    <option value="cadastro">Cadastro</option>
+                    <option value="manual">Manual</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Fluxo do Bot Builder</label>
+                <select style={{ ...inputDark, boxSizing: 'border-box' }} value={novaChamada.bot_fluxo_id}
+                  onChange={e => setNovaChamada(p => ({ ...p, bot_fluxo_id: e.target.value }))}>
+                  <option value="">Selecione um fluxo...</option>
+                  {fluxosBot.map((f: any) => (
+                    <option key={f.id} value={f.id}>{f.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Descrição dos campos coletados (injeta na IA)</label>
+                <input style={inputDark} placeholder="Ex: Coleta nome completo, CPF e e-mail"
+                  value={novaChamada.descricao_campos}
+                  onChange={e => setNovaChamada(p => ({ ...p, descricao_campos: e.target.value }))} />
+              </div>
+              <button onClick={criarChamada} disabled={criandoChamada || !novaChamada.nome || !novaChamada.bot_fluxo_id}
+                style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: C.emerald, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, width: 'fit-content' }}>
+                {criandoChamada ? 'Criando...' : 'Criar Chamada'}
+              </button>
+            </div>
+          )}
+
+          {botChamadas.length === 0 ? (
+            <div style={{ color: C.textSec, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+              Nenhuma chamada configurada. Configure um fluxo do Bot Builder e adicione aqui.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {botChamadas.map((c: any) => (
+                <div key={c.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, border: `1px solid ${C.border}` }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{c.nome}</div>
+                    <div style={{ fontSize: 11, color: C.textSec }}>
+                      Fluxo: <strong>{c.bot_fluxo_nome}</strong> • Gatilho: {c.gatilho}
+                      {c.descricao_campos && ` • ${c.descricao_campos}`}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.violet, marginTop: 2, fontFamily: 'monospace' }}>
+                      [COLETAR_DADOS:{c.bot_fluxo_id}]
+                    </div>
+                  </div>
+                  <button onClick={() => deletarChamada(c.id)}
+                    style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 16 }}>🗑</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
