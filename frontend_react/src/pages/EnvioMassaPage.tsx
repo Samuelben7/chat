@@ -779,7 +779,26 @@ const EnvioMassaPage: React.FC = () => {
                     <label className="block text-[10px] font-black uppercase tracking-[0.2em] opacity-50" style={{ color: colors.textPrimary }}>
                       {tipoMensagem === 'image' ? 'Legenda da Imagem' : 'Corpo da Mensagem'}
                     </label>
-                    <button onClick={() => setShowEmoji(v => !v)} className="text-lg hover:scale-110 transition-transform" title="Emojis">😊</button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const ta = textareaRef.current;
+                          if (ta) {
+                            const start = ta.selectionStart ?? mensagemTexto.length;
+                            const end = ta.selectionEnd ?? mensagemTexto.length;
+                            const next = mensagemTexto.slice(0, start) + '{}' + mensagemTexto.slice(end);
+                            setMensagemTexto(next);
+                            setTimeout(() => { ta.focus(); ta.setSelectionRange(start + 2, start + 2); }, 10);
+                          } else {
+                            setMensagemTexto(v => v + '{}');
+                          }
+                        }}
+                        className="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all hover:scale-105"
+                        style={{ background: `${colors.primary}22`, color: colors.primary, border: `1px solid ${colors.primary}44` }}
+                        title="Inserir parâmetro variável — será substituído por dados do agendamento no lembrete"
+                      >+ &#123;&#125; parâmetro</button>
+                      <button onClick={() => setShowEmoji(v => !v)} className="text-lg hover:scale-110 transition-transform" title="Emojis">😊</button>
+                    </div>
                   </div>
                   <div className="relative">
                     <textarea

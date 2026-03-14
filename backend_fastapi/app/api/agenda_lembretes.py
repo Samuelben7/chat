@@ -15,6 +15,8 @@ import re
 import logging
 from datetime import datetime
 from typing import Optional
+
+DIAS_SEMANA_PT = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -33,7 +35,8 @@ logger = logging.getLogger(__name__)
 CAMPOS_DISPONÍVEIS = [
     ('nome_cliente',     'Nome do cliente'),
     ('hora_agendamento', 'Hora do agendamento'),
-    ('data_agendamento', 'Data do agendamento'),
+    ('data_agendamento', 'Data do agendamento (dd/mm/aaaa)'),
+    ('dia_semana',       'Dia da semana (ex: segunda-feira)'),
     ('especialidade',    'Especialidade/Procedimento'),
     ('valor',            'Valor do procedimento'),
     ('whatsapp',         'WhatsApp do cliente'),
@@ -53,6 +56,8 @@ def _get_field_value(data_field: str, ag: AgendaAgendamento, cliente: Optional[C
         return slot.hora_inicio if slot else ''
     if data_field == 'data_agendamento':
         return slot.data.strftime('%d/%m/%Y') if slot else ''
+    if data_field == 'dia_semana':
+        return DIAS_SEMANA_PT[(slot.data.weekday() + 1) % 7] if slot else ''
     if data_field == 'especialidade':
         return esp.nome if esp else ''
     if data_field == 'valor':
