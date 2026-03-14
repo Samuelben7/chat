@@ -421,6 +421,7 @@ const AdminPanel: React.FC = () => {
   const [usoEmpresas, setUsoEmpresas] = useState<Record<number, any>>({});
   const [confirmDeleteEmpresa, setConfirmDeleteEmpresa] = useState<EmpresaAdmin | null>(null);
   const [deletingEmpresa, setDeletingEmpresa] = useState(false);
+  const [deleteEmpresaError, setDeleteEmpresaError] = useState('');
 
   // --- Devs ---
   const [devs, setDevs] = useState<DevAdmin[]>([]);
@@ -573,11 +574,15 @@ const AdminPanel: React.FC = () => {
   const handleDeleteEmpresa = async () => {
     if (!confirmDeleteEmpresa) return;
     setDeletingEmpresa(true);
+    setDeleteEmpresaError('');
     try {
       await adminApi.deletarEmpresa(confirmDeleteEmpresa.id);
       setConfirmDeleteEmpresa(null);
+      setDeleteEmpresaError('');
       loadEmpresas();
-    } catch { /* */ }
+    } catch (e: any) {
+      setDeleteEmpresaError(e.response?.data?.detail || 'Erro ao deletar empresa');
+    }
     setDeletingEmpresa(false);
   };
 
@@ -1246,10 +1251,15 @@ const AdminPanel: React.FC = () => {
             <p style={{ margin: '0 0 20px', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
               Digite o nome da empresa para confirmar: <em>{confirmDeleteEmpresa.nome}</em>
             </p>
+            {deleteEmpresaError && (
+              <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 8 }}>
+                ❌ {deleteEmpresaError}
+              </p>
+            )}
             <ConfirmDeleteInput
               nomeEsperado={confirmDeleteEmpresa.nome}
               onConfirm={handleDeleteEmpresa}
-              onCancel={() => setConfirmDeleteEmpresa(null)}
+              onCancel={() => { setConfirmDeleteEmpresa(null); setDeleteEmpresaError(''); }}
               loading={deletingEmpresa}
             />
           </div>

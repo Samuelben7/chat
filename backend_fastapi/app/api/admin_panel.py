@@ -464,22 +464,46 @@ async def deletar_empresa(
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-    # Deletar em cascata (order matters for FK constraints)
-    from app.models.models import (
-        EmpresaAuth, Atendente, AtendenteAuth, Atendimento, Cliente,
-        BotFluxo, MessageTemplate, Assinatura as AssinaturaModel, Pagamento
-    )
-    # Atendentes e suas auths
-    atendentes = db.query(Atendente).filter(Atendente.empresa_id == empresa_id).all()
-    for atd in atendentes:
-        db.query(AtendenteAuth).filter(AtendenteAuth.atendente_id == atd.id).delete()
-    db.query(Atendente).filter(Atendente.empresa_id == empresa_id).delete()
-    # Dados da empresa
-    db.query(AssinaturaModel).filter(AssinaturaModel.empresa_id == empresa_id).delete()
-    db.query(Pagamento).filter(Pagamento.empresa_id == empresa_id).delete()
-    db.query(EmpresaAuth).filter(EmpresaAuth.empresa_id == empresa_id).delete()
-    db.delete(empresa)
-    db.commit()
+    # Deletar com SQL raw em ordem correta para evitar FK violations
+    # Tabelas sem ondelete CASCADE precisam ser deletadas manualmente primeiro
+    from sqlalchemy import text
+    stmts = [
+        # Filhas de atendimento/mensagem
+        "DELETE FROM whatsapp_bot_mensagemlog WHERE empresa_id = :eid",
+        "DELETE FROM whatsapp_bot_chatsessao WHERE empresa_id = :eid",
+        # Atendimento (referencia atendente e cliente)
+        "DELETE FROM painel_atendimento WHERE empresa_id = :eid",
+        # Auth dos atendentes
+        "DELETE FROM atendente_auth WHERE atendente_id IN (SELECT id FROM painel_atendente WHERE empresa_id = :eid)",
+        "DELETE FROM painel_atendente WHERE empresa_id = :eid",
+        # Agenda
+        "DELETE FROM agenda_agendamento WHERE empresa_id = :eid",
+        "DELETE FROM agenda_slot WHERE empresa_id = :eid",
+        "DELETE FROM agenda_horario_funcionamento WHERE empresa_id = :eid",
+        # Tipos de serviço / vagas legado
+        "DELETE FROM whatsapp_bot_tiposervico WHERE empresa_id = :eid",
+        "DELETE FROM whatsapp_bot_vagaagenda WHERE empresa_id = :eid",
+        # Clientes e campos customizados
+        "DELETE FROM cliente_valor_custom WHERE cliente_id IN (SELECT id FROM whatsapp_bot_cliente WHERE empresa_id = :eid)",
+        "DELETE FROM whatsapp_bot_cliente WHERE empresa_id = :eid",
+        # Bot
+        "DELETE FROM configuracao_bot WHERE empresa_id = :eid",
+        # Assinatura / financeiro
+        "DELETE FROM assinatura WHERE empresa_id = :eid",
+        "DELETE FROM pagamento WHERE empresa_id = :eid",
+        # Auth empresa
+        "DELETE FROM empresa_auth WHERE empresa_id = :eid",
+        # Empresa (cascades o resto via ondelete=CASCADE)
+        "DELETE FROM empresa WHERE id = :eid",
+    ]
+    try:
+        for stmt in stmts:
+            db.execute(text(stmt), {"eid": empresa_id})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao deletar empresa {empresa_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar empresa: {str(e)}")
 
     logger.info(f"Admin: empresa {empresa_id} deletada permanentemente")
     return {"sucesso": True, "empresa_id": empresa_id}
