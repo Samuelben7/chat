@@ -2614,6 +2614,13 @@ def enviar_lembretes_agendamentos():
             print(f"📭 Lembretes: nenhum agendamento amanhã ({amanha})")
             return {"enviados": 0}
 
+        from app.models.models import ModeloMensagem as _Mdl, MessageTemplate as _MTpl
+        from app.api.agenda_lembretes import (
+            _get_field_value as _gfv, _resolver_modelo as _rsm,
+            _construir_payload_modelo as _cpm, _construir_componentes_template as _cct,
+        )
+        import httpx as _hx
+
         enviados = 0
         for ag in ags:
             try:
@@ -2621,9 +2628,7 @@ def enviar_lembretes_agendamentos():
                     _ALC.empresa_id == ag.empresa_id,
                     _ALC.ativo == True,
                 ).first()
-                if not cfg:
-                    continue
-                if not cfg.mensagem_interativa and not cfg.template_nome:
+                if not cfg or (not cfg.modelo_id and not cfg.template_id):
                     continue
 
                 empresa = db.query(_Emp).filter(_Emp.id == ag.empresa_id).first()
@@ -2640,79 +2645,41 @@ def enviar_lembretes_agendamentos():
                 except Exception:
                     pass
 
-                import httpx as _hx
-
+                url_base = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}/messages"
+                hdrs = {"Authorization": f"Bearer {empresa.whatsapp_token}", "Content-Type": "application/json"}
                 enviado = False
-                if janela_aberta and cfg.mensagem_interativa:
-                    # Enviar mensagem interativa (janela aberta)
-                    url = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}/messages"
-                    headers = {"Authorization": f"Bearer {empresa.whatsapp_token}", "Content-Type": "application/json"}
-                    body = {
-                        "messaging_product": "whatsapp",
-                        "recipient_type": "individual",
-                        "to": ag.whatsapp_number,
-                        **cfg.mensagem_interativa,
-                    }
-                    with _hx.Client(timeout=15.0) as hc:
-                        r = hc.post(url, headers=headers, json=body)
-                        enviado = r.status_code == 200
-                        if not enviado:
-                            print(f"⚠️ Falha lembrete interativo para {ag.whatsapp_number}: {r.text[:200]}")
 
-                elif cfg.template_nome:
-                    # Resolver parâmetros no template
-                    _PARAM_RE = _re_lbr.compile(r'\{(\w+(?::\w+)?)\}')
-                    slot = ag.slot
-                    esp = ag.especialidade
+                # Mensagem interativa (janela 24h aberta)
+                if janela_aberta and cfg.modelo_id:
+                    modelo = db.query(_Mdl).filter(_Mdl.id == cfg.modelo_id).first()
+                    if modelo:
+                        texto = _rsm(modelo, cfg.modelo_params or [], ag, cliente)
+                        payload = _cpm(modelo, texto)
+                        body = {"messaging_product": "whatsapp", "recipient_type": "individual",
+                                "to": ag.whatsapp_number, **payload}
+                        with _hx.Client(timeout=15.0) as hc:
+                            r = hc.post(url_base, headers=hdrs, json=body)
+                            enviado = r.status_code == 200
+                            if not enviado:
+                                print(f"⚠️ Falha lembrete interativo para {ag.whatsapp_number}: {r.text[:200]}")
 
-                    def _res(m):
-                        p = m.group(1)
-                        if p == 'nome_cliente':
-                            return (cliente.nome_completo if cliente else ag.nome_cliente) or 'Cliente'
-                        if p == 'data_agendamento':
-                            return slot.data.strftime('%d/%m/%Y') if slot else ''
-                        if p == 'hora_agendamento':
-                            return slot.hora_inicio if slot else ''
-                        if p == 'especialidade':
-                            return esp.nome if esp else ''
-                        if p == 'valor':
-                            if esp and esp.valor:
-                                return f"R$ {esp.valor:.2f}".replace('.', ',')
-                            return ''
-                        if p.startswith('campo_custom:') and cliente:
-                            cn = p.split(':', 1)[1]
-                            for cv in (cliente.campos_custom_valores or []):
-                                if cv.campo and cv.campo.nome == cn:
-                                    return cv.valor or ''
-                        return m.group(0)
-
-                    componentes = []
-                    for comp in (cfg.template_componentes or []):
-                        c = dict(comp)
-                        if 'parameters' in c:
-                            c['parameters'] = [
-                                {**p, 'text': _PARAM_RE.sub(_res, p.get('text', ''))} if p.get('type') == 'text' else p
-                                for p in c['parameters']
-                            ]
-                        componentes.append(c)
-
-                    url = f"https://graph.facebook.com/v21.0/{empresa.phone_number_id}/messages"
-                    headers = {"Authorization": f"Bearer {empresa.whatsapp_token}", "Content-Type": "application/json"}
-                    body = {
-                        "messaging_product": "whatsapp",
-                        "to": ag.whatsapp_number,
-                        "type": "template",
-                        "template": {
-                            "name": cfg.template_nome,
-                            "language": {"code": cfg.template_idioma or "pt_BR"},
-                            "components": componentes,
-                        },
-                    }
-                    with _hx.Client(timeout=15.0) as hc:
-                        r = hc.post(url, headers=headers, json=body)
-                        enviado = r.status_code == 200
-                        if not enviado:
-                            print(f"⚠️ Falha template lembrete para {ag.whatsapp_number}: {r.text[:200]}")
+                # Template Meta (fora da janela ou fallback)
+                if not enviado and cfg.template_id:
+                    tmpl = db.query(_MTpl).filter(_MTpl.id == cfg.template_id).first()
+                    if tmpl:
+                        componentes = _cct(tmpl.components or [], cfg.template_params or {}, ag, cliente)
+                        body = {
+                            "messaging_product": "whatsapp",
+                            "to": ag.whatsapp_number,
+                            "type": "template",
+                            "template": {"name": tmpl.name, "language": {"code": tmpl.language or "pt_BR"},
+                                         "components": componentes},
+                        }
+                        with _hx.Client(timeout=15.0) as hc:
+                            r = hc.post(url_base, headers=hdrs, json=body)
+                            enviado = r.status_code == 200
+                            if not enviado:
+                                print(f"⚠️ Falha template lembrete para {ag.whatsapp_number}: {r.text[:200]}")
 
                 if enviado:
                     ag.lembrete_enviado = True

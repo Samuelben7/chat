@@ -611,11 +611,12 @@ class AgendaLembreteConfig(Base):
 
     id = Column(Integer, primary_key=True)
     empresa_id = Column(Integer, ForeignKey('empresa.id', ondelete='CASCADE'), unique=True, nullable=False)
-    mensagem_interativa = Column(JSON, nullable=True)       # payload interativo (janela 24h aberta)
-    mensagem_interativa_nome = Column(String(200), nullable=True)
-    template_nome = Column(String(100), nullable=True)      # template Meta (fora da janela)
-    template_idioma = Column(String(10), default='pt_BR')
-    template_componentes = Column(JSON, default=list)       # componentes com params dinâmicos
+    # Mensagem interativa: seleciona um ModeloMensagem salvo + mapeamento de {} para campos
+    modelo_id = Column(Integer, ForeignKey('modelo_mensagem.id', ondelete='SET NULL'), nullable=True)
+    modelo_params = Column(JSON, default=list)   # ['nome_cliente', 'hora_agendamento', ...]
+    # Template Meta: seleciona um MessageTemplate aprovado + mapeamento de {{N}} para campos
+    template_id = Column(Integer, ForeignKey('message_template.id', ondelete='SET NULL'), nullable=True)
+    template_params = Column(JSON, default=dict)  # {'1': 'nome_cliente', '2': 'hora_agendamento'}
     ativo = Column(Boolean, default=True)
     atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

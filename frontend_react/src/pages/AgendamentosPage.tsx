@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { agendamentosApi, agendaLembretesApi } from '../services/api';
+import api, { agendamentosApi, agendaLembretesApi } from '../services/api';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,12 +25,32 @@ interface Agendamento {
 }
 
 interface LembreteConfig {
-  mensagem_interativa?: any;
-  mensagem_interativa_nome?: string;
-  template_nome?: string;
-  template_idioma?: string;
-  template_componentes?: any[];
+  modelo_id?: number | null;
+  modelo_params?: string[];
+  template_id?: number | null;
+  template_params?: Record<string, string>;
   ativo?: boolean;
+}
+
+interface ModeloOpcao {
+  id: number;
+  nome: string;
+  tipo: string;
+  mensagem: string;
+  num_variaveis: number;
+}
+
+interface TemplateOpcao {
+  id: number;
+  name: string;
+  language: string;
+  body_text: string;
+  params: string[];
+}
+
+interface CampoOpcao {
+  value: string;
+  label: string;
 }
 
 // ─── Constantes de estilo ──────────────────────────────────────────────────────
@@ -84,8 +104,14 @@ export default function AgendamentosPage() {
 
   // Configuração de lembrete
   const [abaPainel, setAbaPainel] = useState<'lista' | 'lembrete'>('lista');
-  const [lembreteConfig, setLembreteConfig] = useState<LembreteConfig>({});
+  const [lembreteConfig, setLembreteConfig] = useState<LembreteConfig>({ modelo_params: [], template_params: {} });
   const [salvandoConfig, setSalvandoConfig] = useState(false);
+
+  // Opções disponíveis para seleção
+  const [modelos, setModelos] = useState<ModeloOpcao[]>([]);
+  const [templates, setTemplates] = useState<TemplateOpcao[]>([]);
+  const [camposDisp, setCamposDisp] = useState<CampoOpcao[]>([]);
+  const [carregandoOpcoes, setCarregandoOpcoes] = useState(false);
 
   // ── Navegação de mês ───────────────────────────────────────────────────────
   const navMes = (delta: number) => {
@@ -106,16 +132,30 @@ export default function AgendamentosPage() {
 
   useEffect(() => { carregar(); }, [carregar]);
 
-  const carregarConfig = async () => {
+  const carregarConfigLembrete = useCallback(async () => {
+    setCarregandoOpcoes(true);
     try {
-      const data = await agendaLembretesApi.getConfig();
-      setLembreteConfig(data);
+      const [cfg, opcoes] = await Promise.all([
+        agendaLembretesApi.getConfig(),
+        api.get('/agenda/lembrete-opcoes').then(r => r.data),
+      ]);
+      setLembreteConfig({
+        modelo_id: cfg.modelo_id ?? null,
+        modelo_params: cfg.modelo_params ?? [],
+        template_id: cfg.template_id ?? null,
+        template_params: cfg.template_params ?? {},
+        ativo: cfg.ativo ?? true,
+      });
+      setModelos(opcoes.modelos || []);
+      setTemplates(opcoes.templates || []);
+      setCamposDisp(opcoes.campos_disponiveis || []);
     } catch { /* */ }
-  };
+    setCarregandoOpcoes(false);
+  }, []);
 
   useEffect(() => {
-    if (abaPainel === 'lembrete') carregarConfig();
-  }, [abaPainel]);
+    if (abaPainel === 'lembrete') carregarConfigLembrete();
+  }, [abaPainel, carregarConfigLembrete]);
 
   // ── KPIs ───────────────────────────────────────────────────────────────────
   const kpis = {
@@ -177,6 +217,31 @@ export default function AgendamentosPage() {
     } catch { setFeedbackMsg('Erro ao salvar'); }
     setSalvandoConfig(false);
     setTimeout(() => setFeedbackMsg(''), 3000);
+  };
+
+  // ── Helpers de preview ────────────────────────────────────────────────────
+  const modeloSelecionado = modelos.find(m => m.id === lembreteConfig.modelo_id) ?? null;
+  const templateSelecionado = templates.find(t => t.id === lembreteConfig.template_id) ?? null;
+
+  const previewModelo = () => {
+    if (!modeloSelecionado) return '';
+    let txt = modeloSelecionado.mensagem;
+    (lembreteConfig.modelo_params || []).forEach(campo => {
+      const lbl = camposDisp.find(c => c.value === campo)?.label || campo;
+      txt = txt.replace('{}', `[${lbl}]`);
+    });
+    return txt;
+  };
+
+  const previewTemplate = () => {
+    if (!templateSelecionado) return '';
+    let txt = templateSelecionado.body_text;
+    templateSelecionado.params.forEach(n => {
+      const campo = (lembreteConfig.template_params || {})[n] || '';
+      const lbl = camposDisp.find(c => c.value === campo)?.label || `campo ${n}`;
+      txt = txt.replace(`{{${n}}}`, `[${lbl}]`);
+    });
+    return txt;
   };
 
   // ── Filtros ──────────────────────────────────────────────────────────────
@@ -387,90 +452,160 @@ export default function AgendamentosPage() {
 
         {/* ── Aba: Configurar Lembrete ── */}
         {abaPainel === 'lembrete' && (
-          <div style={{ ...GLASS, padding: 28 }}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 700 }}>⏰ Configurar Lembrete Automático</h2>
-            <p style={{ margin: '0 0 24px', color: C.textSec, fontSize: 13 }}>
-              Enviado automaticamente 1 dia antes do agendamento às 10h.
-              Se o cliente estiver na janela de 24h, usa mensagem interativa; caso contrário, usa template aprovado da Meta.
-            </p>
+          <div>
+            {carregandoOpcoes ? (
+              <div style={{ ...GLASS, padding: 48, textAlign: 'center', color: C.textSec }}>Carregando opções...</div>
+            ) : (
+              <>
+                {/* ── Mensagem Interativa (janela 24h) ── */}
+                <div style={{ ...GLASS, padding: 24, marginBottom: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.cyan, marginBottom: 4 }}>
+                    📱 Mensagem Interativa <span style={{ fontSize: 11, fontWeight: 400, color: C.textSec }}>(usada quando o cliente está na janela de 24h)</span>
+                  </div>
+                  <p style={{ margin: '0 0 16px', fontSize: 12, color: C.textSec }}>
+                    Crie sua mensagem em <strong>Envios em Massa</strong>, salve como modelo e selecione aqui. Use <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>{'{}'}</code> onde quiser inserir dados do agendamento.
+                  </p>
 
-            {/* Mensagem Interativa (janela 24h) */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.cyan, marginBottom: 8 }}>
-                📱 Mensagem Interativa (janela 24h aberta)
-              </div>
-              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>
-                Payload JSON da mensagem interativa (type, body, action...). Deixe vazio para não usar.
-              </div>
-              <input
-                placeholder="Nome da mensagem (ex: Lembrete de consulta)"
-                value={lembreteConfig.mensagem_interativa_nome || ''}
-                onChange={e => setLembreteConfig(p => ({ ...p, mensagem_interativa_nome: e.target.value }))}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text, fontSize: 13, marginBottom: 8, boxSizing: 'border-box' }}
-              />
-              <textarea
-                rows={5}
-                placeholder={'{\n  "type": "text",\n  "text": {"body": "Olá {nome_cliente}, lembrando seu agendamento amanhã às {hora_agendamento}!"}\n}'}
-                value={lembreteConfig.mensagem_interativa ? JSON.stringify(lembreteConfig.mensagem_interativa, null, 2) : ''}
-                onChange={e => {
-                  try { setLembreteConfig(p => ({ ...p, mensagem_interativa: JSON.parse(e.target.value) })); }
-                  catch { /* JSON inválido ainda sendo editado */ }
-                }}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text, fontSize: 12, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
-              />
-            </div>
+                  {/* Seletor de modelo */}
+                  <label style={{ fontSize: 11, color: C.textSec, display: 'block', marginBottom: 6 }}>Selecionar modelo salvo</label>
+                  <select
+                    value={lembreteConfig.modelo_id ?? ''}
+                    onChange={e => {
+                      const id = e.target.value ? Number(e.target.value) : null;
+                      const mdl = modelos.find(m => m.id === id);
+                      const numVars = mdl ? mdl.num_variaveis : 0;
+                      setLembreteConfig(p => ({ ...p, modelo_id: id, modelo_params: Array(numVars).fill('') }));
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: '#1a1a2e', color: C.text, fontSize: 13, marginBottom: 14, boxSizing: 'border-box' }}
+                  >
+                    <option value="">— Selecione um modelo —</option>
+                    {modelos.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.nome} ({m.tipo}{m.num_variaveis > 0 ? ` · ${m.num_variaveis} variável(is)` : ''})
+                      </option>
+                    ))}
+                  </select>
 
-            {/* Template Meta (fora da janela) */}
-            <div style={{ marginBottom: 28 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.amber, marginBottom: 8 }}>
-                📨 Template Aprovado (fora da janela 24h)
-              </div>
-              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 12 }}>
-                Parâmetros disponíveis: {'{nome_cliente}'}, {'{hora_agendamento}'}, {'{data_agendamento}'}, {'{especialidade}'}, {'{valor}'}, {'{campo_custom:X}'}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 11, color: C.textSec, display: 'block', marginBottom: 4 }}>Nome do template</label>
-                  <input
-                    placeholder="ex: lembrete_agendamento"
-                    value={lembreteConfig.template_nome || ''}
-                    onChange={e => setLembreteConfig(p => ({ ...p, template_nome: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text, fontSize: 13, boxSizing: 'border-box' }}
-                  />
+                  {modelos.length === 0 && (
+                    <div style={{ fontSize: 12, color: C.amber, marginBottom: 10 }}>
+                      ⚠️ Nenhum modelo salvo. Crie um em <strong>Envios em Massa → Modelos</strong>.
+                    </div>
+                  )}
+
+                  {/* Mapeamento de variáveis */}
+                  {modeloSelecionado && modeloSelecionado.num_variaveis > 0 && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.textSec, marginBottom: 12 }}>
+                        Mapear variáveis <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>{'{}'}</code> para campos do agendamento:
+                      </div>
+                      {Array.from({ length: modeloSelecionado.num_variaveis }).map((_, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, color: C.cyan, minWidth: 80, fontFamily: 'monospace' }}>
+                            {`{}`} #{i + 1}
+                          </span>
+                          <select
+                            value={(lembreteConfig.modelo_params || [])[i] || ''}
+                            onChange={e => {
+                              const params = [...(lembreteConfig.modelo_params || [])];
+                              params[i] = e.target.value;
+                              setLembreteConfig(p => ({ ...p, modelo_params: params }));
+                            }}
+                            style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: `1px solid ${C.border}`, background: '#1a1a2e', color: C.text, fontSize: 12 }}
+                          >
+                            <option value="">— Selecione o dado —</option>
+                            {camposDisp.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Preview */}
+                  {modeloSelecionado && (
+                    <div style={{ background: 'rgba(6,182,212,0.06)', border: `1px solid ${C.cyan}33`, borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 10, color: C.cyan, fontWeight: 600, marginBottom: 4 }}>PRÉVIA DA MENSAGEM</div>
+                      <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{previewModelo()}</div>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, color: C.textSec, display: 'block', marginBottom: 4 }}>Idioma</label>
-                  <input
-                    placeholder="pt_BR"
-                    value={lembreteConfig.template_idioma || 'pt_BR'}
-                    onChange={e => setLembreteConfig(p => ({ ...p, template_idioma: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text, fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: C.textSec, display: 'block', marginBottom: 4 }}>
-                  Componentes (JSON) — parâmetros serão substituídos automaticamente
-                </label>
-                <textarea
-                  rows={6}
-                  placeholder={`[\n  {\n    "type": "body",\n    "parameters": [\n      {"type": "text", "text": "{nome_cliente}"},\n      {"type": "text", "text": "{hora_agendamento}"}\n    ]\n  }\n]`}
-                  value={lembreteConfig.template_componentes ? JSON.stringify(lembreteConfig.template_componentes, null, 2) : ''}
-                  onChange={e => {
-                    try { setLembreteConfig(p => ({ ...p, template_componentes: JSON.parse(e.target.value) })); }
-                    catch { /* ainda editando */ }
-                  }}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: 'rgba(255,255,255,0.04)', color: C.text, fontSize: 12, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
 
-            <button
-              onClick={salvarConfig}
-              disabled={salvandoConfig}
-              style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: `linear-gradient(135deg, ${C.violet}, ${C.cyan})`, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-              {salvandoConfig ? 'Salvando...' : '💾 Salvar Configuração'}
-            </button>
+                {/* ── Template Meta (fora da janela) ── */}
+                <div style={{ ...GLASS, padding: 24, marginBottom: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.amber, marginBottom: 4 }}>
+                    📨 Template Aprovado <span style={{ fontSize: 11, fontWeight: 400, color: C.textSec }}>(usado quando o cliente está fora da janela de 24h)</span>
+                  </div>
+                  <p style={{ margin: '0 0 16px', fontSize: 12, color: C.textSec }}>
+                    Crie o template em <strong>Templates</strong>, aguarde aprovação da Meta e selecione aqui. Cada <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>{'{{N}}'}</code> vira um campo de dado do agendamento.
+                  </p>
+
+                  {/* Seletor de template */}
+                  <label style={{ fontSize: 11, color: C.textSec, display: 'block', marginBottom: 6 }}>Selecionar template aprovado</label>
+                  <select
+                    value={lembreteConfig.template_id ?? ''}
+                    onChange={e => {
+                      const id = e.target.value ? Number(e.target.value) : null;
+                      setLembreteConfig(p => ({ ...p, template_id: id, template_params: {} }));
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: '#1a1a2e', color: C.text, fontSize: 13, marginBottom: 14, boxSizing: 'border-box' }}
+                  >
+                    <option value="">— Selecione um template aprovado —</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.language}{t.params.length > 0 ? ` · ${t.params.length} parâm.` : ''})
+                      </option>
+                    ))}
+                  </select>
+
+                  {templates.length === 0 && (
+                    <div style={{ fontSize: 12, color: C.amber, marginBottom: 10 }}>
+                      ⚠️ Nenhum template aprovado. Crie e aguarde aprovação em <strong>Templates</strong>.
+                    </div>
+                  )}
+
+                  {/* Mapeamento de parâmetros {{N}} */}
+                  {templateSelecionado && templateSelecionado.params.length > 0 && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.textSec, marginBottom: 12 }}>
+                        Mapear parâmetros para campos do agendamento:
+                      </div>
+                      {templateSelecionado.params.map(n => (
+                        <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, color: C.amber, minWidth: 48, fontFamily: 'monospace' }}>
+                            {`{{${n}}}`}
+                          </span>
+                          <select
+                            value={(lembreteConfig.template_params || {})[n] || ''}
+                            onChange={e => setLembreteConfig(p => ({
+                              ...p,
+                              template_params: { ...(p.template_params || {}), [n]: e.target.value }
+                            }))}
+                            style={{ flex: 1, padding: '7px 10px', borderRadius: 8, border: `1px solid ${C.border}`, background: '#1a1a2e', color: C.text, fontSize: 12 }}
+                          >
+                            <option value="">— Selecione o dado —</option>
+                            {camposDisp.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Preview */}
+                  {templateSelecionado && (
+                    <div style={{ background: 'rgba(245,158,11,0.06)', border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 10, color: C.amber, fontWeight: 600, marginBottom: 4 }}>PRÉVIA DO TEMPLATE</div>
+                      <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{previewTemplate()}</div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={salvarConfig}
+                  disabled={salvandoConfig}
+                  style={{ padding: '11px 32px', borderRadius: 10, border: 'none', background: `linear-gradient(135deg, ${C.violet}, ${C.cyan})`, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                  {salvandoConfig ? 'Salvando...' : '💾 Salvar Configuração'}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
