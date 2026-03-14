@@ -62,5 +62,10 @@ Thumbs.db
 .DS_Store
 
 # Backups
-*.sql
 backup_*
+# SQL backups (mas não migrations)
+*.backup.sql
+
+# Permite arquivos de migration SQL
+!backend_fastapi/migrate_*.sql
+!backend_fastapi/migration_*.sql
