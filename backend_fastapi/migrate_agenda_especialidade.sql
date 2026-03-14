@@ -38,3 +38,7 @@ CREATE TABLE IF NOT EXISTS agenda_lembrete_config (
   atualizado_em TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lembrete_config_empresa ON agenda_lembrete_config(empresa_id);
+
+-- 4. Coluna lembrete_enviado no agendamento
+ALTER TABLE agenda_agendamento
+  ADD COLUMN IF NOT EXISTS lembrete_enviado BOOLEAN DEFAULT FALSE;
