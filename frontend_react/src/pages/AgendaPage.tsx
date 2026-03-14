@@ -354,6 +354,11 @@ const AgendaPage: React.FC = () => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
+            onClick={() => navigate('/empresa/agendamentos')}
+            title="Acompanhar agendamentos"
+            style={{ background: dark ? 'rgba(6,182,212,0.15)' : '#f3f4f6', border: `1px solid ${dark ? 'rgba(6,182,212,0.4)' : '#e5e7eb'}`, color: dark ? C.cyan : '#6b7280', borderRadius: 10, padding: '0 14px', height: 38, cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, transition: 'all .15s', whiteSpace: 'nowrap' }}
+          >📋 Agendamentos</button>
+          <button
             onClick={() => { setModalConfig(true); setFormDia(null); setFormEdit(null); }}
             title="Configurar horários de funcionamento"
             style={{ background: dark ? 'rgba(139,92,246,0.15)' : '#f3f4f6', border: `1px solid ${dark ? 'rgba(139,92,246,0.4)' : '#e5e7eb'}`, color: dark ? C.violet : '#6b7280', borderRadius: 10, width: 38, height: 38, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}
