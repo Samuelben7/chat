@@ -393,6 +393,98 @@ async def conceder_dias_gratuitos(
     }
 
 
+@router.get("/empresas/{empresa_id}/uso")
+async def uso_empresa_admin(
+    empresa_id: int,
+    user: CurrentUser = None,
+    db: Session = Depends(get_db),
+):
+    """Admin: retorna uso mensal de qualquer empresa."""
+    _require_admin(user)
+    agora = datetime.utcnow()
+    inicio_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    from app.models.models import Atendimento, Atendente, Plano
+
+    conversas_mes = db.query(func.count(Atendimento.id)).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.iniciado_em >= inicio_mes,
+    ).scalar() or 0
+
+    ia_conversas = db.query(func.count(Atendimento.id)).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.iniciado_em >= inicio_mes,
+        Atendimento.atendido_por_ia == True,
+    ).scalar() or 0
+
+    atendentes_ativos = db.query(func.count(Atendente.id)).filter(
+        Atendente.empresa_id == empresa_id,
+        Atendente.pode_atender == True,
+    ).scalar() or 0
+
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+        Assinatura.status.in_(["active", "overdue", "trial"]),
+    ).order_by(Assinatura.data_inicio.desc()).first()
+
+    limites = {}
+    if assinatura:
+        if assinatura.is_personalizado and assinatura.limites_personalizados:
+            limites = assinatura.limites_personalizados
+        elif assinatura.plano_id:
+            plano = db.query(Plano).filter(Plano.id == assinatura.plano_id).first()
+            if plano and plano.limites:
+                limites = plano.limites
+
+    lim_conv = limites.get("conversas_mes", limites.get("mensagens_mes", 0))
+    lim_ia = limites.get("ia_conversas", 0)
+    lim_atd = limites.get("max_atendentes", limites.get("atendentes", 0))
+
+    def pct(usado, limite):
+        if not limite: return None
+        return round((usado / limite) * 100, 1)
+
+    return {
+        "conversas_mes": {"usado": conversas_mes, "limite": lim_conv or None, "percentual": pct(conversas_mes, lim_conv)},
+        "ia_conversas": {"usado": ia_conversas, "limite": lim_ia or None, "percentual": pct(ia_conversas, lim_ia)},
+        "atendentes": {"ativo": atendentes_ativos, "limite": lim_atd or None},
+    }
+
+
+@router.delete("/empresas/{empresa_id}")
+async def deletar_empresa(
+    empresa_id: int,
+    user: CurrentUser = None,
+    db: Session = Depends(get_db),
+):
+    """Admin: deleta uma empresa e todos os dados relacionados (irreversível)."""
+    _require_admin(user)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    # Deletar em cascata (order matters for FK constraints)
+    from app.models.models import (
+        EmpresaAuth, Atendente, AtendenteAuth, Atendimento, Cliente,
+        BotFluxo, MessageTemplate, Assinatura as AssinaturaModel, Pagamento
+    )
+    # Atendentes e suas auths
+    atendentes = db.query(Atendente).filter(Atendente.empresa_id == empresa_id).all()
+    for atd in atendentes:
+        db.query(AtendenteAuth).filter(AtendenteAuth.atendente_id == atd.id).delete()
+    db.query(Atendente).filter(Atendente.empresa_id == empresa_id).delete()
+    # Dados da empresa
+    db.query(AssinaturaModel).filter(AssinaturaModel.empresa_id == empresa_id).delete()
+    db.query(Pagamento).filter(Pagamento.empresa_id == empresa_id).delete()
+    db.query(EmpresaAuth).filter(EmpresaAuth.empresa_id == empresa_id).delete()
+    db.delete(empresa)
+    db.commit()
+
+    logger.info(f"Admin: empresa {empresa_id} deletada permanentemente")
+    return {"sucesso": True, "empresa_id": empresa_id}
+
+
 # ==================== FINANCEIRO ====================
 
 @router.get("/empresas/financeiro")

@@ -15,7 +15,8 @@ import io
 from app.database.database import get_db
 from app.models.models import (
     Atendimento, Atendente, Cliente, MensagemLog,
-    CrmTag, CrmClienteTag, MessageTemplate, ListaContatos
+    CrmTag, CrmClienteTag, MessageTemplate, ListaContatos,
+    Empresa, Assinatura, Plano
 )
 from app.core.dependencies import CurrentEmpresa, EmpresaIdFromToken
 
@@ -636,3 +637,105 @@ async def exportar_leads_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=leads.csv"},
     )
+
+
+# ========== USO MENSAL E LIMITES ==========
+
+@router.get("/empresa/uso-mensal")
+async def uso_mensal(
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Retorna uso atual do mês comparado com os limites do plano."""
+    agora = datetime.utcnow()
+    inicio_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Contar conversas do mês
+    conversas_mes = db.query(func.count(Atendimento.id)).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.iniciado_em >= inicio_mes,
+    ).scalar() or 0
+
+    # Contar conversas com IA
+    ia_conversas = db.query(func.count(Atendimento.id)).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.iniciado_em >= inicio_mes,
+        Atendimento.atendido_por_ia == True,
+    ).scalar() or 0
+
+    # Contar atendentes ativos
+    atendentes_ativos = db.query(func.count(Atendente.id)).filter(
+        Atendente.empresa_id == empresa_id,
+        Atendente.pode_atender == True,
+    ).scalar() or 0
+
+    # Buscar limites do plano
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+        Assinatura.status.in_(["active", "overdue", "trial"]),
+    ).order_by(Assinatura.data_inicio.desc()).first()
+
+    limites = {}
+    if assinatura:
+        if assinatura.is_personalizado and assinatura.limites_personalizados:
+            limites = assinatura.limites_personalizados
+        elif assinatura.plano_id:
+            plano = db.query(Plano).filter(Plano.id == assinatura.plano_id).first()
+            if plano and plano.limites:
+                limites = plano.limites
+
+    lim_conv = limites.get("conversas_mes", limites.get("mensagens_mes", 0))
+    lim_ia = limites.get("ia_conversas", 0)
+    lim_atd = limites.get("max_atendentes", limites.get("atendentes", 0))
+
+    def pct(usado, limite):
+        if not limite:
+            return None
+        return round((usado / limite) * 100, 1)
+
+    return {
+        "conversas_mes": {
+            "usado": conversas_mes,
+            "limite": lim_conv or None,
+            "percentual": pct(conversas_mes, lim_conv),
+        },
+        "ia_conversas": {
+            "usado": ia_conversas,
+            "limite": lim_ia or None,
+            "percentual": pct(ia_conversas, lim_ia),
+        },
+        "atendentes": {
+            "ativo": atendentes_ativos,
+            "limite": lim_atd or None,
+        },
+    }
+
+
+@router.get("/empresa/status-acesso")
+async def status_acesso(
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """Verifica se empresa tem acesso liberado ou deve ser redirecionada/bloqueada."""
+    agora = datetime.utcnow()
+
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+    ).order_by(Assinatura.data_inicio.desc()).first()
+
+    if not assinatura:
+        return {"pode_acessar": True, "motivo": None, "dias_atraso": 0, "trial_expirado": False}
+
+    # Trial expirado
+    if assinatura.trial_expira_em and assinatura.trial_expira_em < agora and assinatura.status not in ("active",):
+        return {"pode_acessar": False, "motivo": "trial_expirado", "dias_atraso": 0, "trial_expirado": True}
+
+    # Assinatura vencida
+    if assinatura.data_proximo_vencimento and assinatura.status in ("overdue", "blocked"):
+        dias_atraso = (agora - assinatura.data_proximo_vencimento).days
+        if dias_atraso >= 10:
+            return {"pode_acessar": False, "motivo": "bloqueado", "dias_atraso": dias_atraso, "trial_expirado": False}
+        if dias_atraso >= 5:
+            return {"pode_acessar": True, "motivo": "pagamento_pendente", "dias_atraso": dias_atraso, "trial_expirado": False}
+
+    return {"pode_acessar": True, "motivo": None, "dias_atraso": 0, "trial_expirado": False}

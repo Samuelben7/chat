@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import api, { chatApi, whatsappProfileApi, WhatsAppProfile, atendentesApi } from '../services/api';
+import api, { chatApi, whatsappProfileApi, WhatsAppProfile, atendentesApi, usoApi } from '../services/api';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
@@ -180,6 +180,8 @@ export const DashboardEmpresa: React.FC = () => {
   const [configSaving, setConfigSaving] = useState(false);
   const [satisfacao, setSatisfacao] = useState<MetricasSatisfacao | null>(null);
   const [graficoData, setGraficoData] = useState<GraficoItem[]>([]);
+  const [usoMensal, setUsoMensal] = useState<any>(null);
+  const [statusAcesso, setStatusAcesso] = useState<any>(null);
 
   // Inject CSS
   useEffect(() => {
@@ -192,7 +194,7 @@ export const DashboardEmpresa: React.FC = () => {
     }
   }, []);
 
-  // Checar status protocolo e cascata
+  // Checar status protocolo, cascata, uso mensal e acesso
   useEffect(() => {
     api.get('/chat/protocolo/status')
       .then(res => setProtocoloAtivo(res.data.protocolo_ativo))
@@ -200,7 +202,14 @@ export const DashboardEmpresa: React.FC = () => {
     api.get('/chat/cascata/status')
       .then(res => setCascataAtivo(res.data.cascata_ativo))
       .catch(() => {});
-  }, []);
+    usoApi.usoMensal().then(setUsoMensal).catch(() => {});
+    usoApi.statusAcesso().then(sa => {
+      setStatusAcesso(sa);
+      if (sa && !sa.pode_acessar) {
+        navigate('/empresa/pagamento');
+      }
+    }).catch(() => {});
+  }, [navigate]);
 
   // Carregar config encerramento
   useEffect(() => {
@@ -566,6 +575,84 @@ export const DashboardEmpresa: React.FC = () => {
             </div>
           )}
 
+          {/* ─── Banner de status de acesso / pagamento pendente ──────── */}
+          {statusAcesso && statusAcesso.motivo === 'pagamento_pendente' && (
+            <div style={{
+              background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)',
+              borderRadius: 12, padding: '12px 20px', marginBottom: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                ⚠️ Pagamento atrasado há {statusAcesso.dias_atraso} dias. Regularize para evitar bloqueio.
+              </span>
+              <button
+                onClick={() => navigate('/empresa/pagamento')}
+                style={{ padding: '6px 16px', background: '#f59e0b', border: 'none', borderRadius: 8, color: '#000', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+              >
+                Pagar agora
+              </button>
+            </div>
+          )}
+
+          {/* ─── Banner de uso mensal ──────────────────────────────────── */}
+          {usoMensal && (() => {
+            const conv = usoMensal.conversas_mes;
+            const ia = usoMensal.ia_conversas;
+            const atd = usoMensal.atendentes;
+            const alertaConv = conv.percentual !== null && conv.percentual >= 80;
+            const alertaIa = ia.percentual !== null && ia.percentual >= 80;
+            if (!alertaConv && !alertaIa) return null;
+            return (
+              <div style={{
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: 12, padding: '12px 20px', marginBottom: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+              }}>
+                <div style={{ color: '#f87171', fontWeight: 600, fontSize: 13 }}>
+                  🚨 Limite próximo do teto:
+                  {alertaConv && <span style={{ marginLeft: 12 }}>Conversas {conv.usado}/{conv.limite} ({conv.percentual}%)</span>}
+                  {alertaIa && <span style={{ marginLeft: 12 }}>IA {ia.usado}/{ia.limite} ({ia.percentual}%)</span>}
+                </div>
+                <button
+                  onClick={() => navigate('/empresa/pagamento')}
+                  style={{ padding: '6px 16px', background: '#ef4444', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
+                >
+                  Ver plano
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* ─── Uso mensal compacto ──────────────────────────────────── */}
+          {usoMensal && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Conversas/mês', usado: usoMensal.conversas_mes.usado, limite: usoMensal.conversas_mes.limite, pct: usoMensal.conversas_mes.percentual },
+                { label: 'IA/mês', usado: usoMensal.ia_conversas.usado, limite: usoMensal.ia_conversas.limite, pct: usoMensal.ia_conversas.percentual },
+                { label: 'Atendentes', usado: usoMensal.atendentes.ativo, limite: usoMensal.atendentes.limite, pct: null },
+              ].map(item => (
+                <div key={item.label} style={{
+                  background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
+                  borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 140,
+                }}>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4 }}>{item.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: item.pct && item.pct >= 80 ? '#f87171' : '#e2e8f0' }}>
+                    {item.usado}{item.limite ? <span style={{ fontSize: 12, color: '#64748b', fontWeight: 400 }}>/{item.limite}</span> : ''}
+                  </div>
+                  {item.pct !== null && item.limite && (
+                    <div style={{ marginTop: 6, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2 }}>
+                      <div style={{
+                        height: 4, borderRadius: 2,
+                        width: `${Math.min(item.pct, 100)}%`,
+                        background: item.pct >= 90 ? '#ef4444' : item.pct >= 80 ? '#f59e0b' : '#22c55e',
+                      }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ─── KPIs Row 1: Atendimento ───────────────────────────────── */}
           {metricas && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 16 }}>
@@ -752,7 +839,7 @@ export const DashboardEmpresa: React.FC = () => {
                     <button
                       onClick={async () => {
                         try {
-                          const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+                          const token = localStorage.getItem('@WhatsApp:token') || '';
                           const apiBase = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
                           const res = await fetch(`${apiBase}/empresa/exportar-leads-csv`, {
                             headers: { Authorization: `Bearer ${token}` },

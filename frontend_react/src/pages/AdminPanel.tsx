@@ -356,6 +356,49 @@ const PlanoModal: React.FC<{
   );
 };
 
+// ==================== CONFIRM DELETE COMPONENT ====================
+
+const ConfirmDeleteInput: React.FC<{
+  nomeEsperado: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}> = ({ nomeEsperado, onConfirm, onCancel, loading }) => {
+  const [typed, setTyped] = React.useState('');
+  const match = typed.trim() === nomeEsperado.trim();
+  return (
+    <div>
+      <input
+        value={typed}
+        onChange={e => setTyped(e.target.value)}
+        placeholder={`Digite: ${nomeEsperado}`}
+        style={{
+          width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
+          border: `1px solid ${match ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.15)'}`,
+          background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 14, marginBottom: 14,
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button onClick={onCancel} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
+          Cancelar
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={!match || loading}
+          style={{
+            padding: '9px 20px', borderRadius: 8, border: 'none',
+            background: match ? '#ef4444' : '#333', color: '#fff',
+            cursor: match && !loading ? 'pointer' : 'not-allowed', fontWeight: 700,
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          {loading ? 'Deletando...' : 'Confirmar Delete'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ==================== MAIN COMPONENT ====================
 
 const AdminPanel: React.FC = () => {
@@ -375,6 +418,9 @@ const AdminPanel: React.FC = () => {
   const [diasGratuitosModal, setDiasGratuitosModal] = useState<EmpresaAdmin | null>(null);
   const [diasGratuitosValor, setDiasGratuitosValor] = useState('30');
   const [diasGratuitosLoading, setDiasGratuitosLoading] = useState(false);
+  const [usoEmpresas, setUsoEmpresas] = useState<Record<number, any>>({});
+  const [confirmDeleteEmpresa, setConfirmDeleteEmpresa] = useState<EmpresaAdmin | null>(null);
+  const [deletingEmpresa, setDeletingEmpresa] = useState(false);
 
   // --- Devs ---
   const [devs, setDevs] = useState<DevAdmin[]>([]);
@@ -451,13 +497,16 @@ const AdminPanel: React.FC = () => {
   const toggleStatus = async (emp: EmpresaAdmin) => {
     const isExpanded = expanded[emp.id];
     setExpanded(prev => ({ ...prev, [emp.id]: !isExpanded }));
-    if (!isExpanded && !profiles[emp.id] && emp.whatsapp_conectado) {
-      setProfiles(prev => ({ ...prev, [emp.id]: 'loading' }));
-      try {
-        const data = await whatsappProfileApi.getEmpresaProfile(emp.id);
-        setProfiles(prev => ({ ...prev, [emp.id]: data }));
-      } catch {
-        setProfiles(prev => ({ ...prev, [emp.id]: 'error' }));
+    if (!isExpanded) {
+      loadUsoEmpresa(emp.id);
+      if (!profiles[emp.id] && emp.whatsapp_conectado) {
+        setProfiles(prev => ({ ...prev, [emp.id]: 'loading' }));
+        try {
+          const data = await whatsappProfileApi.getEmpresaProfile(emp.id);
+          setProfiles(prev => ({ ...prev, [emp.id]: data }));
+        } catch {
+          setProfiles(prev => ({ ...prev, [emp.id]: 'error' }));
+        }
       }
     }
   };
@@ -512,6 +561,24 @@ const AdminPanel: React.FC = () => {
     if (!window.confirm('Desativar este plano?')) return;
     await adminApi.deletarPlano(id);
     loadPlanos();
+  };
+
+  const loadUsoEmpresa = async (empresaId: number) => {
+    try {
+      const uso = await adminApi.usoEmpresa(empresaId);
+      setUsoEmpresas(prev => ({ ...prev, [empresaId]: uso }));
+    } catch { /* */ }
+  };
+
+  const handleDeleteEmpresa = async () => {
+    if (!confirmDeleteEmpresa) return;
+    setDeletingEmpresa(true);
+    try {
+      await adminApi.deletarEmpresa(confirmDeleteEmpresa.id);
+      setConfirmDeleteEmpresa(null);
+      loadEmpresas();
+    } catch { /* */ }
+    setDeletingEmpresa(false);
   };
 
   const handleConcederDias = async () => {
@@ -707,9 +774,8 @@ const AdminPanel: React.FC = () => {
                               <button
                                 className="admin-btn-status"
                                 onClick={() => toggleStatus(emp)}
-                                disabled={!emp.whatsapp_conectado}
                               >
-                                {expanded[emp.id] ? '▲' : '▼ Status'}
+                                {expanded[emp.id] ? '▲' : '▼ Ver'}
                               </button>
                               <button
                                 onClick={() => setPlanoPersonalizadoModal(emp)}
@@ -731,6 +797,16 @@ const AdminPanel: React.FC = () => {
                               >
                                 🎁 Dias
                               </button>
+                              <button
+                                onClick={() => setConfirmDeleteEmpresa(emp)}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 6, border: 'none',
+                                  background: 'rgba(239,68,68,0.15)', color: '#ef4444',
+                                  cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                                }}
+                              >
+                                🗑 Del
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -739,6 +815,38 @@ const AdminPanel: React.FC = () => {
                           <tr className="admin-row-expanded">
                             <td colSpan={7}>
                               <div className="admin-profile-panel">
+                                {/* Uso mensal */}
+                                {usoEmpresas[emp.id] && (() => {
+                                  const u = usoEmpresas[emp.id];
+                                  return (
+                                    <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                                      {[
+                                        { label: 'Conversas/mês', usado: u.conversas_mes.usado, limite: u.conversas_mes.limite, pct: u.conversas_mes.percentual },
+                                        { label: 'IA/mês', usado: u.ia_conversas.usado, limite: u.ia_conversas.limite, pct: u.ia_conversas.percentual },
+                                        { label: 'Atendentes', usado: u.atendentes.ativo, limite: u.atendentes.limite, pct: null },
+                                      ].map(item => (
+                                        <div key={item.label} style={{
+                                          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                                          borderRadius: 8, padding: '8px 14px', minWidth: 120,
+                                        }}>
+                                          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>{item.label}</div>
+                                          <div style={{ fontSize: 18, fontWeight: 800, color: item.pct && item.pct >= 80 ? '#f87171' : '#e2e8f0' }}>
+                                            {item.usado}{item.limite ? <span style={{ fontSize: 11, color: '#64748b' }}>/{item.limite}</span> : ''}
+                                          </div>
+                                          {item.pct !== null && item.limite && (
+                                            <div style={{ marginTop: 4, height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 2 }}>
+                                              <div style={{
+                                                height: 3, borderRadius: 2,
+                                                width: `${Math.min(item.pct!, 100)}%`,
+                                                background: item.pct! >= 90 ? '#ef4444' : item.pct! >= 80 ? '#f59e0b' : '#22c55e',
+                                              }} />
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                                 {profiles[emp.id] === 'loading' && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#94a3b8' }}>
                                     <div className="admin-spinner" style={{ width: 16, height: 16 }} />
@@ -1120,6 +1228,32 @@ const AdminPanel: React.FC = () => {
           onClose={() => setPlanoModal(false)}
           onSave={salvarPlano}
         />
+      )}
+
+      {/* Modal confirmar delete empresa */}
+      {confirmDeleteEmpresa && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            background: '#0f1929', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 16, padding: 28, maxWidth: 420, width: '100%',
+          }}>
+            <h2 style={{ margin: '0 0 8px', color: '#fff', fontSize: 18 }}>⚠️ Deletar Empresa</h2>
+            <p style={{ margin: '0 0 16px', color: '#94a3b8', fontSize: 14 }}>
+              Você está prestes a deletar permanentemente a empresa <strong style={{ color: '#fff' }}>{confirmDeleteEmpresa.nome}</strong> e todos os seus dados (atendentes, conversas, pagamentos). Esta ação é irreversível.
+            </p>
+            <p style={{ margin: '0 0 20px', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
+              Digite o nome da empresa para confirmar: <em>{confirmDeleteEmpresa.nome}</em>
+            </p>
+            <ConfirmDeleteInput
+              nomeEsperado={confirmDeleteEmpresa.nome}
+              onConfirm={handleDeleteEmpresa}
+              onCancel={() => setConfirmDeleteEmpresa(null)}
+              loading={deletingEmpresa}
+            />
+          </div>
+        </div>
       )}
 
       {/* Modal plano personalizado por empresa */}

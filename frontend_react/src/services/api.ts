@@ -454,6 +454,36 @@ export const adminApi = {
     const response = await api.post(`/admin/empresas/${empresaId}/dias-gratuitos`, { dias });
     return response.data;
   },
+  usoEmpresa: async (empresaId: number) => {
+    const response = await api.get(`/admin/empresas/${empresaId}/uso`);
+    return response.data;
+  },
+  deletarEmpresa: async (empresaId: number) => {
+    const response = await api.delete(`/admin/empresas/${empresaId}`);
+    return response.data;
+  },
+};
+
+// ==================== USO & ACESSO ====================
+
+export const usoApi = {
+  usoMensal: async (): Promise<{
+    conversas_mes: { usado: number; limite: number | null; percentual: number | null };
+    ia_conversas: { usado: number; limite: number | null; percentual: number | null };
+    atendentes: { ativo: number; limite: number | null };
+  }> => {
+    const response = await api.get('/empresa/uso-mensal');
+    return response.data;
+  },
+  statusAcesso: async (): Promise<{
+    pode_acessar: boolean;
+    motivo: string | null;
+    dias_atraso: number;
+    trial_expirado: boolean;
+  }> => {
+    const response = await api.get('/empresa/status-acesso');
+    return response.data;
+  },
 };
 
 // ==================== PERFIL WHATSAPP BUSINESS ====================

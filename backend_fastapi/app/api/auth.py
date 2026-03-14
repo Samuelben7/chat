@@ -296,6 +296,34 @@ async def criar_atendente(
     # Validar que é uma empresa
     empresa_id = validar_permissao_empresa(token)
 
+    # Verificar limite de atendentes do plano
+    from app.models.models import Assinatura, Plano
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+        Assinatura.status.in_(["active", "overdue", "trial"]),
+    ).order_by(Assinatura.data_inicio.desc()).first()
+    if assinatura:
+        limites = {}
+        if assinatura.is_personalizado and assinatura.limites_personalizados:
+            limites = assinatura.limites_personalizados
+        elif assinatura.plano_id:
+            plano = db.query(Plano).filter(Plano.id == assinatura.plano_id).first()
+            if plano and plano.limites:
+                limites = plano.limites
+        max_atd = limites.get("max_atendentes", limites.get("atendentes", 0))
+        if max_atd:
+            from app.models.models import Atendente as AtendenteModel
+            from sqlalchemy import func as _func
+            ativos = db.query(_func.count(AtendenteModel.id)).filter(
+                AtendenteModel.empresa_id == empresa_id,
+                AtendenteModel.pode_atender == True,
+            ).scalar() or 0
+            if ativos >= max_atd:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Limite de {max_atd} atendentes atingido. Atualize seu plano para adicionar mais.",
+                )
+
     # Verificar se email já existe
     email_existente = db.query(AtendenteAuth).filter(
         AtendenteAuth.email == dados.email

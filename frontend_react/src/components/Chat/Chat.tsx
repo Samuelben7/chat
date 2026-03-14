@@ -61,6 +61,9 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
 
   // Capturar teclas em qualquer lugar do chat e redirecionar para o input
   const handleChatKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const tag = (e.target as HTMLElement).tagName;
+    // Ignorar se o foco já está em input/textarea/select (ex: modal aberto)
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     // Ignorar se já está no textarea ou se é atalho/modificador
     if (
       e.target === inputRef.current ||
