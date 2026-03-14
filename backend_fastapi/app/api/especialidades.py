@@ -49,7 +49,7 @@ class EspecialidadeResponse(BaseModel):
 
 @router.get("", response_model=List[EspecialidadeResponse])
 async def listar_especialidades(
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """Lista todas as especialidades da empresa."""
@@ -61,7 +61,7 @@ async def listar_especialidades(
 @router.post("", response_model=EspecialidadeResponse, status_code=201)
 async def criar_especialidade(
     dados: EspecialidadeCreate,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     esp = Especialidade(
@@ -81,7 +81,7 @@ async def criar_especialidade(
 async def atualizar_especialidade(
     esp_id: int,
     dados: EspecialidadeUpdate,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     esp = db.query(Especialidade).filter(
@@ -100,7 +100,7 @@ async def atualizar_especialidade(
 @router.delete("/{esp_id}")
 async def deletar_especialidade(
     esp_id: int,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     esp = db.query(Especialidade).filter(

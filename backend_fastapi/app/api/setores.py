@@ -12,7 +12,7 @@ from datetime import datetime
 
 from app.database.database import get_db
 from app.models.models import Setor, AtendenteSetor, Atendente
-from app.core.dependencies import EmpresaIdFromToken, CurrentUser
+from app.core.dependencies import EmpresaIdFromToken
 
 router = APIRouter(prefix="/setores", tags=["setores"])
 
@@ -78,7 +78,7 @@ def _setor_to_response(setor: Setor) -> SetorResponse:
 
 @router.get("/para-transferencia", response_model=List[SetorResponse])
 async def setores_para_transferencia(
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """
@@ -94,7 +94,7 @@ async def setores_para_transferencia(
 
 @router.get("", response_model=List[SetorResponse])
 async def listar_setores(
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """Lista todos os setores da empresa com seus atendentes."""
@@ -107,7 +107,7 @@ async def listar_setores(
 @router.post("", response_model=SetorResponse, status_code=201)
 async def criar_setor(
     dados: SetorCreate,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """Cria novo setor. Apenas empresa pode criar."""
@@ -127,7 +127,7 @@ async def criar_setor(
 async def atualizar_setor(
     setor_id: int,
     dados: SetorUpdate,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     setor = db.query(Setor).filter(Setor.id == setor_id, Setor.empresa_id == empresa_id).first()
@@ -143,7 +143,7 @@ async def atualizar_setor(
 @router.delete("/{setor_id}")
 async def deletar_setor(
     setor_id: int,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     setor = db.query(Setor).filter(Setor.id == setor_id, Setor.empresa_id == empresa_id).first()
@@ -158,7 +158,7 @@ async def deletar_setor(
 async def adicionar_atendente_setor(
     setor_id: int,
     atendente_id: int,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """Adiciona atendente a um setor."""
@@ -189,7 +189,7 @@ async def adicionar_atendente_setor(
 async def remover_atendente_setor(
     setor_id: int,
     atendente_id: int,
-    empresa_id: int = Depends(EmpresaIdFromToken),
+    empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
 ):
     """Remove atendente de um setor."""
