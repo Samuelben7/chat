@@ -467,7 +467,9 @@ const TemplateManager: React.FC = () => {
       }
 
       // BODY
-      comps.push({ type: 'BODY', text: formBody });
+      const bodyVars = [...new Set((formBody.match(/\{\{(\d+)\}\}/g) || []).map(v => v.replace(/\{\{|\}\}/g, '')))].sort((a, b) => +a - +b);
+      const bodyExample = bodyVars.length > 0 ? { body_text: [bodyVars.map(n => paramExamples[n] || `exemplo${n}`)] } : undefined;
+      comps.push({ type: 'BODY', text: formBody, ...(bodyExample ? { example: bodyExample } : {}) });
 
       // FOOTER
       if (formFooter) comps.push({ type: 'FOOTER', text: formFooter });
@@ -896,14 +898,41 @@ const TemplateManager: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                    <textarea 
-                      value={formBody} 
-                      onChange={e => setFormBody(e.target.value.slice(0, MAX_BODY))} 
-                      rows={8} 
-                      className="w-full p-8 rounded-[2.5rem] outline-none border-2 transition-all leading-relaxed text-sm shadow-inner focus:ring-4" 
-                      style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder, ringColor: `${colors.primary}11` }} 
-                      placeholder={templateType === 'carousel' ? "O texto que aparece ANTES do carrossel começar..." : "Digite o conteúdo principal da sua mensagem aqui..."} 
+                    <textarea
+                      value={formBody}
+                      onChange={e => setFormBody(e.target.value.slice(0, MAX_BODY))}
+                      rows={8}
+                      className="w-full p-8 rounded-[2.5rem] outline-none border-2 transition-all leading-relaxed text-sm shadow-inner focus:ring-4"
+                      style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder, ringColor: `${colors.primary}11` }}
+                      placeholder={templateType === 'carousel' ? "O texto que aparece ANTES do carrossel começar..." : "Digite o conteúdo principal da sua mensagem aqui..."}
                     />
+                    {/* Exemplos de variáveis — obrigatório pela Meta para aprovação */}
+                    {(() => {
+                      const vars = [...new Set((formBody.match(/\{\{(\d+)\}\}/g) || []).map(v => v.replace(/\{\{|\}\}/g, '')))].sort((a, b) => +a - +b);
+                      if (vars.length === 0) return null;
+                      return (
+                        <div className="mt-4 p-5 rounded-2xl border space-y-3" style={{ background: `${colors.primary}08`, borderColor: `${colors.primary}33` }}>
+                          <p className="text-[9px] font-black uppercase tracking-widest opacity-60" style={{ color: colors.primary }}>
+                            Exemplos de preenchimento (obrigatório pela Meta)
+                          </p>
+                          <div className="grid grid-cols-2 gap-3">
+                            {vars.map(n => (
+                              <div key={n} className="flex items-center gap-2">
+                                <span className="text-[9px] font-black opacity-50 w-8 shrink-0" style={{ color: colors.textPrimary }}>{`{{${n}}}`}</span>
+                                <input
+                                  type="text"
+                                  value={paramExamples[n] || ''}
+                                  onChange={e => setParamExamples(prev => ({ ...prev, [n]: e.target.value }))}
+                                  placeholder={`Ex: valor para {{${n}}}`}
+                                  className="flex-1 px-3 py-2 rounded-xl border outline-none text-xs"
+                                  style={{ background: colors.inputBg, color: colors.textPrimary, borderColor: colors.inputBorder }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {templateType !== 'carousel' && (
