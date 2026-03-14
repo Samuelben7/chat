@@ -70,3 +70,68 @@
     transition: all 0.2s ease-in-out;
   }
 }
+
+/* ─── Responsividade Mobile Global ─────────────────────────────────────────── */
+
+/* Dashboard empresa e admin: grids colapsam em mobile */
+@media (max-width: 768px) {
+  /* Grids de 2 ou 3 colunas viram 1 coluna */
+  [style*="grid-template-columns: 2fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr 1fr"],
+  [style*="gridTemplateColumns: '2fr 1fr'"],
+  [style*="gridTemplateColumns: '1fr 1fr 1fr'"],
+  [style*="gridTemplateColumns: 'repeat(3"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Funil de vendas com filtros de data em coluna */
+  [style*="gridTemplateColumns: 'repeat(2"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Tabelas admin: scroll horizontal */
+  .admin-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-table {
+    min-width: 600px;
+  }
+
+  /* Header admin compacto */
+  .admin-header-inner {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  /* KPIs do admin em 2 colunas */
+  .admin-kpis {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Dashboard empresa: botões em wrap */
+  .dash-page {
+    padding: 12px !important;
+  }
+}
+
+/* Chat: garantir que input nunca seja maior que necessário */
+.chat-input-container {
+  flex-shrink: 0;
+  max-height: 200px;
+}
+
+/* Viewport height fix para mobile (endereço do browser some) */
+@supports (height: 100dvh) {
+  .h-screen-dynamic {
+    height: 100dvh;
+  }
+}
+
+/* Input date picker estilo dark */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}

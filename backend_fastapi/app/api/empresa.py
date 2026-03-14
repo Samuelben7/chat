@@ -598,44 +598,76 @@ async def obter_metricas_satisfacao(
 async def exportar_leads_csv(
     empresa_id: EmpresaIdFromToken,
     db: Session = Depends(get_db),
+    data_inicio: Optional[str] = None,  # YYYY-MM-DD
+    data_fim: Optional[str] = None,     # YYYY-MM-DD
 ):
     """
-    Exporta todos os leads da empresa em CSV.
-    Campos: nome, numero, data_nascimento, etapa_funil.
+    Exporta leads da empresa em CSV com filtro opcional de período.
+    Campos: nome, numero, data_nascimento, etapa_funil, valor_negocio, data_contato.
     """
-    # Buscar clientes com seus atendimentos mais recentes
-    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa_id).all()
+    from sqlalchemy import text as sa_text
+
+    # Parsear datas do filtro
+    dt_inicio = None
+    dt_fim = None
+    try:
+        if data_inicio:
+            dt_inicio = datetime.strptime(data_inicio, "%Y-%m-%d")
+        if data_fim:
+            dt_fim = datetime.strptime(data_fim, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    except ValueError:
+        pass
+
+    # Query base de atendimentos finalizados
+    query = db.query(Atendimento).filter(
+        Atendimento.empresa_id == empresa_id,
+        Atendimento.status == "finalizado",
+    )
+    if dt_inicio:
+        query = query.filter(Atendimento.finalizado_em >= dt_inicio)
+    if dt_fim:
+        query = query.filter(Atendimento.finalizado_em <= dt_fim)
+
+    atendimentos = query.order_by(Atendimento.finalizado_em.desc()).all()
+
+    # Indexar clientes por número
+    numeros = list({a.whatsapp_number for a in atendimentos})
+    clientes_map: dict = {}
+    if numeros:
+        clientes = db.query(Cliente).filter(
+            Cliente.empresa_id == empresa_id,
+            Cliente.whatsapp_number.in_(numeros),
+        ).all()
+        clientes_map = {c.whatsapp_number: c for c in clientes}
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["nome", "numero", "data_nascimento", "etapa_funil"])
+    writer.writerow(["nome", "numero", "data_nascimento", "etapa_funil", "valor_negocio", "data_contato"])
 
-    for cliente in clientes:
-        # Pegar etapa_funil do atendimento mais recente finalizado
-        atendimento = db.query(Atendimento).filter(
-            Atendimento.empresa_id == empresa_id,
-            Atendimento.whatsapp_number == cliente.whatsapp_number,
-            Atendimento.status == "finalizado",
-            Atendimento.etapa_funil.isnot(None),
-        ).order_by(Atendimento.finalizado_em.desc()).first()
-
-        etapa = atendimento.etapa_funil if atendimento else ""
-        nascimento = cliente.data_nascimento.strftime("%d/%m/%Y") if cliente.data_nascimento else ""
+    for atd in atendimentos:
+        cliente = clientes_map.get(atd.whatsapp_number)
+        nome = cliente.nome if cliente else ""
+        nascimento = cliente.data_nascimento.strftime("%d/%m/%Y") if (cliente and cliente.data_nascimento) else ""
+        data_contato = atd.finalizado_em.strftime("%d/%m/%Y") if atd.finalizado_em else ""
+        valor = f"{float(atd.valor_negocio):.2f}".replace(".", ",") if atd.valor_negocio else ""
 
         writer.writerow([
-            cliente.nome or "",
-            cliente.whatsapp_number or "",
+            nome,
+            atd.whatsapp_number or "",
             nascimento,
-            etapa,
+            atd.etapa_funil or "",
+            valor,
+            data_contato,
         ])
 
     csv_content = output.getvalue()
     output.close()
 
+    nome_arquivo = f"leads_{data_inicio or 'todos'}_{data_fim or ''}.csv".replace("__", "_")
     return Response(
         content=csv_content,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=leads.csv"},
+        headers={"Content-Disposition": f"attachment; filename={nome_arquivo}"},
     )
 
 

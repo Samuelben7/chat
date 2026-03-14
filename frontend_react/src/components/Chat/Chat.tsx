@@ -589,7 +589,7 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 relative pb-14 md:pb-0" onKeyDown={handleChatKeyDown} tabIndex={-1}>
+    <div className="flex-1 flex flex-col min-h-0 relative" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} onKeyDown={handleChatKeyDown} tabIndex={-1}>
       {/* Header */}
       <Header
         conversa={detalhesConversa}
@@ -603,6 +603,7 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
       {/* Banner IA — quando conversa está sendo gerenciada pela IA */}
       {detalhesConversa?.atendimento?.atendido_por_ia && (
         <div style={{
+          flexShrink: 0,
           padding: '6px 16px',
           background: 'rgba(139,92,246,0.12)',
           borderBottom: '1px solid rgba(139,92,246,0.25)',
@@ -611,15 +612,17 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
           gap: 8,
           fontSize: 12,
           color: '#8b5cf6',
+          flexWrap: 'wrap',
         }}>
-          <span>🤖</span>
-          <span>Este atendimento está sendo gerenciado pela IA. Clique em <strong>Assumir</strong> para responder manualmente.</span>
+          <span style={{ flexShrink: 0 }}>🤖</span>
+          <span>Este atendimento está sendo gerenciado pela <strong>IA</strong>. Clique em <strong>Assumir</strong> para responder manualmente.</span>
         </div>
       )}
 
       {/* Área de mensagens com fundo temático */}
       <div
         className="flex-1 overflow-y-auto p-4 custom-scrollbar"
+        style={{ minHeight: 0 }}
         onClick={focusInput}
         style={{
           backgroundColor: colors.chatBg,

@@ -182,6 +182,8 @@ export const DashboardEmpresa: React.FC = () => {
   const [graficoData, setGraficoData] = useState<GraficoItem[]>([]);
   const [usoMensal, setUsoMensal] = useState<any>(null);
   const [statusAcesso, setStatusAcesso] = useState<any>(null);
+  const [csvDataInicio, setCsvDataInicio] = useState('');
+  const [csvDataFim, setCsvDataFim] = useState('');
 
   // Inject CSS
   useEffect(() => {
@@ -835,20 +837,44 @@ export const DashboardEmpresa: React.FC = () => {
                     <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: C.text }}>Funil de Vendas</h3>
                     <div style={{ fontSize: 12, color: C.textMuted }}>Distribuição por etapa</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      value={csvDataInicio}
+                      onChange={e => setCsvDataInicio(e.target.value)}
+                      style={{
+                        background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
+                        borderRadius: 8, padding: '6px 10px', color: C.textSec, fontSize: 12, cursor: 'pointer',
+                      }}
+                      title="Data início"
+                    />
+                    <input
+                      type="date"
+                      value={csvDataFim}
+                      onChange={e => setCsvDataFim(e.target.value)}
+                      style={{
+                        background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
+                        borderRadius: 8, padding: '6px 10px', color: C.textSec, fontSize: 12, cursor: 'pointer',
+                      }}
+                      title="Data fim"
+                    />
                     <button
                       onClick={async () => {
                         try {
                           const token = localStorage.getItem('@WhatsApp:token') || '';
                           const apiBase = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
-                          const res = await fetch(`${apiBase}/empresa/exportar-leads-csv`, {
-                            headers: { Authorization: `Bearer ${token}` },
-                          });
+                          const params = new URLSearchParams();
+                          if (csvDataInicio) params.append('data_inicio', csvDataInicio);
+                          if (csvDataFim) params.append('data_fim', csvDataFim);
+                          const url = `${apiBase}/empresa/exportar-leads-csv${params.toString() ? '?' + params.toString() : ''}`;
+                          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
                           const blob = await res.blob();
-                          const url = URL.createObjectURL(blob);
+                          const blobUrl = URL.createObjectURL(blob);
                           const a = document.createElement('a');
-                          a.href = url; a.download = 'leads.csv'; a.click();
-                          URL.revokeObjectURL(url);
+                          a.href = blobUrl;
+                          a.download = `leads${csvDataInicio ? '_' + csvDataInicio : ''}${csvDataFim ? '_' + csvDataFim : ''}.csv`;
+                          a.click();
+                          URL.revokeObjectURL(blobUrl);
                         } catch {}
                       }}
                       style={{

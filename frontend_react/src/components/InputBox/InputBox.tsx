@@ -203,7 +203,7 @@ const InputBox: React.FC<InputBoxProps> = ({ onEnviar, onTyping, onAttachment, e
   return (
     <div
       className="relative border-t p-2 flex items-end space-x-1.5"
-      style={{ backgroundColor: colors.inputBg, borderColor: colors.border }}
+      style={{ backgroundColor: colors.inputBg, borderColor: colors.border, flexShrink: 0 }}
     >
       {/* Hidden file input */}
       <input

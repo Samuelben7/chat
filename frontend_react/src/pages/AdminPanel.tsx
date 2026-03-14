@@ -358,13 +358,13 @@ const PlanoModal: React.FC<{
 
 // ==================== CONFIRM DELETE COMPONENT ====================
 
-const ConfirmDeleteInput: React.FC<{
+function ConfirmDeleteInput({ nomeEsperado, onConfirm, onCancel, loading }: {
   nomeEsperado: string;
   onConfirm: () => void;
   onCancel: () => void;
   loading: boolean;
-}> = ({ nomeEsperado, onConfirm, onCancel, loading }) => {
-  const [typed, setTyped] = React.useState('');
+}) {
+  const [typed, setTyped] = useState('');
   const match = typed.trim() === nomeEsperado.trim();
   return (
     <div>
