@@ -990,6 +990,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             ))
                             resposta_limpa = _re.sub(r'\[AGENDAMENTO:[^\]]+\]', '', _resp_feedback)
                             resposta_limpa = _re.sub(r'\[CANCELAR_AGENDAMENTO:[^\]]+\]', '', resposta_limpa)
+                            resposta_limpa = _re.sub(r'\[COLETAR_DADOS:[^\]]+\]', '', resposta_limpa)
                             resposta_limpa = resposta_limpa.replace('[CONVERSA_ENCERRADA]', '').strip()
                             print(f"🔄 IA respondeu com feedback de conflito para {from_number}")
                         except Exception as _rfb_err:
