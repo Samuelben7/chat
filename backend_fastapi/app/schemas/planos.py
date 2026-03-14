@@ -54,6 +54,17 @@ class AssinaturaResponse(BaseModel):
     status: str
     data_inicio: Optional[datetime]
     data_proximo_vencimento: Optional[datetime]
+    # Plano personalizado
+    is_personalizado: bool = False
+    plano_personalizado_nome: Optional[str] = None
+    preco_personalizado: Optional[Decimal] = None
+    limites_personalizados: Optional[dict] = None
+    dias_gratuitos: int = 0
+    trial_expira_em: Optional[datetime] = None
+    # Campos efetivos (considera personalizado se existir)
+    preco_efetivo: Optional[Decimal] = None
+    limites_efetivos: Optional[dict] = None
+    nome_efetivo: Optional[str] = None
 
     class Config:
         from_attributes = True

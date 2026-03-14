@@ -436,6 +436,24 @@ export const adminApi = {
     const response = await api.delete(`/admin/planos/${planoId}`);
     return response.data;
   },
+
+  // Empresas (admin)
+  listarEmpresasAdmin: async () => {
+    const response = await api.get('/admin/empresas');
+    return response.data;
+  },
+  definirPlanoPersonalizado: async (empresaId: number, dados: {
+    nome: string; preco_mensal: number;
+    limites: { conversas_mes: number; ia_conversas: number; max_atendentes: number };
+    dias_gratuitos?: number;
+  }) => {
+    const response = await api.post(`/admin/empresas/${empresaId}/plano-personalizado`, dados);
+    return response.data;
+  },
+  concederDiasGratuitos: async (empresaId: number, dias: number) => {
+    const response = await api.post(`/admin/empresas/${empresaId}/dias-gratuitos`, { dias });
+    return response.data;
+  },
 };
 
 // ==================== PERFIL WHATSAPP BUSINESS ====================

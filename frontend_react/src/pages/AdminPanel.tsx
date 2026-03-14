@@ -10,15 +10,135 @@ import './AdminPanel.css';
 interface EmpresaAdmin {
   id: number;
   nome: string;
-  cnpj: string | null;
+  cnpj?: string | null;
   email: string;
-  telefone: string | null;
+  telefone?: string | null;
   ativa: boolean;
   whatsapp_conectado: boolean;
-  phone_number_id: string | null;
-  waba_id: string | null;
-  criado_em: string | null;
+  phone_number_id?: string | null;
+  waba_id?: string | null;
+  criado_em?: string | null;
+  // campos novos do /admin/empresas
+  plano?: string;
+  preco?: number;
+  is_personalizado?: boolean;
+  status_assinatura?: string;
+  vencimento?: string | null;
+  trial_expira_em?: string | null;
+  limites?: Record<string, any>;
+  assinatura_id?: number | null;
 }
+
+interface PlanoPersonalizadoForm {
+  nome: string;
+  preco_mensal: string;
+  conversas_mes: string;
+  ia_conversas: string;
+  max_atendentes: string;
+  dias_gratuitos: string;
+}
+
+const PlanoPersonalizadoModal: React.FC<{
+  empresa: EmpresaAdmin;
+  onClose: () => void;
+  onSave: () => void;
+}> = ({ empresa, onClose, onSave }) => {
+  const [form, setForm] = useState<PlanoPersonalizadoForm>({
+    nome: empresa.plano && empresa.is_personalizado ? empresa.plano : '',
+    preco_mensal: empresa.preco ? String(empresa.preco) : '',
+    conversas_mes: String(empresa.limites?.conversas_mes || 1000),
+    ia_conversas: String(empresa.limites?.ia_conversas || 200),
+    max_atendentes: String(empresa.limites?.max_atendentes || 3),
+    dias_gratuitos: '0',
+  });
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleSave = async () => {
+    if (!form.nome || !form.preco_mensal) { setErr('Nome e preço são obrigatórios'); return; }
+    setLoading(true);
+    try {
+      await adminApi.definirPlanoPersonalizado(empresa.id, {
+        nome: form.nome,
+        preco_mensal: parseFloat(form.preco_mensal),
+        limites: {
+          conversas_mes: parseInt(form.conversas_mes) || 1000,
+          ia_conversas: parseInt(form.ia_conversas) || 200,
+          max_atendentes: parseInt(form.max_atendentes) || 3,
+        },
+        dias_gratuitos: parseInt(form.dias_gratuitos) || 0,
+      });
+      onSave();
+      onClose();
+    } catch (e: any) {
+      setErr(e.response?.data?.detail || 'Erro ao salvar');
+    }
+    setLoading(false);
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)',
+    background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 14, boxSizing: 'border-box',
+  };
+  const labelStyle: React.CSSProperties = { fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block' };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{
+        background: '#0f1929', border: '1px solid rgba(75,123,236,0.3)', borderRadius: 16,
+        padding: 28, width: '100%', maxWidth: 480,
+      }}>
+        <h2 style={{ margin: '0 0 4px', color: '#fff', fontSize: 18 }}>Plano Personalizado</h2>
+        <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: 13 }}>{empresa.nome}</p>
+
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div>
+            <label style={labelStyle}>Nome do plano</label>
+            <input style={inputStyle} value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} placeholder="Ex: Enterprise, Básico..." />
+          </div>
+          <div>
+            <label style={labelStyle}>Preço mensal (R$)</label>
+            <input style={inputStyle} type="number" step="0.01" value={form.preco_mensal} onChange={e => setForm({ ...form, preco_mensal: e.target.value })} placeholder="200.00" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Conversas/mês</label>
+              <input style={inputStyle} type="number" value={form.conversas_mes} onChange={e => setForm({ ...form, conversas_mes: e.target.value })} />
+            </div>
+            <div>
+              <label style={labelStyle}>IA conversas/mês</label>
+              <input style={inputStyle} type="number" value={form.ia_conversas} onChange={e => setForm({ ...form, ia_conversas: e.target.value })} />
+            </div>
+            <div>
+              <label style={labelStyle}>Máx. atendentes</label>
+              <input style={inputStyle} type="number" value={form.max_atendentes} onChange={e => setForm({ ...form, max_atendentes: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Dias gratuitos (trial)</label>
+            <input style={inputStyle} type="number" value={form.dias_gratuitos} onChange={e => setForm({ ...form, dias_gratuitos: e.target.value })} placeholder="0" />
+          </div>
+        </div>
+
+        {err && <p style={{ color: '#f87171', fontSize: 13, marginTop: 10 }}>{err}</p>}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>Cancelar</button>
+          <button onClick={handleSave} disabled={loading} style={{
+            padding: '9px 20px', borderRadius: 8, border: 'none',
+            background: 'linear-gradient(135deg, #4B7BEC, #6C8EE6)', color: '#fff',
+            cursor: 'pointer', fontWeight: 600, opacity: loading ? 0.6 : 1,
+          }}>
+            {loading ? 'Salvando...' : 'Salvar Plano'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface DevAdmin {
   id: number;
@@ -251,6 +371,10 @@ const AdminPanel: React.FC = () => {
   const [profiles, setProfiles] = useState<Record<number, WhatsAppProfile | 'loading' | 'error'>>({});
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [copied, setCopied] = useState<Record<number, boolean>>({});
+  const [planoPersonalizadoModal, setPlanoPersonalizadoModal] = useState<EmpresaAdmin | null>(null);
+  const [diasGratuitosModal, setDiasGratuitosModal] = useState<EmpresaAdmin | null>(null);
+  const [diasGratuitosValor, setDiasGratuitosValor] = useState('30');
+  const [diasGratuitosLoading, setDiasGratuitosLoading] = useState(false);
 
   // --- Devs ---
   const [devs, setDevs] = useState<DevAdmin[]>([]);
@@ -275,7 +399,7 @@ const AdminPanel: React.FC = () => {
   const loadEmpresas = useCallback(async () => {
     setLoadingEmpresas(true);
     try {
-      const data = await adminApi.listarEmpresas();
+      const data = await adminApi.listarEmpresasAdmin();
       setEmpresas(data);
       setErrEmpresas('');
     } catch (e: any) {
@@ -388,6 +512,20 @@ const AdminPanel: React.FC = () => {
     if (!window.confirm('Desativar este plano?')) return;
     await adminApi.deletarPlano(id);
     loadPlanos();
+  };
+
+  const handleConcederDias = async () => {
+    if (!diasGratuitosModal) return;
+    const dias = parseInt(diasGratuitosValor);
+    if (!dias || dias <= 0) return;
+    setDiasGratuitosLoading(true);
+    try {
+      await adminApi.concederDiasGratuitos(diasGratuitosModal.id, dias);
+      setDiasGratuitosModal(null);
+      setDiasGratuitosValor('30');
+      loadEmpresas();
+    } catch { /* */ }
+    setDiasGratuitosLoading(false);
   };
 
   // -------- KPIs --------
@@ -512,12 +650,12 @@ const AdminPanel: React.FC = () => {
                   <thead>
                     <tr>
                       <th>ID</th><th>Empresa</th><th>Email</th>
-                      <th>Status</th><th>WhatsApp</th><th>Ações</th>
+                      <th>Plano</th><th>Assinatura</th><th>WhatsApp</th><th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.length === 0 ? (
-                      <tr><td colSpan={6} className="admin-empty">Nenhuma empresa encontrada.</td></tr>
+                      <tr><td colSpan={7} className="admin-empty">Nenhuma empresa encontrada.</td></tr>
                     ) : filtered.map(emp => (
                       <React.Fragment key={emp.id}>
                         <tr>
@@ -528,9 +666,36 @@ const AdminPanel: React.FC = () => {
                           </td>
                           <td className="admin-td-email">{emp.email}</td>
                           <td>
-                            <span className={`admin-badge ${emp.ativa ? 'admin-badge-active' : 'admin-badge-pending'}`}>
-                              {emp.ativa ? 'Ativa' : 'Pendente'}
-                            </span>
+                            <div style={{ fontSize: 13 }}>
+                              {emp.plano ? (
+                                <span style={{
+                                  padding: '2px 8px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                                  background: emp.is_personalizado ? 'rgba(168,85,247,0.2)' : 'rgba(0,212,255,0.15)',
+                                  color: emp.is_personalizado ? '#a855f7' : '#00d4ff',
+                                }}>
+                                  {emp.is_personalizado ? '★ ' : ''}{emp.plano}
+                                </span>
+                              ) : <span style={{ color: '#64748b', fontSize: 12 }}>Sem plano</span>}
+                              {emp.preco != null && <div style={{ fontSize: 11, color: '#22c55e', marginTop: 2 }}>R$ {emp.preco?.toFixed(2).replace('.', ',')}/mês</div>}
+                            </div>
+                          </td>
+                          <td>
+                            {emp.status_assinatura ? (
+                              <div>
+                                <span style={{
+                                  padding: '2px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+                                  background: emp.status_assinatura === 'active' ? 'rgba(34,197,94,0.15)' : emp.status_assinatura === 'trial' ? 'rgba(99,102,241,0.15)' : 'rgba(239,68,68,0.15)',
+                                  color: emp.status_assinatura === 'active' ? '#22c55e' : emp.status_assinatura === 'trial' ? '#818cf8' : '#ef4444',
+                                }}>
+                                  {emp.status_assinatura}
+                                </span>
+                                {(emp.vencimento || emp.trial_expira_em) && (
+                                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                    até {fmtDate(emp.trial_expira_em || emp.vencimento)}
+                                  </div>
+                                )}
+                              </div>
+                            ) : <span style={{ color: '#64748b', fontSize: 12 }}>—</span>}
                           </td>
                           <td>
                             <span className={`admin-badge ${emp.whatsapp_conectado ? 'admin-badge-connected' : 'admin-badge-disconnected'}`}>
@@ -538,19 +703,41 @@ const AdminPanel: React.FC = () => {
                             </span>
                           </td>
                           <td>
-                            <button
-                              className="admin-btn-status"
-                              onClick={() => toggleStatus(emp)}
-                              disabled={!emp.whatsapp_conectado}
-                            >
-                              {expanded[emp.id] ? '▲ Fechar' : '▼ Ver Status'}
-                            </button>
+                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                              <button
+                                className="admin-btn-status"
+                                onClick={() => toggleStatus(emp)}
+                                disabled={!emp.whatsapp_conectado}
+                              >
+                                {expanded[emp.id] ? '▲' : '▼ Status'}
+                              </button>
+                              <button
+                                onClick={() => setPlanoPersonalizadoModal(emp)}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 6, border: 'none',
+                                  background: 'rgba(168,85,247,0.2)', color: '#a855f7',
+                                  cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                                }}
+                              >
+                                ★ Plano
+                              </button>
+                              <button
+                                onClick={() => { setDiasGratuitosModal(emp); setDiasGratuitosValor('30'); }}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 6, border: 'none',
+                                  background: 'rgba(34,197,94,0.15)', color: '#22c55e',
+                                  cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                                }}
+                              >
+                                🎁 Dias
+                              </button>
+                            </div>
                           </td>
                         </tr>
 
                         {expanded[emp.id] && (
                           <tr className="admin-row-expanded">
-                            <td colSpan={6}>
+                            <td colSpan={7}>
                               <div className="admin-profile-panel">
                                 {profiles[emp.id] === 'loading' && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#94a3b8' }}>
@@ -933,6 +1120,66 @@ const AdminPanel: React.FC = () => {
           onClose={() => setPlanoModal(false)}
           onSave={salvarPlano}
         />
+      )}
+
+      {/* Modal plano personalizado por empresa */}
+      {planoPersonalizadoModal && (
+        <PlanoPersonalizadoModal
+          empresa={planoPersonalizadoModal}
+          onClose={() => setPlanoPersonalizadoModal(null)}
+          onSave={loadEmpresas}
+        />
+      )}
+
+      {/* Modal dias gratuitos */}
+      {diasGratuitosModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            background: '#0f1929', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 16,
+            padding: 28, width: '100%', maxWidth: 360,
+          }}>
+            <h2 style={{ margin: '0 0 4px', color: '#fff', fontSize: 18 }}>🎁 Dias Gratuitos</h2>
+            <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: 13 }}>{diasGratuitosModal.nome}</p>
+            <label style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block' }}>
+              Quantos dias gratuitos conceder?
+            </label>
+            <input
+              type="number"
+              value={diasGratuitosValor}
+              onChange={e => setDiasGratuitosValor(e.target.value)}
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 8,
+                border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.05)',
+                color: '#fff', fontSize: 16, boxSizing: 'border-box',
+              }}
+            />
+            <p style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+              A assinatura ativa será extendida por {diasGratuitosValor || '0'} dias.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <button
+                onClick={() => setDiasGratuitosModal(null)}
+                style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConcederDias}
+                disabled={diasGratuitosLoading}
+                style={{
+                  padding: '9px 20px', borderRadius: 8, border: 'none',
+                  background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff',
+                  cursor: 'pointer', fontWeight: 600, opacity: diasGratuitosLoading ? 0.6 : 1,
+                }}
+              >
+                {diasGratuitosLoading ? 'Concedendo...' : 'Conceder Dias'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

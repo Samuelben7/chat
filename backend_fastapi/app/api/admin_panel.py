@@ -14,6 +14,9 @@ from app.models.models import (
 )
 from app.core.dependencies import CurrentUser
 from app.services.mercadopago_platform import MercadoPagoPlatformService
+from pydantic import BaseModel
+from decimal import Decimal
+from typing import Optional, Dict, Any
 import logging
 
 logger = logging.getLogger("admin_panel")
@@ -208,6 +211,186 @@ async def desbloquear_dev(
     dev.status = "active"
     db.commit()
     return {"message": f"Dev {dev.nome} desbloqueado"}
+
+
+# ==================== PLANOS PERSONALIZADOS ====================
+
+class PlanoPersonalizadoRequest(BaseModel):
+    nome: str
+    preco_mensal: Decimal
+    limites: Dict[str, Any]  # {conversas_mes, ia_conversas, max_atendentes}
+    dias_gratuitos: int = 0
+
+class DiasGratuitosRequest(BaseModel):
+    dias: int
+
+
+@router.get("/empresas")
+async def listar_empresas_admin(
+    user: CurrentUser = None,
+    db: Session = Depends(get_db),
+):
+    """Lista todas as empresas com status de assinatura."""
+    _require_admin(user)
+    empresas = db.query(Empresa).order_by(Empresa.id.desc()).all()
+    result = []
+    for emp in empresas:
+        assinatura = db.query(Assinatura).filter(
+            Assinatura.empresa_id == emp.id,
+            Assinatura.status.in_(["active", "overdue"])
+        ).order_by(Assinatura.data_inicio.desc()).first()
+
+        if assinatura and assinatura.is_personalizado:
+            plano_info = assinatura.plano_personalizado_nome or "Personalizado"
+            preco = float(assinatura.preco_personalizado or 0)
+        elif assinatura and assinatura.plano:
+            plano_info = assinatura.plano.nome
+            preco = float(assinatura.plano.preco_mensal)
+        else:
+            plano_info = "Sem plano"
+            preco = 0
+
+        result.append({
+            "id": emp.id,
+            "nome": emp.nome,
+            "email": emp.admin_email,
+            "ativa": emp.ativa,
+            "whatsapp_conectado": bool(emp.whatsapp_token and emp.phone_number_id),
+            "plano": plano_info,
+            "preco": preco,
+            "is_personalizado": assinatura.is_personalizado if assinatura else False,
+            "status_assinatura": assinatura.status if assinatura else "sem_assinatura",
+            "vencimento": assinatura.data_proximo_vencimento.isoformat() if assinatura and assinatura.data_proximo_vencimento else None,
+            "trial_expira_em": assinatura.trial_expira_em.isoformat() if assinatura and assinatura.trial_expira_em else None,
+            "limites": assinatura.limites_personalizados if (assinatura and assinatura.is_personalizado) else (assinatura.plano.limites if assinatura and assinatura.plano else {}),
+            "assinatura_id": assinatura.id if assinatura else None,
+        })
+    return result
+
+
+@router.post("/empresas/{empresa_id}/plano-personalizado")
+async def definir_plano_personalizado(
+    empresa_id: int,
+    dados: PlanoPersonalizadoRequest,
+    user: CurrentUser = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Cria ou atualiza plano personalizado para uma empresa.
+    Admin define: nome, preço, limites (conversas_mes, ia_conversas, max_atendentes) e dias gratuitos.
+    """
+    _require_admin(user)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    # Buscar plano base "empresa" para usar como referência
+    plano_base = db.query(Plano).filter(Plano.tipo == "empresa", Plano.ativo == True).order_by(Plano.ordem).first()
+    if not plano_base:
+        raise HTTPException(status_code=400, detail="Nenhum plano empresa base cadastrado")
+
+    # Verificar se já tem assinatura ativa
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+        Assinatura.status.in_(["active", "overdue"])
+    ).order_by(Assinatura.data_inicio.desc()).first()
+
+    agora = datetime.utcnow()
+    trial_expira = agora + timedelta(days=dados.dias_gratuitos) if dados.dias_gratuitos > 0 else None
+    vencimento = (trial_expira or agora) + timedelta(days=30)
+
+    if assinatura:
+        # Atualizar existente
+        assinatura.is_personalizado = True
+        assinatura.plano_personalizado_nome = dados.nome
+        assinatura.preco_personalizado = dados.preco_mensal
+        assinatura.limites_personalizados = dados.limites
+        assinatura.dias_gratuitos = dados.dias_gratuitos
+        if dados.dias_gratuitos > 0:
+            assinatura.trial_expira_em = trial_expira
+        assinatura.data_proximo_vencimento = vencimento
+        assinatura.status = "active"
+    else:
+        # Criar nova assinatura personalizada
+        assinatura = Assinatura(
+            tipo_usuario="empresa",
+            empresa_id=empresa_id,
+            plano_id=plano_base.id,
+            status="active",
+            is_personalizado=True,
+            plano_personalizado_nome=dados.nome,
+            preco_personalizado=dados.preco_mensal,
+            limites_personalizados=dados.limites,
+            dias_gratuitos=dados.dias_gratuitos,
+            trial_expira_em=trial_expira,
+            data_proximo_vencimento=vencimento,
+        )
+        db.add(assinatura)
+
+    db.commit()
+    logger.info(f"Admin: plano personalizado '{dados.nome}' definido para empresa {empresa_id}")
+    return {
+        "sucesso": True,
+        "empresa": empresa.nome,
+        "plano": dados.nome,
+        "preco": float(dados.preco_mensal),
+        "dias_gratuitos": dados.dias_gratuitos,
+        "vencimento": vencimento.isoformat(),
+    }
+
+
+@router.post("/empresas/{empresa_id}/dias-gratuitos")
+async def conceder_dias_gratuitos(
+    empresa_id: int,
+    dados: DiasGratuitosRequest,
+    user: CurrentUser = None,
+    db: Session = Depends(get_db),
+):
+    """Concede N dias gratuitos adicionais para a empresa, estendendo o vencimento."""
+    _require_admin(user)
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    assinatura = db.query(Assinatura).filter(
+        Assinatura.empresa_id == empresa_id,
+        Assinatura.status.in_(["active", "overdue", "blocked"])
+    ).order_by(Assinatura.data_inicio.desc()).first()
+
+    agora = datetime.utcnow()
+    if assinatura:
+        base = assinatura.data_proximo_vencimento or agora
+        if base < agora:
+            base = agora
+        assinatura.data_proximo_vencimento = base + timedelta(days=dados.dias)
+        assinatura.dias_gratuitos = (assinatura.dias_gratuitos or 0) + dados.dias
+        assinatura.status = "active"
+    else:
+        # Criar assinatura trial sem plano personalizado
+        plano_base = db.query(Plano).filter(Plano.tipo == "empresa", Plano.ativo == True).order_by(Plano.ordem).first()
+        if not plano_base:
+            raise HTTPException(status_code=400, detail="Nenhum plano empresa base cadastrado")
+        assinatura = Assinatura(
+            tipo_usuario="empresa",
+            empresa_id=empresa_id,
+            plano_id=plano_base.id,
+            status="active",
+            dias_gratuitos=dados.dias,
+            trial_expira_em=agora + timedelta(days=dados.dias),
+            data_proximo_vencimento=agora + timedelta(days=dados.dias),
+        )
+        db.add(assinatura)
+
+    db.commit()
+    logger.info(f"Admin: {dados.dias} dias gratuitos concedidos para empresa {empresa_id}")
+    return {
+        "sucesso": True,
+        "empresa": empresa.nome,
+        "dias_adicionados": dados.dias,
+        "novo_vencimento": assinatura.data_proximo_vencimento.isoformat(),
+    }
 
 
 # ==================== FINANCEIRO ====================

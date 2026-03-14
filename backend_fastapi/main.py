@@ -26,6 +26,7 @@ from app.api import dev_auth, dev_api_keys, dev_gateway, dev_usage, dev_webhook,
 from app.api import processos, aniversario
 from app.api import planos, admin_planos, assinaturas, pagamentos_plataforma, admin_panel
 from app.api import setores, especialidades
+from app.api import contrato_pdf
 
 # Import Redis Pub/Sub e WebSocket Manager
 from app.core.redis_pubsub import pubsub_manager
@@ -192,3 +193,4 @@ app.include_router(admin_panel.router, prefix=settings.API_V1_STR, tags=["admin-
 app.include_router(aniversario.router, prefix=settings.API_V1_STR, tags=["aniversario"])
 app.include_router(setores.router, prefix=settings.API_V1_STR, tags=["setores"])
 app.include_router(especialidades.router, prefix=settings.API_V1_STR, tags=["especialidades"])
+app.include_router(contrato_pdf.router, prefix=settings.API_V1_STR, tags=["contrato"])

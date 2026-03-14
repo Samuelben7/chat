@@ -757,6 +757,14 @@ class Assinatura(Base):
     data_proximo_vencimento = Column(DateTime(timezone=True))
     data_bloqueio = Column(DateTime(timezone=True))
 
+    # Plano personalizado (criado pelo admin para empresa específica)
+    is_personalizado = Column(Boolean, default=False)
+    plano_personalizado_nome = Column(String(100))
+    preco_personalizado = Column(Numeric(10, 2))   # substitui plano.preco_mensal
+    limites_personalizados = Column(JSON)           # substitui plano.limites
+    dias_gratuitos = Column(Integer, default=0)
+    trial_expira_em = Column(DateTime(timezone=True))
+
     # Relationships
     empresa = relationship("Empresa")
     dev = relationship("DevUsuario", back_populates="assinaturas")

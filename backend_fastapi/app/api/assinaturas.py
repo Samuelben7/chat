@@ -40,14 +40,28 @@ async def minha_assinatura(
     if not assinatura:
         raise HTTPException(status_code=404, detail="Nenhuma assinatura ativa")
 
+    plano = assinatura.plano
+    preco_ef = assinatura.preco_personalizado if assinatura.is_personalizado and assinatura.preco_personalizado else (plano.preco_mensal if plano else None)
+    limites_ef = assinatura.limites_personalizados if assinatura.is_personalizado and assinatura.limites_personalizados else (plano.limites if plano else {})
+    nome_ef = assinatura.plano_personalizado_nome if assinatura.is_personalizado and assinatura.plano_personalizado_nome else (plano.nome if plano else None)
+
     return AssinaturaResponse(
         id=assinatura.id,
         tipo_usuario=assinatura.tipo_usuario,
         plano_id=assinatura.plano_id,
-        plano_nome=assinatura.plano.nome if assinatura.plano else None,
+        plano_nome=plano.nome if plano else None,
         status=assinatura.status,
         data_inicio=assinatura.data_inicio,
         data_proximo_vencimento=assinatura.data_proximo_vencimento,
+        is_personalizado=assinatura.is_personalizado or False,
+        plano_personalizado_nome=assinatura.plano_personalizado_nome,
+        preco_personalizado=assinatura.preco_personalizado,
+        limites_personalizados=assinatura.limites_personalizados,
+        dias_gratuitos=assinatura.dias_gratuitos or 0,
+        trial_expira_em=assinatura.trial_expira_em,
+        preco_efetivo=preco_ef,
+        limites_efetivos=limites_ef,
+        nome_efetivo=nome_ef,
     )
 
 
