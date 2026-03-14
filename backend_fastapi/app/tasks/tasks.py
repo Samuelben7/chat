@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.tasks.celery_app import celery_app
 from app.database.database import SessionLocal
-from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente, DevUsuario, Assinatura, ChatSessao
+from app.models.models import MensagemLog, Atendimento, Atendente, Empresa, MessageTemplate, Cliente, DevUsuario, Assinatura, ChatSessao, AtendenteSetor
 from app.core.config import settings
 from app.core.redis_client import redis_cache
 from app.core.circuit_breaker import whatsapp_circuit_breaker
@@ -550,6 +550,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     status='bot',
                     empresa_id=empresa.id,
                 )
+                _aplicar_cascata(empresa, atendimento, db)
                 db.add(atendimento)
             elif not atendimento:
                 atendimento = Atendimento(
@@ -557,6 +558,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                     status='bot',
                     empresa_id=empresa.id,
                 )
+                _aplicar_cascata(empresa, atendimento, db)
                 db.add(atendimento)
                 # Tracking: dispara eventos de conversão (Meta e/ou Google) no primeiro contato
                 _disparar_tracking_novo_contato(empresa, from_number)
@@ -2298,8 +2300,7 @@ def encerrar_chats_ia_inativos():
                 try:
                     from app.services.whatsapp import WhatsAppService
                     wa_service = WhatsAppService(empresa)
-                    msg_enc = getattr(empresa, 'mensagem_encerramento', None) or \
-                        "Seu atendimento foi encerrado por inatividade. Obrigado por entrar em contato!"
+                    msg_enc = "Sua conversa foi encerrada após 5 minutos sem interação. Obrigado pelo contato! 😊"
                     asyncio.run(wa_service.send_text_message(from_number, msg_enc))
 
                     pesquisa_ativa = getattr(empresa, 'pesquisa_satisfacao_ativa', False)
@@ -2402,6 +2403,34 @@ def arquivar_leads_antigos():
 
 
 # ─── Tracking helper ──────────────────────────────────────────────────────────
+
+def _aplicar_cascata(empresa: Empresa, atendimento: Atendimento, db: Session):
+    """
+    Se o efeito cascata estiver ativo, atribui o próximo atendente disponível
+    (round-robin) ao atendimento recém-criado.
+    A empresa vê todos; cada atendente só vê o que foi atribuído a ele.
+    """
+    if not empresa.cascata_ativo:
+        return
+
+    atendentes = db.query(Atendente).filter(
+        Atendente.empresa_id == empresa.id,
+        Atendente.pode_atender == True,
+    ).order_by(Atendente.id).all()
+
+    if not atendentes:
+        return
+
+    idx = (empresa.cascata_index or 0) % len(atendentes)
+    atendente = atendentes[idx]
+    atendimento.atendente_id = atendente.id
+
+    # Avançar o índice para o próximo atendente
+    empresa.cascata_index = (idx + 1) % len(atendentes)
+    db.add(empresa)
+
+    print(f"🔁 Cascata: lead {atendimento.whatsapp_number} → atendente {atendente.nome_exibicao} (idx {idx})")
+
 
 def _disparar_tracking_novo_contato(empresa, numero_whatsapp: str):
     """

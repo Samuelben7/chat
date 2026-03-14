@@ -557,6 +557,11 @@ async def finalizar_atendimento(
     if body:
         atendimento.motivo_encerramento = body.get("motivo")
         atendimento.observacao_encerramento = body.get("observacao")
+        # Novos campos do modal de encerramento enriquecido
+        if body.get("etapa_funil"):
+            atendimento.etapa_funil = body.get("etapa_funil")
+        if body.get("valor_negocio") is not None:
+            atendimento.valor_negocio = body.get("valor_negocio")
 
     # Resetar bot
     sessao = db.query(ChatSessao).filter(
@@ -700,6 +705,37 @@ async def status_protocolo(
 ):
     """Retorna status atual do protocolo de atendimento."""
     return {"protocolo_ativo": protocolo_ativo(db, empresa_id)}
+
+
+@router.post("/chat/cascata/toggle")
+async def toggle_cascata(
+    user: CurrentUser,
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """
+    Liga/desliga o efeito cascata (distribuição round-robin de leads entre atendentes).
+    Apenas a empresa pode configurar.
+    """
+    if user.role != "empresa":
+        raise HTTPException(status_code=403, detail="Apenas a empresa pode configurar a cascata")
+
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    empresa.cascata_ativo = not (empresa.cascata_ativo or False)
+    if empresa.cascata_ativo:
+        empresa.cascata_index = 0  # reinicia o índice ao ativar
+    db.commit()
+    return {"cascata_ativo": empresa.cascata_ativo}
+
+
+@router.get("/chat/cascata/status")
+async def status_cascata(
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db)
+):
+    """Retorna status atual do efeito cascata."""
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+    return {"cascata_ativo": empresa.cascata_ativo or False}
 
 
 @router.get("/motivos-encerramento")

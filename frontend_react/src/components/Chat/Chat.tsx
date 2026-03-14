@@ -285,7 +285,7 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
     setModalEncerrarAberto(true);
   };
 
-  const handleEncerrarAtendimento = async (motivo: string, observacao?: string, retornarBot?: boolean) => {
+  const handleEncerrarAtendimento = async (motivo: string, observacao?: string, retornarBot?: boolean, etapaFunil?: string, valorNegocio?: number) => {
     if (!conversaSelecionada) return;
 
     try {
@@ -293,6 +293,8 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
         motivo,
         observacao,
         retornar_bot: retornarBot,
+        etapa_funil: etapaFunil,
+        valor_negocio: valorNegocio,
       });
       showToast('Atendimento encerrado com sucesso', 'success');
       await carregarDetalhes();

@@ -171,6 +171,7 @@ export const DashboardEmpresa: React.FC = () => {
   const [criarLoading, setCriarLoading] = useState(false);
   const [criarErro, setCriarErro] = useState('');
   const [protocoloAtivo, setProtocoloAtivo] = useState(false);
+  const [cascataAtivo, setCascataAtivo] = useState(false);
   const [showConfigEncerramento, setShowConfigEncerramento] = useState(false);
   const [configEncerramento, setConfigEncerramento] = useState({
     mensagem_encerramento: '',
@@ -191,10 +192,13 @@ export const DashboardEmpresa: React.FC = () => {
     }
   }, []);
 
-  // Checar status protocolo
+  // Checar status protocolo e cascata
   useEffect(() => {
     api.get('/chat/protocolo/status')
       .then(res => setProtocoloAtivo(res.data.protocolo_ativo))
+      .catch(() => {});
+    api.get('/chat/cascata/status')
+      .then(res => setCascataAtivo(res.data.cascata_ativo))
       .catch(() => {});
   }, []);
 
@@ -225,6 +229,13 @@ export const DashboardEmpresa: React.FC = () => {
     try {
       const res = await api.post('/chat/protocolo/toggle');
       setProtocoloAtivo(res.data.protocolo_ativo);
+    } catch {}
+  };
+
+  const toggleCascata = async () => {
+    try {
+      const res = await api.post('/chat/cascata/toggle');
+      setCascataAtivo(res.data.cascata_ativo);
     } catch {}
   };
 
@@ -425,6 +436,34 @@ export const DashboardEmpresa: React.FC = () => {
                 }} />
               </span>
               Protocolo
+            </button>
+
+            <div style={{ width: 1, height: 22, background: C.border, margin: '0 4px' }} />
+
+            {/* Toggle Cascata */}
+            <button
+              onClick={toggleCascata}
+              title={cascataAtivo ? 'Cascata ativada — leads distribuídos automaticamente. Clique para desativar' : 'Cascata desativada — clique para ativar distribuição automática de leads'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                background: cascataAtivo ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${cascataAtivo ? 'rgba(168,85,247,0.3)' : C.border}`,
+                borderRadius: 10, padding: '7px 14px', cursor: 'pointer',
+                color: cascataAtivo ? '#a855f7' : C.textMuted, fontSize: 12, fontWeight: 600,
+              }}
+            >
+              <span style={{
+                width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                background: cascataAtivo ? '#a855f7' : 'rgba(255,255,255,0.15)',
+                position: 'relative', transition: 'background 0.2s',
+              }}>
+                <span style={{
+                  position: 'absolute', top: 2, left: cascataAtivo ? 14 : 2,
+                  width: 12, height: 12, borderRadius: '50%',
+                  background: '#fff', transition: 'left 0.2s',
+                }} />
+              </span>
+              Cascata
             </button>
 
             <div style={{ width: 1, height: 22, background: C.border, margin: '0 4px' }} />
@@ -709,16 +748,41 @@ export const DashboardEmpresa: React.FC = () => {
                     <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: C.text }}>Funil de Vendas</h3>
                     <div style={{ fontSize: 12, color: C.textMuted }}>Distribuição por etapa</div>
                   </div>
-                  <button
-                    onClick={() => navigate('/empresa/kanban')}
-                    style={{
-                      background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
-                      borderRadius: 8, padding: '7px 14px', cursor: 'pointer',
-                      color: C.textSec, fontSize: 12, fontWeight: 600,
-                    }}
-                  >
-                    Ver Kanban →
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+                          const apiBase = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
+                          const res = await fetch(`${apiBase}/empresa/exportar-leads-csv`, {
+                            headers: { Authorization: `Bearer ${token}` },
+                          });
+                          const blob = await res.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url; a.download = 'leads.csv'; a.click();
+                          URL.revokeObjectURL(url);
+                        } catch {}
+                      }}
+                      style={{
+                        background: 'rgba(34,197,94,0.08)', border: `1px solid rgba(34,197,94,0.25)`,
+                        borderRadius: 8, padding: '7px 14px', cursor: 'pointer',
+                        color: '#22c55e', fontSize: 12, fontWeight: 600,
+                      }}
+                    >
+                      ↓ Exportar CSV
+                    </button>
+                    <button
+                      onClick={() => navigate('/empresa/kanban')}
+                      style={{
+                        background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
+                        borderRadius: 8, padding: '7px 14px', cursor: 'pointer',
+                        color: C.textSec, fontSize: 12, fontWeight: 600,
+                      }}
+                    >
+                      Ver Kanban →
+                    </button>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {ETAPAS.map((etapa) => {
@@ -1033,6 +1097,7 @@ export const DashboardEmpresa: React.FC = () => {
               { icon: '🤖', label: 'Bot Builder',   desc: 'Fluxo do bot',              path: '/empresa/bot-builder',            color: C.cyan     },
               { icon: '✨', label: 'Agente IA',     desc: 'Atendimento com IA',        path: '/empresa/ia-config',              color: '#a855f7'  },
               { icon: '📅', label: 'Agenda',        desc: 'Agendamentos',              path: '/empresa/agenda',                 color: C.violet   },
+              { icon: '🗂️', label: 'Setores',       desc: 'Departamentos e serviços',  path: '/empresa/setores',                color: '#8b5cf6'  },
               { icon: '🎯', label: 'Funil CRM',     desc: 'Kanban de vendas',          path: '/empresa/kanban',                 color: C.blue     },
               { icon: '📢', label: 'Envio em Massa',desc: 'Mensagens e templates',     path: '/empresa/envio-massa',            color: C.pink     },
               { icon: '📱', label: 'Perfil Meta',   desc: 'Foto, nome e categoria',    path: '/empresa/perfil-whatsapp',        color: '#25D366'  },

@@ -47,6 +47,10 @@ class Empresa(Base):
     google_gtag_id = Column(String(50))          # Google Tag ID (G-xxx ou AW-xxx)
     google_api_secret = Column(String(200))      # GA4 Measurement Protocol API Secret
 
+    # ── Efeito Cascata (distribuição automática de leads entre atendentes) ──
+    cascata_ativo = Column(Boolean, default=False)
+    cascata_index = Column(Integer, default=0)   # índice do próximo atendente na fila
+
     # Status
     ativa = Column(Boolean, default=True)
     criada_em = Column(DateTime(timezone=True), server_default=func.now())
@@ -62,6 +66,8 @@ class Empresa(Base):
     templates = relationship("MessageTemplate", back_populates="empresa", cascade="all, delete-orphan")
     listas_contatos = relationship("ListaContatos", back_populates="empresa", cascade="all, delete-orphan")
     campos_custom = relationship("CampoCustomCliente", back_populates="empresa", cascade="all, delete-orphan")
+    setores = relationship("Setor", cascade="all, delete-orphan", foreign_keys="Setor.empresa_id")
+    especialidades = relationship("Especialidade", cascade="all, delete-orphan", foreign_keys="Especialidade.empresa_id")
 
 
 class ConfiguracaoBot(Base):
@@ -291,6 +297,7 @@ class Atendente(Base):
     empresa = relationship("Empresa", back_populates="atendentes")
     atendimentos = relationship("Atendimento", back_populates="atendente")
     auth = relationship("AtendenteAuth", back_populates="atendente", uselist=False)
+    setores = relationship("AtendenteSetor", back_populates="atendente", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_empresa_user', 'empresa_id', 'user_id', unique=True),
@@ -316,8 +323,14 @@ class Atendimento(Base):
     nota_satisfacao = Column(Integer, nullable=True)  # 1 a 5
     atendido_por_ia = Column(Boolean, default=False)
 
+    # ── Campos de encerramento enriquecidos ────────────────────────────────
+    etapa_funil = Column(String(50), nullable=True)    # etapa do funil ao encerrar
+    valor_negocio = Column(Numeric(12, 2), nullable=True)  # valor da negociação
+    setor_id = Column(Integer, ForeignKey("setor.id"), nullable=True)  # setor atendente
+
     # Relationships
     atendente = relationship("Atendente", back_populates="atendimentos")
+    setor = relationship("Setor", foreign_keys=[setor_id])
 
     __table_args__ = (
         Index('idx_whatsapp_status', 'whatsapp_number', 'status'),
@@ -931,6 +944,74 @@ class ProcessoJudicial(Base):
 
     __table_args__ = (
         Index('idx_processo_empresa_numero', 'empresa_id', 'numero_cnj', unique=True),
+    )
+
+
+class Setor(Base):
+    """
+    Setores/departamentos da empresa. Ex: Financeiro, Loja 1, Cível, Canal...
+    Atendentes são associados a setores. Na transferência, o atendente escolhe
+    o setor destino e o atendente dentro dele.
+    """
+    __tablename__ = "setor"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(100), nullable=False)
+    descricao = Column(String(255), nullable=True)
+    ativo = Column(Boolean, default=True)
+    ordem = Column(Integer, default=0)  # ordenação exibição
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    atendentes = relationship("AtendenteSetor", back_populates="setor", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_setor_empresa', 'empresa_id'),
+    )
+
+
+class AtendenteSetor(Base):
+    """
+    Relacionamento many-to-many entre Atendente e Setor.
+    Um atendente pode estar em múltiplos setores.
+    """
+    __tablename__ = "atendente_setor"
+
+    id = Column(Integer, primary_key=True, index=True)
+    atendente_id = Column(Integer, ForeignKey("painel_atendente.id", ondelete="CASCADE"), nullable=False)
+    setor_id = Column(Integer, ForeignKey("setor.id", ondelete="CASCADE"), nullable=False)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    atendente = relationship("Atendente", back_populates="setores")
+    setor = relationship("Setor", back_populates="atendentes")
+
+    __table_args__ = (
+        Index('idx_atendente_setor_unique', 'atendente_id', 'setor_id', unique=True),
+    )
+
+
+class Especialidade(Base):
+    """
+    Especialidades/procedimentos da empresa. Útil para clínicas, advogados, etc.
+    Futuramente integrada com IA para agendamento automático do procedimento correto.
+    Ex: Canal (R$ 800), Limpeza (R$ 150), Consulta (R$ 200)
+    """
+    __tablename__ = "especialidade"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(150), nullable=False)
+    descricao = Column(Text, nullable=True)
+    valor = Column(Numeric(10, 2), nullable=True)
+    duracao_minutos = Column(Integer, nullable=True)  # duração para agenda futura
+    ativo = Column(Boolean, default=True)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_especialidade_empresa', 'empresa_id'),
     )
 
 

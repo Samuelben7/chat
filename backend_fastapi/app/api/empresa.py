@@ -3,12 +3,14 @@ Endpoints para Dashboard da Empresa
 Métricas, aniversários, atendentes, gerenciamento
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, and_, or_
 from typing import List, Optional
 from datetime import datetime, date, timedelta
 from pydantic import BaseModel
+import csv
+import io
 
 from app.database.database import get_db
 from app.models.models import (
@@ -589,3 +591,48 @@ async def obter_metricas_satisfacao(
             "media": round(float(empresa_media), 1),
         },
     }
+
+
+@router.get("/empresa/exportar-leads-csv")
+async def exportar_leads_csv(
+    empresa_id: EmpresaIdFromToken,
+    db: Session = Depends(get_db),
+):
+    """
+    Exporta todos os leads da empresa em CSV.
+    Campos: nome, numero, data_nascimento, etapa_funil.
+    """
+    # Buscar clientes com seus atendimentos mais recentes
+    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa_id).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["nome", "numero", "data_nascimento", "etapa_funil"])
+
+    for cliente in clientes:
+        # Pegar etapa_funil do atendimento mais recente finalizado
+        atendimento = db.query(Atendimento).filter(
+            Atendimento.empresa_id == empresa_id,
+            Atendimento.whatsapp_number == cliente.whatsapp_number,
+            Atendimento.status == "finalizado",
+            Atendimento.etapa_funil.isnot(None),
+        ).order_by(Atendimento.finalizado_em.desc()).first()
+
+        etapa = atendimento.etapa_funil if atendimento else ""
+        nascimento = cliente.data_nascimento.strftime("%d/%m/%Y") if cliente.data_nascimento else ""
+
+        writer.writerow([
+            cliente.nome or "",
+            cliente.whatsapp_number or "",
+            nascimento,
+            etapa,
+        ])
+
+    csv_content = output.getvalue()
+    output.close()
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads.csv"},
+    )

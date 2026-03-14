@@ -39,6 +39,7 @@ import DevEsqueciSenha from './pages/DevEsqueciSenha';
 import DevRedefinirSenha from './pages/DevRedefinirSenha';
 import DevConfirmarEmail from './pages/DevConfirmarEmail';
 import TrackingConfigPage from './pages/TrackingConfigPage';
+import SetoresPage from './pages/SetoresPage';
 
 function AppRoutes() {
   const location = useLocation();
@@ -211,6 +212,16 @@ function AppRoutes() {
           element={
             <PrivateRoute allowedRoles={['empresa']}>
               <TrackingConfigPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Setores e Especialidades */}
+        <Route
+          path="/empresa/setores"
+          element={
+            <PrivateRoute allowedRoles={['empresa']}>
+              <SetoresPage />
             </PrivateRoute>
           }
         />
