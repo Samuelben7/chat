@@ -257,6 +257,7 @@ const TemplateManager: React.FC = () => {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [totalTemplates, setTotalTemplates] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null);
   
   // Filters
@@ -641,6 +642,24 @@ const TemplateManager: React.FC = () => {
            
            <div className="flex items-center gap-4">
              <LangToggle /><div className="scale-110"><ThemeToggle /></div>
+             <button
+               onClick={async () => {
+                 setSyncing(true);
+                 try {
+                   const res = await templatesApi.sincronizar();
+                   await carregarTemplates();
+                   alert(`Sincronizado! ✅ ${res.criados} novos · ${res.atualizados} atualizados · ${res.removidos} removidos`);
+                 } catch (e: any) {
+                   alert(e.response?.data?.detail || 'Erro ao sincronizar com a Meta');
+                 } finally { setSyncing(false); }
+               }}
+               disabled={syncing}
+               className="px-5 py-3 text-[10px] font-black uppercase tracking-widest rounded-full transition-all hover:scale-105 border"
+               style={{ borderColor: '#22c55e44', color: '#22c55e', background: 'rgba(34,197,94,0.08)' }}
+               title="Buscar status atualizado de todos os templates na Meta"
+             >
+               {syncing ? '⏳ Sincronizando...' : '🔄 Sincronizar Meta'}
+             </button>
              <button onClick={salvarTemplate} disabled={saving || !formName} className="px-8 py-3 text-[10px] font-black uppercase tracking-widest text-white rounded-full transition-all hover:scale-105 shadow-xl shadow-blue-500/20" style={{ background: colors.gradientButton }}>
                {saving ? '...' : 'Salvar Template'}
              </button>

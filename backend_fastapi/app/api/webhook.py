@@ -117,12 +117,40 @@ async def process_webhook_sync(body: dict, db: Session):
             entries = body.get("entry", [])
 
             for entry in entries:
+                waba_id = entry.get("id")
                 changes = entry.get("changes", [])
 
                 for change in changes:
+                    field = change.get("field", "")
                     value = change.get("value", {})
 
-                    # Extrai phone_number_id para identificar empresa
+                    # ── Atualização de status de template (aprovado/rejeitado pela Meta) ──
+                    if field == "message_template_status_update":
+                        try:
+                            from app.models.models import MessageTemplate
+                            event = value.get("event", "").upper()          # APPROVED / REJECTED / DISABLED
+                            tmpl_id_meta = str(value.get("message_template_id", ""))
+                            tmpl_name    = value.get("message_template_name", "")
+                            reason       = value.get("reason") or value.get("rejected_reason")
+
+                            # Buscar pelo id da Meta (campo id no banco) ou pelo nome+waba
+                            empresa_waba = db.query(Empresa).filter(Empresa.waba_id == waba_id).first()
+                            if empresa_waba:
+                                tmpl = db.query(MessageTemplate).filter(
+                                    MessageTemplate.empresa_id == empresa_waba.id,
+                                    MessageTemplate.name == tmpl_name,
+                                ).first()
+                                if tmpl:
+                                    tmpl.status = event
+                                    if reason:
+                                        tmpl.rejected_reason = str(reason)
+                                    db.commit()
+                                    print(f"✅ Template '{tmpl_name}' atualizado para {event} via webhook")
+                        except Exception as _te:
+                            print(f"⚠️ Erro ao atualizar status de template via webhook: {_te}")
+                        continue  # Não precisa buscar empresa por phone_number_id
+
+                    # Extrai phone_number_id para identificar empresa (mensagens normais)
                     phone_number_id = value.get("metadata", {}).get("phone_number_id")
 
                     if not phone_number_id:

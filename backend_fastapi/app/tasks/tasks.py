@@ -194,10 +194,35 @@ def processar_webhook_completo(webhook_data: dict):
                 return {"success": True, "message": "account_update processado"}
 
         for entry in entries:
+            waba_id_entry = entry.get("id")
             changes = entry.get("changes", [])
 
             for change in changes:
+                field = change.get("field", "")
                 value = change.get("value", {})
+
+                # ── Status de template (aprovado/rejeitado pela Meta) ──
+                if field == "message_template_status_update":
+                    try:
+                        from app.models.models import MessageTemplate as _MT
+                        event    = value.get("event", "").upper()
+                        tmpl_name = value.get("message_template_name", "")
+                        reason   = value.get("reason") or value.get("rejected_reason")
+                        empresa_waba = db.query(Empresa).filter(Empresa.waba_id == waba_id_entry).first()
+                        if empresa_waba:
+                            tmpl = db.query(_MT).filter(
+                                _MT.empresa_id == empresa_waba.id,
+                                _MT.name == tmpl_name,
+                            ).first()
+                            if tmpl:
+                                tmpl.status = event
+                                if reason:
+                                    tmpl.rejected_reason = str(reason)
+                                db.commit()
+                                print(f"✅ [Celery] Template '{tmpl_name}' → {event}")
+                    except Exception as _te:
+                        print(f"⚠️ Erro status template webhook: {_te}")
+                    continue
 
                 # Identificar empresa
                 phone_number_id = value.get("metadata", {}).get("phone_number_id")
