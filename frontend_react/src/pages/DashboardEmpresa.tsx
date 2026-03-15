@@ -846,17 +846,7 @@ export const DashboardEmpresa: React.FC = () => {
                         background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
                         borderRadius: 8, padding: '6px 10px', color: C.textSec, fontSize: 12, cursor: 'pointer',
                       }}
-                      title="Data início"
-                    />
-                    <input
-                      type="date"
-                      value={csvDataFim}
-                      onChange={e => setCsvDataFim(e.target.value)}
-                      style={{
-                        background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
-                        borderRadius: 8, padding: '6px 10px', color: C.textSec, fontSize: 12, cursor: 'pointer',
-                      }}
-                      title="Data fim"
+                      title="Data início (deixe vazio para exportar tudo)"
                     />
                     <button
                       onClick={async () => {
@@ -865,14 +855,13 @@ export const DashboardEmpresa: React.FC = () => {
                           const apiBase = process.env.REACT_APP_API_URL || 'https://api.yoursystem.dev.br/api/v1';
                           const params = new URLSearchParams();
                           if (csvDataInicio) params.append('data_inicio', csvDataInicio);
-                          if (csvDataFim) params.append('data_fim', csvDataFim);
                           const url = `${apiBase}/empresa/exportar-leads-csv${params.toString() ? '?' + params.toString() : ''}`;
                           const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
                           const blob = await res.blob();
                           const blobUrl = URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = blobUrl;
-                          a.download = `leads${csvDataInicio ? '_' + csvDataInicio : ''}${csvDataFim ? '_' + csvDataFim : ''}.csv`;
+                          a.download = `leads${csvDataInicio ? '_' + csvDataInicio : ''}.csv`;
                           a.click();
                           URL.revokeObjectURL(blobUrl);
                         } catch {}

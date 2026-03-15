@@ -604,15 +604,18 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
       {detalhesConversa?.atendimento?.atendido_por_ia && (
         <div style={{
           flexShrink: 0,
-          padding: '6px 16px',
-          background: 'rgba(139,92,246,0.12)',
-          borderBottom: '1px solid rgba(139,92,246,0.25)',
+          width: '100%',
+          padding: '8px 16px',
+          background: 'rgba(139,92,246,0.15)',
+          borderBottom: '1px solid rgba(139,92,246,0.3)',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           fontSize: 12,
           color: '#8b5cf6',
           flexWrap: 'wrap',
+          zIndex: 10,
+          boxSizing: 'border-box',
         }}>
           <span style={{ flexShrink: 0 }}>🤖</span>
           <span>Este atendimento está sendo gerenciado pela <strong>IA</strong>. Clique em <strong>Assumir</strong> para responder manualmente.</span>
@@ -622,9 +625,9 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
       {/* Área de mensagens com fundo temático */}
       <div
         className="flex-1 overflow-y-auto p-4 custom-scrollbar"
-        style={{ minHeight: 0 }}
         onClick={focusInput}
         style={{
+          minHeight: 0,
           backgroundColor: colors.chatBg,
           ...(theme === 'whatsapp' && {
             backgroundImage: `url(${whatsappBg})`,
