@@ -1130,16 +1130,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                             )
                         except Exception as _e:
                             print(f"⚠️ Falha ao agendar CRM update: {_e}")
-                    else:
-                        # Conversa ainda ativa — CRM update em 10 min
-                        try:
-                            celery_app.send_task(
-                                'app.tasks.tasks.atualizar_crm_ia',
-                                args=[empresa.id, from_number],
-                                countdown=600,  # 10 minutos
-                            )
-                        except Exception as _e:
-                            print(f"⚠️ Falha ao agendar CRM update: {_e}")
+                    # else: conversa ainda ativa — CRM só atualiza no encerramento
 
                 except Exception as e:
                     print(f"❌ Erro na IA: {e}")
