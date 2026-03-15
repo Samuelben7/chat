@@ -691,8 +691,13 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                         ).first()
                         if cliente_crm:
                             partes = []
-                            if cliente_crm.nome_completo:
-                                partes.append(f"Nome: {cliente_crm.nome_completo}")
+                            # Dados cadastrais — informa o que JÁ está preenchido
+                            partes.append(f"Nome: {cliente_crm.nome_completo or '(não cadastrado)'}")
+                            partes.append(f"CPF: {cliente_crm.cpf or '(não cadastrado)'}")
+                            partes.append(f"Data de nascimento: {cliente_crm.data_nascimento.strftime('%d/%m/%Y') if cliente_crm.data_nascimento else '(não cadastrado)'}")
+                            if cliente_crm.email:
+                                partes.append(f"Email: {cliente_crm.email}")
+                            # Dados CRM
                             if cliente_crm.funil_etapa:
                                 partes.append(f"Etapa no funil: {cliente_crm.funil_etapa}")
                             if cliente_crm.resumo_conversa:
@@ -701,8 +706,7 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                                 partes.append(f"Preferências conhecidas: {cliente_crm.preferencias}")
                             if cliente_crm.valor_estimado:
                                 partes.append(f"Valor estimado: R$ {cliente_crm.valor_estimado}")
-                            if partes:
-                                crm_context = "\n".join(partes)
+                            crm_context = "\n".join(partes)
                     except Exception as _crm_err:
                         print(f"⚠️ Erro ao buscar CRM context: {_crm_err}")
 
@@ -749,9 +753,13 @@ def _process_incoming_message_sync(message: Dict[str, Any], empresa: Empresa, db
                                 )
                             if especialidades_context:
                                 especialidades_context += (
-                                    "\n\nBOTS DE COLETA CONFIGURADOS (use [COLETAR_DADOS:fluxo_id] ANTES de confirmar agendamento se o cliente não tiver cadastro):\n"
+                                    "\n\nBOTS DE COLETA CONFIGURADOS:\n"
                                     + "\n".join(linhas_bot)
-                                    + "\n\nREGRA: Se for agendar e o cliente ainda não tem nome completo cadastrado, emita [COLETAR_DADOS:ID] com o ID do bot de cadastro para coletar os dados primeiro."
+                                    + "\n\nREGRAS OBRIGATÓRIAS sobre coleta de dados:"
+                                    + "\n- NUNCA peça dados cadastrais diretamente na conversa (nome, CPF, data de nascimento, etc.)."
+                                    + "\n- Antes de confirmar qualquer agendamento, verifique no CONTEXTO DO CLIENTE acima se todos os campos que o bot coleta já estão preenchidos."
+                                    + "\n- Se qualquer campo listado na descrição do bot aparecer como '(não cadastrado)' no contexto do cliente, emita [COLETAR_DADOS:ID] para o bot coletar ANTES de confirmar o agendamento."
+                                    + "\n- Se todos os campos já estiverem preenchidos (sem '(não cadastrado)'), prossiga direto para o agendamento sem pedir nada."
                                 )
                     except Exception as _esp_err:
                         print(f"⚠️ Erro ao buscar especialidades/bot-chamadas: {_esp_err}")
