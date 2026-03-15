@@ -53,6 +53,7 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
   } = useChatStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const focusInput = useCallback(() => {
@@ -102,9 +103,10 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
     if (!loadingDetalhes && detalhesConversa?.mensagens && detalhesConversa.mensagens.length > 0) {
       // setTimeout garante que o DOM já renderizou antes de rolar
       const timer = setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({
-          behavior: 'smooth',
-        });
+        const container = messagesContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
         isFirstLoad.current = false;
       }, 150);
       return () => clearTimeout(timer);
@@ -126,7 +128,10 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
   }, [usuarioDigitando]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
   };
 
   const carregarDetalhes = async () => {
@@ -624,6 +629,7 @@ const Chat: React.FC<ChatProps> = ({ onVoltar }) => {
 
       {/* Área de mensagens com fundo temático */}
       <div
+        ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 custom-scrollbar"
         onClick={focusInput}
         style={{
